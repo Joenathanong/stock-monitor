@@ -1,0 +1,10 @@
+node_modules
+.next
+.env
+.env*.local
+.env.example
+*.tsbuildinfo
+DEPLOY.md
+README.md
+next-env.d.ts
+/tmp

@@ -1,0 +1,236 @@
+// DOI Monitor — TiDB Serverless (MySQL 8 compatible)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+/// Snapshot stok terkini dari OCS (/odata/DTO_WmsItemStockLiteV2).
+/// Ditimpa tiap sinkronisasi; baris yang hilang dari sumber ikut dihapus.
+model StockCurrent {
+  sku          String   @db.VarChar(120)
+  areaId       String   @db.VarChar(60)
+  name         String   @default("") @db.VarChar(500)
+  sapCode      String?  @db.VarChar(60)
+  category     String?  @db.VarChar(40)
+  qtyRack      Int      @default(0)
+  qtyBulk      Int      @default(0)
+  qtyOnHand    Int      @default(0)
+  qtyOnOrder   Int      @default(0)
+  availableQty Int      @default(0)
+  reserveQty   Int      @default(0)
+  isActive     Boolean  @default(true)
+  firstSeenAt  DateTime @default(now())
+  updatedAt    DateTime @default(now())
+
+  @@id([sku, areaId])
+  @@index([category, isActive])
+  @@map("stock_current")
+}
+
+/// Riwayat stok harian (satu baris per SKU per area per hari), ditulis saat
+/// perhitungan 07.30. Dipakai untuk mengeluarkan hari stok kosong dari ADS
+/// dan untuk tren. Tidak pernah ditimpa oleh Refresh selain hari yang sama.
+model StockDaily {
+  snapshotDate DateTime @db.Date
+  sku          String   @db.VarChar(120)
+  areaId       String   @db.VarChar(60)
+  availableQty Int      @default(0)
+  qtyOnHand    Int      @default(0)
+  qtyOnOrder   Int      @default(0)
+
+  @@id([snapshotDate, sku, areaId])
+  @@index([sku, snapshotDate])
+  @@map("stock_daily")
+}
+
+/// Penjualan harian per SKU per area. Kunci unik (tanggal, sku, area)
+/// membuat sinkronisasi harian idempoten — menarik ulang hari yang sama aman.
+model SalesDaily {
+  id         BigInt   @id @default(autoincrement())
+  salesDate  DateTime @db.Date
+  sku        String   @db.VarChar(120)
+  areaId     String   @db.VarChar(60)
+  qty        Int      @default(0)
+  qtyShopee  Int      @default(0)
+  qtyTiktok  Int      @default(0)
+  qtyTokped  Int      @default(0)
+  qtyLazada  Int      @default(0)
+  qtyOther   Int      @default(0)
+  source     String   @default("sync") @db.VarChar(16) // sync | upload
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@unique([salesDate, sku, areaId], name: "sales_daily_key")
+  @@index([sku, salesDate])
+  @@index([salesDate])
+  @@map("sales_daily")
+}
+
+/// Stok dalam perjalanan — satu angka per SKU. Unggahan bersifat REPLACE:
+/// seluruh isi tabel diganti dengan isi berkas terakhir.
+model TransitStock {
+  sku        String    @id @db.VarChar(120)
+  qty        Int       @default(0)
+  eta        DateTime? @db.Date
+  note       String?   @db.VarChar(300)
+  batchId    String?   @db.VarChar(40)
+  updatedAt  DateTime  @default(now()) @updatedAt
+
+  @@map("transit_stock")
+}
+
+/// Master per SKU: lead time kirim (hari) dan penanda dikecualikan.
+/// SKU tanpa baris di sini memakai default global dari Pengaturan.
+model SkuMaster {
+  sku          String   @id @db.VarChar(120)
+  leadTimeDays Int?
+  isExcluded   Boolean  @default(false)
+  note         String?  @db.VarChar(300)
+  updatedAt    DateTime @default(now()) @updatedAt
+
+  @@map("sku_master")
+}
+
+/// Tanggal tambahan yang dikecualikan dari ADS Opsi 1 (di luar aturan
+/// payday & double date yang dihasilkan otomatis dari Pengaturan).
+model ExclusionDate {
+  date      DateTime @id @db.Date
+  reason    String   @default("") @db.VarChar(120)
+  createdAt DateTime @default(now())
+
+  @@map("exclusion_date")
+}
+
+/// Hasil perhitungan DOI per SKU per hari. Baris hari ini ditimpa oleh Refresh.
+model DoiSnapshot {
+  snapshotDate   DateTime @db.Date
+  sku            String   @db.VarChar(120)
+  name           String   @default("") @db.VarChar(500)
+  sapCode        String?  @db.VarChar(60)
+  availableQty   Int      @default(0)
+  qtyOnHand      Int      @default(0)
+  qtyOnOrder     Int      @default(0)
+  transitQty     Int      @default(0)
+  leadTimeDays   Int      @default(0)
+  firstSalesDate DateTime? @db.Date
+  ageDays        Int?
+  isNpl          Boolean  @default(false)
+  nplNote        String?  @db.VarChar(80)
+  sales90        Int      @default(0)
+  salesEx        Int      @default(0)
+  daysEx         Int      @default(0)
+  ads1           Float    @default(0)
+  ads8w          Float    @default(0)
+  ads4w          Float    @default(0)
+  ads2w          Float    @default(0)
+  ads2           Float    @default(0)
+  ads2Source     String   @default("") @db.VarChar(8)
+  doi1           Float?
+  doi2           Float?
+  doi1Transit    Float?
+  doi2Transit    Float?
+  refDoi         Float?
+  refDoiTransit  Float?
+  status         String   @default("") @db.VarChar(20)
+  action         String   @default("") @db.VarChar(60)
+  suggested1     Int      @default(0)
+  suggested2     Int      @default(0)
+  abcClass       String   @default("C") @db.VarChar(1)
+  abcShare       Float    @default(0)
+  abcCumShare    Float    @default(0)
+  runOutDate     DateTime? @db.Date
+  computedAt     DateTime @default(now())
+
+  @@id([snapshotDate, sku])
+  @@index([snapshotDate, status])
+  @@index([sku, snapshotDate])
+  @@map("doi_snapshot")
+}
+
+/// Ringkasan satu perhitungan (KPI + parameter yang dipakai), satu baris per hari.
+model DoiSummary {
+  snapshotDate DateTime @id @db.Date
+  computedAt   DateTime @default(now())
+  trigger      String   @default("cron") @db.VarChar(20)
+  payload      String   @db.Text
+
+  @@map("doi_summary")
+}
+
+/// Riwayat unggahan berkas.
+model UploadBatch {
+  id         String   @id @db.VarChar(40)
+  kind       String   @db.VarChar(24) // SALES | TRANSIT | LEAD_TIME
+  filename   String   @db.VarChar(260)
+  rowCount   Int      @default(0)
+  mode       String   @default("REPLACE") @db.VarChar(16)
+  note       String?  @db.VarChar(300)
+  uploadedAt DateTime @default(now())
+
+  @@index([kind, uploadedAt])
+  @@map("upload_batch")
+}
+
+/// Seluruh pengaturan operasional. Nilai disimpan sebagai teks, di-parse di aplikasi.
+model AppSetting {
+  key       String   @id @db.VarChar(60)
+  value     String   @db.VarChar(500)
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@map("app_setting")
+}
+
+model AuditLog {
+  id       BigInt   @id @default(autoincrement())
+  at       DateTime @default(now())
+  actor    String   @default("system") @db.VarChar(60)
+  action   String   @db.VarChar(60)
+  entity   String   @db.VarChar(60)
+  entityId String?  @db.VarChar(120)
+  detail   String?  @db.Text
+
+  @@index([at])
+  @@map("audit_log")
+}
+
+model SyncLog {
+  id         BigInt    @id @default(autoincrement())
+  kind       String    @db.VarChar(16) // STOCK | SALES | COMPUTE
+  trigger    String    @default("cron") @db.VarChar(20)
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  status     String    @default("running") @db.VarChar(16) // running | ok | error | skipped
+  rows       Int       @default(0)
+  message    String?   @db.VarChar(500)
+
+  @@index([kind, startedAt])
+  @@map("sync_log")
+}
+
+/// Pengguna aplikasi. Password disimpan sebagai hash scrypt (salt:hash).
+model AppUser {
+  id           String    @id @db.VarChar(40)
+  username     String    @unique @db.VarChar(60)
+  passwordHash String    @db.VarChar(200)
+  name         String    @db.VarChar(120)
+  role         String    @default("USER") @db.VarChar(20) // ADMIN | USER | VIEWER
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @default(now()) @updatedAt
+
+  @@map("app_user")
+}
+
+/// Kunci antar-proses supaya cron Vercel dan tombol Refresh tidak menulis bersamaan.
+model SyncLock {
+  name       String   @id @db.VarChar(30)
+  owner      String   @db.VarChar(120)
+  acquiredAt DateTime @default(now())
+
+  @@map("sync_lock")
+}

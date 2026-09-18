@@ -74,7 +74,7 @@ export async function latestSnapshot(): Promise<SnapshotView> {
     snapshotDate: toDateKeyUtc(summary.snapshotDate),
     computedAt: summary.computedAt.toISOString(),
     trigger: summary.trigger,
-    summary: payload.summary,
+    summary: normalizeSummary(payload.summary),
     exclusions: payload.exclusions ?? [],
     earliestDataDate: payload.earliestDataDate ?? null,
     settings: payload.settings ?? null,
@@ -130,6 +130,23 @@ export type DashboardView = {
 };
 
 /**
+ * Snapshot yang dihitung sebelum fitur phase out tidak punya `phaseOut` dan
+ * `totalWithPhaseOut` di payload-nya. Tanpa ini halaman akan error sampai
+ * pengguna menekan Refresh — jadi nilai lama diisi default yang masuk akal.
+ */
+function normalizeSummary(sum: HealthSummary | null): HealthSummary | null {
+  if (!sum) return null;
+  const byStatus = { ...sum.byStatus } as HealthSummary['byStatus'];
+  if (byStatus.PHASE_OUT === undefined) byStatus.PHASE_OUT = 0;
+  return {
+    ...sum,
+    byStatus,
+    totalWithPhaseOut: sum.totalWithPhaseOut ?? sum.total,
+    phaseOut: sum.phaseOut ?? { count: 0, stock: 0, excessQty: 0, lateCount: 0 },
+  };
+}
+
+/**
  * Data dashboard saja — ringkasan (sudah tersimpan utuh di doi_summary.payload)
  * plus empat daftar pendek. Jauh lebih ringan daripada mengirim seluruh SKU:
  * ±20 KB, bukan ratusan KB, dan hanya satu query ke doi_snapshot.
@@ -149,7 +166,7 @@ export async function dashboardView(): Promise<DashboardView> {
     snapshotDate: toDateKeyUtc(summary.snapshotDate),
     computedAt: summary.computedAt.toISOString(),
     trigger: summary.trigger,
-    summary: payload.summary,
+    summary: normalizeSummary(payload.summary),
     settings: payload.settings ?? null,
     exclusions: payload.exclusions ?? [],
     earliestDataDate: payload.earliestDataDate ?? null,

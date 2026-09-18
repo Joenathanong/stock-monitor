@@ -51,7 +51,8 @@ export default function Dashboard() {
   const s = data?.summary;
   const set = data?.settings;
   // Kedua versi total sudah dihitung saat compute, jadi toggle ini tidak menghitung ulang apa pun.
-  const tot = s ? (withPhaseOut ? s.totalWithPhaseOut : s.total) : null;
+  const tot = s ? ((withPhaseOut ? s.totalWithPhaseOut : s.total) ?? s.total) : null;
+  const poSum = s?.phaseOut ?? { count: 0, stock: 0, excessQty: 0, lateCount: 0 };
 
   const critical = data?.po ?? [];
   const overstock = data?.overstock ?? [];
@@ -70,7 +71,7 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {s && s.byStatus.PHASE_OUT > 0 ? (
+          {poSum.count > 0 ? (
             <label className="flex items-center gap-2 text-[13px]" title="Secara default SKU phase out tidak dihitung di DOI total & ABC">
               <input type="checkbox" checked={withPhaseOut} onChange={(e) => setWithPhaseOut(e.target.checked)} />
               Hitung termasuk Phase Out
@@ -90,7 +91,7 @@ export default function Dashboard() {
       {s ? (
         <>
           <div className="kpi-grid">
-            <Kpi label="SKU dihitung" value={fmt(tot!.skuCount)} hint={`${fmt(s.byStatus.EXCLUDED)} dikecualikan · ${fmt(s.byStatus.PHASE_OUT)} phase out`} />
+            <Kpi label="SKU dihitung" value={fmt(tot!.skuCount)} hint={`${fmt(s.byStatus.EXCLUDED)} dikecualikan · ${fmt(s.byStatus.PHASE_OUT ?? 0)} phase out`} />
             <Kpi label="Total stok (Available)" value={fmt(tot!.stock)} hint={`+ ${fmt(tot!.transit)} dalam perjalanan`} />
             <Kpi label="DOI total — Opsi 1" value={fmtDoi(tot!.doi1)} unit="hari" hint={`ADS total ${fmt(tot!.ads1, 1)}/hari · 3 bln ex campaign`} />
             <Kpi label="DOI total — Opsi 2" value={fmtDoi(tot!.doi2)} unit="hari" hint={`ADS total ${fmt(tot!.ads2, 1)}/hari · max(8w,4w,2w)`} />
@@ -158,14 +159,14 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {s.phaseOut.count ? (
+            {poSum.count ? (
               <div className="card overflow-hidden">
                 <div className="flex items-center justify-between px-4 pt-4">
                   <div>
                     <div className="card-title">Phase Out — pantau sell-down</div>
                     <div className="mt-0.5 text-[12px] text-label">
-                      {fmt(s.phaseOut.count)} SKU · stok {fmt(s.phaseOut.stock)} pcs · perkiraan sisa saat target {fmt(s.phaseOut.excessQty)} pcs
-                      {s.phaseOut.lateCount ? <span className="text-negative"> · {fmt(s.phaseOut.lateCount)} melewati target</span> : null}
+                      {fmt(poSum.count)} SKU · stok {fmt(poSum.stock)} pcs · perkiraan sisa saat target {fmt(poSum.excessQty)} pcs
+                      {poSum.lateCount ? <span className="text-negative"> · {fmt(poSum.lateCount)} melewati target</span> : null}
                     </div>
                   </div>
                   <Link href="/phase-out" className="text-[12.5px] text-primary hover:underline">Kelola →</Link>

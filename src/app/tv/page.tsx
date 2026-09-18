@@ -44,7 +44,7 @@ const STATUS_CHIP: Record<string, { fg: string; bg: string; bd: string }> = {
   NO_SALES: { fg: 'var(--neutral)', bg: 'var(--neutral-bg)', bd: 'var(--neutral-border)' },
   EXCLUDED: { fg: 'var(--neutral)', bg: 'var(--neutral-bg)', bd: 'var(--neutral-border)' },
 };
-const ORDER: ProductStatus[] = ['CRITICAL', 'LOW', 'WAITING', 'HEALTHY', 'OVERSTOCK', 'NPL_WAIT', 'DEAD_STOCK', 'NO_SALES', 'EXCLUDED'];
+const ORDER: ProductStatus[] = ['CRITICAL', 'LOW', 'WAITING', 'HEALTHY', 'OVERSTOCK', 'NPL_WAIT', 'PHASE_OUT', 'DEAD_STOCK', 'NO_SALES', 'EXCLUDED'];
 
 const nf = (n: number | null | undefined, d = 0) =>
   n === null || n === undefined || !Number.isFinite(n) ? '—' : n.toLocaleString('id-ID', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -141,7 +141,7 @@ function Tv() {
           </div>
           <div className="grid min-h-0 grid-cols-1 gap-3 overflow-y-auto md:grid-cols-2 xl:grid-cols-3 xl:gap-4 xl:overflow-hidden">
             <Panel title="Status SKU">
-              <Bars items={ORDER.map((k) => ({ label: STATUS_TEXT[k], value: s.byStatus[k], color: STATUS_COLOR[k] }))} />
+              <Bars items={ORDER.map((k) => ({ label: STATUS_TEXT[k], value: s.byStatus[k] ?? 0, color: STATUS_COLOR[k] }))} />
             </Panel>
             <Panel title="Distribusi DOI">
               <Bars items={s.buckets.map((b) => ({ label: b.label, value: b.count, color: 'var(--c1)' }))} />

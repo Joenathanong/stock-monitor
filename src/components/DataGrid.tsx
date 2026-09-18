@@ -104,9 +104,10 @@ function matchOne(raw: string | number | null | undefined, f: Filter, type: ColT
   return true;
 }
 
+const isBlank = (v: unknown) => v === null || v === undefined || v === '';
+
+/** Pembanding nilai TERISI saja. Sel kosong ditangani di luar (lihat `processed`). */
 function compare(a: unknown, b: unknown, type: ColType): number {
-  const ea = a === null || a === undefined || a === '', eb = b === null || b === undefined || b === '';
-  if (ea && eb) return 0; if (ea) return 1; if (eb) return -1; // kosong selalu di bawah
   if (type === 'number') return Number(a) - Number(b);
   if (type === 'date') return Date.parse(String(a)) - Date.parse(String(b));
   return String(a).localeCompare(String(b), 'id');
@@ -173,7 +174,13 @@ export function DataGrid<T>(props: DataGridProps<T>) {
       const entries = sort.map((s) => ({ ...s, col: colMap.get(s.key) })).filter((s) => s.col);
       out = [...out].sort((a, b) => {
         for (const s of entries) {
-          const d = compare(s.col!.get(a), s.col!.get(b), s.col!.type ?? 'text');
+          const av = s.col!.get(a), bv = s.col!.get(b);
+          const ea = isBlank(av), eb = isBlank(bv);
+          // Sel kosong selalu di bawah, termasuk saat menurun — kalau ikut dibalik,
+          // deretan "—" akan menumpuk di atas dan tabel terlihat acak.
+          if (ea !== eb) return ea ? 1 : -1;
+          if (ea && eb) continue;
+          const d = compare(av, bv, s.col!.type ?? 'text');
           if (d !== 0) return s.dir === 'asc' ? d : -d;
         }
         return 0;

@@ -20,6 +20,7 @@ export type ProductStatus =
   | 'DEAD_STOCK' // pernah terjual, 0 penjualan di jendela dead stock, stok > 0
   | 'NO_SALES'   // belum pernah terjual sama sekali
   | 'NPL_WAIT'   // produk baru, umur jual belum cukup untuk dihitung
+  | 'PHASE_OUT'  // masa phase out: masih dijual sampai habis, tidak di-PO lagi
   | 'EXCLUDED';  // dikecualikan manual (discontinued, dsb.)
 
 export const STATUS_LABEL: Record<ProductStatus, string> = {
@@ -31,6 +32,7 @@ export const STATUS_LABEL: Record<ProductStatus, string> = {
   DEAD_STOCK: 'Dead Stock',
   NO_SALES: 'Belum Terjual',
   NPL_WAIT: 'NPL',
+  PHASE_OUT: 'Phase Out',
   EXCLUDED: 'Dikecualikan',
 };
 
@@ -43,6 +45,7 @@ export const STATUS_ACTION: Record<ProductStatus, string> = {
   DEAD_STOCK: 'Dead stock — review / promo',
   NO_SALES: 'Belum terjual — pantau',
   NPL_WAIT: 'NPL — data belum cukup, pantau',
+  PHASE_OUT: 'Phase out — habiskan stok, jangan PO',
   EXCLUDED: 'Dikecualikan dari perhitungan',
 };
 
@@ -56,6 +59,8 @@ export type SkuInput = {
   transitQty: number;
   leadTimeDays?: number | null;
   isExcluded?: boolean;
+  /** Data phase out bila SKU sedang dihabiskan. */
+  phaseOut?: { effectiveDate: DateKey; targetOutDate: DateKey | null; replacementSku: string | null; disposition: string } | null;
   /** Penjualan harian `YYYY-MM-DD` → qty di dalam jendela terpanjang. Hari tanpa penjualan boleh tidak ada. */
   salesByDate: Record<DateKey, number>;
   /** Tanggal penjualan pertama sepanjang histori (bukan hanya di jendela). Null bila belum pernah terjual. */
@@ -123,6 +128,14 @@ export type DoiResult = {
   suggested2: number;
   runOutDate: DateKey | null;
   abcClass: 'A' | 'B' | 'C';
+  /** Phase out: penanda + metrik sell-down. */
+  isPhaseOut: boolean;
+  phaseOutTargetDate: DateKey | null;
+  phaseOutReplacement: string | null;
+  /** Perkiraan sisa stok pada tanggal target (0 bila habis tepat waktu). */
+  phaseOutExcessQty: number | null;
+  /** Berapa hari perkiraan habis melewati tanggal target (0 bila tidak telat). */
+  phaseOutLateDays: number | null;
   abcShare: number;
   abcCumShare: number;
 };
@@ -169,6 +182,9 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
   const ageDays = first ? diffDays(first, today) : null;
   const firstSalesTruncated = !!first && !!ctx.earliestDataDate && first <= ctx.earliestDataDate;
 
+  const po = input.phaseOut ?? null;
+  const isPhaseOut = !!po && !input.isExcluded;
+
   const exOpts = { exclusionDates: ctx.exclusionDates, excludeStockout: s.excludeStockoutDays };
   const w1 = windowStat(input, today, s.opsi1WindowDays, exOpts);
   const opts2 = { exclusionDates: s.opsi2ApplyExclusion ? ctx.exclusionDates : undefined, excludeStockout: s.excludeStockoutDays };
@@ -212,6 +228,7 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
   // --- Status ---
   let status: ProductStatus;
   if (input.isExcluded) status = 'EXCLUDED';
+  else if (isPhaseOut) status = 'PHASE_OUT';
   else if (first === null) status = 'NO_SALES';
   else if (isNpl && ageDays! < s.nplMinDays) status = 'NPL_WAIT';
   else if (salesDead === 0 && stock > 0) status = 'DEAD_STOCK';
@@ -229,11 +246,21 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
 
   // --- Saran qty: cukup untuk mencapai target DOI, dikurangi stok + transit ---
   const suggest = (ads: number) =>
-    ads > 0 && status !== 'DEAD_STOCK' && status !== 'NO_SALES' && status !== 'EXCLUDED' && status !== 'NPL_WAIT'
+    ads > 0 && status !== 'DEAD_STOCK' && status !== 'NO_SALES' && status !== 'EXCLUDED' && status !== 'NPL_WAIT' && status !== 'PHASE_OUT'
       ? Math.max(0, Math.ceil(s.targetDoiDays * ads - position))
       : 0;
 
   const runOutDate = refDoi !== null ? addDays(today, Math.max(0, Math.floor(refDoi))) : null;
+
+  // --- Phase out: apakah stok sisa habis sebelum tanggal target? ---
+  let phaseOutExcessQty: number | null = null;
+  let phaseOutLateDays: number | null = null;
+  if (isPhaseOut && po?.targetOutDate) {
+    const daysToTarget = Math.max(0, diffDays(today, po.targetOutDate));
+    // Yang bisa terjual sampai tanggal target, dibandingkan posisi stok + transit.
+    phaseOutExcessQty = Math.max(0, Math.round(position - refAds * daysToTarget));
+    phaseOutLateDays = runOutDate && runOutDate > po.targetOutDate ? diffDays(po.targetOutDate, runOutDate) : 0;
+  }
 
   return {
     sku: input.sku,
@@ -264,6 +291,11 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
     abcClass: 'C',
     abcShare: 0,
     abcCumShare: 0,
+    isPhaseOut,
+    phaseOutTargetDate: po?.targetOutDate ?? null,
+    phaseOutReplacement: po?.replacementSku ?? null,
+    phaseOutExcessQty,
+    phaseOutLateDays,
   };
 }
 
@@ -273,8 +305,12 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
  * Mengubah `rows` di tempat, mengembalikan rows yang sama untuk kenyamanan.
  */
 export function assignAbc(rows: DoiResult[], aPct: number, bPct: number): DoiResult[] {
-  const total = rows.reduce((sum, r) => sum + Math.max(0, r.sales90), 0);
-  const sorted = [...rows].sort((a, b) => b.sales90 - a.sales90 || a.sku.localeCompare(b.sku));
+  // Hanya SKU aktif yang menentukan batas kelas: produk yang dikecualikan atau sedang
+  // di-phase-out akan menggeser ambang 70/90 dan membuat produk aktif turun kelas.
+  const active = rows.filter((r) => r.status !== 'EXCLUDED' && r.status !== 'PHASE_OUT');
+  for (const r of rows) { r.abcShare = 0; r.abcCumShare = 0; r.abcClass = 'C'; }
+  const total = active.reduce((sum, r) => sum + Math.max(0, r.sales90), 0);
+  const sorted = [...active].sort((a, b) => b.sales90 - a.sales90 || a.sku.localeCompare(b.sku));
   let cum = 0;
   for (const r of sorted) {
     const share = total > 0 ? (Math.max(0, r.sales90) / total) * 100 : 0;
@@ -290,10 +326,11 @@ export function assignAbc(rows: DoiResult[], aPct: number, bPct: number): DoiRes
 export type TotalDoi = { stock: number; transit: number; ads1: number; ads2: number; doi1: number | null; doi2: number | null; skuCount: number };
 
 /** DOI keseluruhan = total stok ÷ total ADS. Dihitung untuk semua SKU dan per kelas ABC. */
-export function totalDoi(rows: DoiResult[]): TotalDoi {
+export function totalDoi(rows: DoiResult[], excludePhaseOut = false): TotalDoi {
+  const skip = (r: DoiResult) => r.status === 'EXCLUDED' || (excludePhaseOut && r.status === 'PHASE_OUT');
   let stock = 0, transit = 0, ads1 = 0, ads2 = 0;
   for (const r of rows) {
-    if (r.status === 'EXCLUDED') continue;
+    if (skip(r)) continue;
     stock += r.availableQty;
     transit += r.transitQty;
     ads1 += r.ads1;
@@ -305,7 +342,7 @@ export function totalDoi(rows: DoiResult[]): TotalDoi {
     ads2: round2(ads2),
     doi1: ads1 > 0 ? round2(stock / ads1) : null,
     doi2: ads2 > 0 ? round2(stock / ads2) : null,
-    skuCount: rows.filter((r) => r.status !== 'EXCLUDED').length,
+    skuCount: rows.filter((r) => !skip(r)).length,
   };
 }
 
@@ -314,17 +351,21 @@ export type HealthSummary = {
   byStatus: Record<ProductStatus, number>;
   byAbc: Record<'A' | 'B' | 'C', { count: number; stock: number; sales: number; total: TotalDoi }>;
   total: TotalDoi;
+  /** Total bila SKU phase out ikut dihitung — untuk toggle di layar, tanpa hitung ulang. */
+  totalWithPhaseOut: TotalDoi;
+  phaseOut: { count: number; stock: number; excessQty: number; lateCount: number };
   npl: number;
   suggestedQty1: number;
   suggestedQty2: number;
   buckets: { label: string; count: number }[];
 };
 
-export function summarize(rows: DoiResult[]): HealthSummary {
+export function summarize(rows: DoiResult[], excludePhaseOut = false): HealthSummary {
   const byStatus = Object.fromEntries((Object.keys(STATUS_LABEL) as ProductStatus[]).map((k) => [k, 0])) as Record<ProductStatus, number>;
   for (const r of rows) byStatus[r.status]++;
   const cls = (c: 'A' | 'B' | 'C') => {
-    const part = rows.filter((r) => r.abcClass === c && r.status !== 'EXCLUDED');
+    // Kelas ABC hanya berisi SKU aktif (lihat assignAbc), jadi phase out tidak ikut.
+    const part = rows.filter((r) => r.abcClass === c && r.status !== 'EXCLUDED' && r.status !== 'PHASE_OUT');
     return {
       count: part.length,
       stock: part.reduce((s, r) => s + r.availableQty, 0),
@@ -332,13 +373,22 @@ export function summarize(rows: DoiResult[]): HealthSummary {
       total: totalDoi(part),
     };
   };
+  const inBuckets = excludePhaseOut ? rows.filter((r) => r.status !== 'PHASE_OUT') : rows;
   const bucket = (lo: number, hi: number) =>
-    rows.filter((r) => r.refDoi !== null && r.refDoi >= lo && r.refDoi < hi).length;
+    inBuckets.filter((r) => r.refDoi !== null && r.refDoi >= lo && r.refDoi < hi).length;
+  const pos = rows.filter((r) => r.status === 'PHASE_OUT');
   return {
     totalSku: rows.length,
     byStatus,
     byAbc: { A: cls('A'), B: cls('B'), C: cls('C') },
-    total: totalDoi(rows),
+    total: totalDoi(rows, excludePhaseOut),
+    totalWithPhaseOut: totalDoi(rows, false),
+    phaseOut: {
+      count: pos.length,
+      stock: pos.reduce((a, r) => a + r.availableQty, 0),
+      excessQty: pos.reduce((a, r) => a + (r.phaseOutExcessQty ?? 0), 0),
+      lateCount: pos.filter((r) => (r.phaseOutLateDays ?? 0) > 0).length,
+    },
     npl: rows.filter((r) => r.isNpl).length,
     suggestedQty1: rows.reduce((s, r) => s + r.suggested1, 0),
     suggestedQty2: rows.reduce((s, r) => s + r.suggested2, 0),
@@ -347,7 +397,7 @@ export function summarize(rows: DoiResult[]): HealthSummary {
       { label: '7–14 hari', count: bucket(7, 14) },
       { label: '14–30 hari', count: bucket(14, 30) },
       { label: '30–60 hari', count: bucket(30, 60) },
-      { label: '> 60 hari', count: rows.filter((r) => r.refDoi !== null && r.refDoi >= 60).length },
+      { label: '> 60 hari', count: inBuckets.filter((r) => r.refDoi !== null && r.refDoi >= 60).length },
     ],
   };
 }

@@ -11,6 +11,7 @@ export const STATUS_TEXT: Record<string, string> = {
   DEAD_STOCK: 'Dead Stock',
   NO_SALES: 'Belum Terjual',
   NPL_WAIT: 'NPL',
+  PHASE_OUT: 'Phase Out',
   EXCLUDED: 'Dikecualikan',
 };
 
@@ -23,16 +24,17 @@ export const STATUS_CHIP: Record<string, string> = {
   DEAD_STOCK: 'chip-gray',
   NO_SALES: 'chip-gray',
   NPL_WAIT: 'chip-brand',
+  PHASE_OUT: 'chip-warn',
   EXCLUDED: 'chip-gray',
 };
 
 /** Warna solid status untuk bar/grafik — token tema (§2.4 / §3.4). */
 export const STATUS_COLOR: Record<string, string> = {
   CRITICAL: 'var(--negative-solid)', LOW: 'var(--critical-solid)', WAITING: 'var(--informative-solid)', HEALTHY: 'var(--positive-solid)',
-  OVERSTOCK: 'var(--accent-violet)', NPL_WAIT: 'var(--primary)', DEAD_STOCK: 'var(--neutral-solid)', NO_SALES: 'var(--neutral-border)', EXCLUDED: 'var(--border-strong)',
+  OVERSTOCK: 'var(--accent-violet)', NPL_WAIT: 'var(--primary)', PHASE_OUT: 'var(--critical-solid)', DEAD_STOCK: 'var(--neutral-solid)', NO_SALES: 'var(--neutral-border)', EXCLUDED: 'var(--border-strong)',
 };
 
-export const STATUS_ORDER: ProductStatus[] = ['CRITICAL', 'LOW', 'WAITING', 'HEALTHY', 'OVERSTOCK', 'NPL_WAIT', 'DEAD_STOCK', 'NO_SALES', 'EXCLUDED'];
+export const STATUS_ORDER: ProductStatus[] = ['CRITICAL', 'LOW', 'WAITING', 'HEALTHY', 'OVERSTOCK', 'NPL_WAIT', 'PHASE_OUT', 'DEAD_STOCK', 'NO_SALES', 'EXCLUDED'];
 
 export function StatusChip({ status }: { status: string }) {
   return <span className={`chip ${STATUS_CHIP[status] ?? 'chip-gray'}`}>{STATUS_TEXT[status] ?? status}</span>;

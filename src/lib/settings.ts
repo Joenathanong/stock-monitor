@@ -28,6 +28,8 @@ export const DEFAULT_SETTINGS = {
   default_lead_time_days: 7,    // lead time bila SKU tidak ada di master
   action_basis: 'KONSERVATIF',  // KONSERVATIF (DOI terkecil) | OPSI1 | OPSI2
 
+  exclude_phase_out: 1,         // SKU phase out tidak dihitung di DOI total & ABC
+
   // --- ABC ---
   abc_a_pct: 70,                // kumulatif ≤ 70% → A
   abc_b_pct: 90,                // kumulatif ≤ 90% → B, sisanya C
@@ -69,6 +71,7 @@ export type DoiSettings = {
   actionBasis: 'KONSERVATIF' | 'OPSI1' | 'OPSI2';
   abcAPct: number;
   abcBPct: number;
+  excludePhaseOut: boolean;
   salesSyncLookbackDays: number;
   salesIncludeReady: boolean;
   salesIncludeReturn: boolean;
@@ -107,6 +110,7 @@ export function toDoiSettings(raw: SettingsMap = {}): DoiSettings {
     actionBasis: basis === 'OPSI1' || basis === 'OPSI2' ? basis : 'KONSERVATIF',
     abcAPct: num(raw, 'abc_a_pct'),
     abcBPct: num(raw, 'abc_b_pct'),
+    excludePhaseOut: bool(raw, 'exclude_phase_out'),
     salesSyncLookbackDays: Math.max(1, num(raw, 'sales_sync_lookback_days')),
     salesIncludeReady: bool(raw, 'sales_include_ready'),
     salesIncludeReturn: bool(raw, 'sales_include_return'),

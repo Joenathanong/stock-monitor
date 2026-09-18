@@ -21,15 +21,18 @@ function Monitoring() {
   const [status, setStatus] = useState(params.get('status') || 'ALL');
   const [abc, setAbc] = useState('ALL');
   const [nplOnly, setNplOnly] = useState(false);
+  const [hidePhaseOut, setHidePhaseOut] = useState(true);
   const [open, setOpen] = useState<string | null>(null);
   const earliest = data?.earliestDataDate ?? null;
 
   const preFilter = useCallback((r: SnapshotRow) => {
+    // Phase out disembunyikan secara bawaan, kecuali memang sedang difilter ke status itu.
+    if (hidePhaseOut && r.status === 'PHASE_OUT' && status !== 'PHASE_OUT') return false;
     if (status === 'PO' ? !(r.status === 'CRITICAL' || r.status === 'LOW') : status !== 'ALL' && r.status !== status) return false;
     if (abc !== 'ALL' && r.abcClass !== abc) return false;
     if (nplOnly && !r.isNpl) return false;
     return true;
-  }, [status, abc, nplOnly]);
+  }, [status, abc, nplOnly, hidePhaseOut]);
 
   const columns = useMemo<Column<SnapshotRow>[]>(() => [
     { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 240, sticky: true, isTitle: true,
@@ -51,6 +54,11 @@ function Monitoring() {
     { key: 'doi2t', label: 'DOI 2+T', get: (r) => r.doi2Transit, type: 'number', mono: true, width: 76, prio: 'p3', render: (r) => fmtDoi(r.doi2Transit) },
     { key: 'first', label: 'Jual pertama', get: (r) => r.firstSalesDate, type: 'date', mono: true, width: 120, prio: 'p3',
       render: (r) => r.firstSalesDate ? <>{r.firstSalesDate}{earliest && r.firstSalesDate <= earliest ? <span className="ml-1 text-[10px] text-muted" title="Sama dengan awal data — tanggal listing bisa lebih tua">≥ awal</span> : null}</> : <span className="empty">—</span> },
+    { key: 'potarget', label: 'Target habis', get: (r) => r.phaseOutTargetDate, type: 'date', mono: true, width: 120, prio: 'p3', title: 'Tanggal target stok phase out harus habis' },
+    { key: 'poexcess', label: 'Sisa saat target', get: (r) => r.phaseOutExcessQty, type: 'number', mono: true, width: 130, prio: 'p3',
+      title: 'Perkiraan stok tersisa pada tanggal target',
+      render: (r) => r.phaseOutExcessQty === null ? <span className="empty">—</span>
+        : <span className={(r.phaseOutLateDays ?? 0) > 0 ? 'text-negative font-semibold' : ''}>{fmt(r.phaseOutExcessQty)}</span> },
     { key: 'sap', label: 'SAP', get: (r) => r.sapCode, mono: true, width: 100, prio: 'p3' },
   ], [earliest]);
 
@@ -94,6 +102,9 @@ function Monitoring() {
               <option value="ALL">ABC: semua</option><option value="A">A</option><option value="B">B</option><option value="C">C</option>
             </select>
             <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={nplOnly} onChange={(e) => setNplOnly(e.target.checked)} /> NPL</label>
+            <label className="flex items-center gap-2 text-[13px]" title="Phase out tidak dapat saran PO dan tidak dihitung di DOI total">
+              <input type="checkbox" checked={hidePhaseOut} onChange={(e) => setHidePhaseOut(e.target.checked)} /> Sembunyikan Phase Out
+            </label>
           </>
         }
       />

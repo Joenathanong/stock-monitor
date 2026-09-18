@@ -58,6 +58,12 @@ const GROUPS: { title: string; fields: Field[] }[] = [
     ],
   },
   {
+    title: 'Phase out',
+    fields: [
+      { key: 'exclude_phase_out', label: 'Keluarkan SKU phase out dari DOI total & kelas ABC', type: 'bool' },
+    ],
+  },
+  {
     title: 'Sinkronisasi & jadwal',
     fields: [
       { key: 'auto_compute', label: 'Hitung otomatis 07.30 WIB', type: 'bool' },

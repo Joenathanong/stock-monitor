@@ -175,3 +175,81 @@ test('aturan pengecualian: double date & payday tanggal tunggal', () => {
   assert.deepEqual([...map.keys()].sort(), ['2026-09-09', '2026-09-17', '2026-09-25']);
   assert.equal(map.get('2026-09-17'), 'Flash sale');
 });
+
+// ---------------------------------------------------------------- Phase out
+
+const PO = { effectiveDate: '2026-09-01' as DateKey, targetOutDate: null, replacementSku: null, disposition: 'SELL_DOWN' };
+
+test('phase out: status PHASE_OUT dan tidak pernah dapat saran PO', () => {
+  // stok nyaris habis — tanpa phase out pasti CRITICAL dan dapat saran qty.
+  const biasa = computeSku(input({ availableQty: 5 }), S, ctx());
+  assert.equal(biasa.status, 'CRITICAL');
+  assert.ok(biasa.suggested1 > 0);
+
+  const po = computeSku(input({ availableQty: 5, phaseOut: PO }), S, ctx());
+  assert.equal(po.status, 'PHASE_OUT');
+  assert.equal(po.isPhaseOut, true);
+  assert.equal(po.suggested1, 0);
+  assert.equal(po.suggested2, 0);
+});
+
+test('phase out: dikecualikan manual tetap menang atas phase out', () => {
+  const r = computeSku(input({ isExcluded: true, phaseOut: PO }), S, ctx());
+  assert.equal(r.status, 'EXCLUDED');
+  assert.equal(r.isPhaseOut, false);
+});
+
+test('phase out: sisa stok pada tanggal target dan keterlambatan', () => {
+  // ADS 10/hari, target 10 hari lagi -> terjual 100. Stok 250 -> sisa 150, habis 25 hari lagi (telat 15).
+  const target = addDays(TODAY, 10);
+  const r = computeSku(input({ availableQty: 250, phaseOut: { ...PO, targetOutDate: target } }), S, ctx());
+  assert.equal(r.phaseOutTargetDate, target);
+  assert.equal(r.phaseOutExcessQty, 150);
+  assert.equal(r.phaseOutLateDays, 15);
+});
+
+test('phase out: habis sebelum target -> tidak ada sisa, tidak telat', () => {
+  // ADS 10/hari, target 60 hari lagi, stok 100 -> habis 10 hari lagi.
+  const r = computeSku(input({ availableQty: 100, phaseOut: { ...PO, targetOutDate: addDays(TODAY, 60) } }), S, ctx());
+  assert.equal(r.phaseOutExcessQty, 0);
+  assert.equal(r.phaseOutLateDays, 0);
+});
+
+test('phase out: stok DAN ADS sama-sama keluar dari DOI total', () => {
+  const aktif = computeSku(input({ sku: 'AKTIF', availableQty: 1000 }), S, ctx());
+  const keluar = computeSku(input({ sku: 'PO-1', availableQty: 5000, phaseOut: PO }), S, ctx());
+  const rows = [aktif, keluar];
+
+  const dengan = totalDoi(rows, false);
+  const tanpa = totalDoi(rows, true);
+  assert.equal(dengan.stock, 6000);
+  assert.equal(tanpa.stock, 1000);
+  // ADS ikut berkurang — kalau tidak, DOI total jadi salah kecil.
+  assert.equal(tanpa.ads1, aktif.ads1);
+  assert.equal(tanpa.doi1, 100); // 1000 / 10
+  assert.equal(tanpa.skuCount, 1);
+});
+
+test('phase out: tidak ikut menentukan batas kelas ABC', () => {
+  const besar = computeSku(input({ sku: 'PO-BESAR', salesByDate: constantSales(100, 120), phaseOut: PO }), S, ctx());
+  const a = computeSku(input({ sku: 'A', salesByDate: constantSales(10, 120) }), S, ctx());
+  const b = computeSku(input({ sku: 'B', salesByDate: constantSales(2, 120) }), S, ctx());
+  assignAbc([besar, a, b], S.abcAPct, S.abcBPct);
+  // Tanpa SKU phase out, A menguasai ~83% penjualan aktif -> kelas A.
+  assert.equal(a.abcClass, 'A');
+  assert.equal(besar.abcClass, 'C');
+  assert.equal(besar.abcShare, 0);
+});
+
+test('phase out: ringkasan menyimpan dua versi total', () => {
+  const aktif = computeSku(input({ sku: 'AKTIF', availableQty: 1000 }), S, ctx());
+  const keluar = computeSku(input({ sku: 'PO-1', availableQty: 5000, phaseOut: { ...PO, targetOutDate: addDays(TODAY, 10) } }), S, ctx());
+  const sum = summarize([aktif, keluar], true);
+  assert.equal(sum.total.stock, 1000);
+  assert.equal(sum.totalWithPhaseOut.stock, 6000);
+  assert.equal(sum.byStatus.PHASE_OUT, 1);
+  assert.equal(sum.phaseOut.count, 1);
+  assert.equal(sum.phaseOut.stock, 5000);
+  assert.equal(sum.phaseOut.excessQty, 4900); // 5000 - 10*10
+  assert.equal(sum.phaseOut.lateCount, 1);
+});

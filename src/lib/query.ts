@@ -43,6 +43,10 @@ export type SnapshotRow = {
   abcShare: number;
   abcCumShare: number;
   runOutDate: DateKey | null;
+  isPhaseOut: boolean;
+  phaseOutTargetDate: DateKey | null;
+  phaseOutExcessQty: number | null;
+  phaseOutLateDays: number | null;
 };
 
 export type SnapshotView = {
@@ -110,7 +114,49 @@ export async function latestSnapshot(): Promise<SnapshotView> {
       abcShare: r.abcShare,
       abcCumShare: r.abcCumShare,
       runOutDate: r.runOutDate ? toDateKeyUtc(r.runOutDate) : null,
+      isPhaseOut: r.isPhaseOut,
+      phaseOutTargetDate: r.phaseOutTargetDate ? toDateKeyUtc(r.phaseOutTargetDate) : null,
+      phaseOutExcessQty: r.phaseOutExcessQty,
+      phaseOutLateDays: r.phaseOutLateDays,
     })),
+  };
+}
+
+export type DashboardView = {
+  snapshotDate: string | null; computedAt: string | null; trigger: string | null;
+  summary: HealthSummary | null; settings: DoiSettings | null;
+  exclusions: { date: DateKey; reason: string }[]; earliestDataDate: DateKey | null;
+  po: SnapshotRow[]; overstock: SnapshotRow[]; npl: SnapshotRow[]; phaseOut: SnapshotRow[];
+};
+
+/**
+ * Data dashboard saja — ringkasan (sudah tersimpan utuh di doi_summary.payload)
+ * plus empat daftar pendek. Jauh lebih ringan daripada mengirim seluruh SKU:
+ * ±20 KB, bukan ratusan KB, dan hanya satu query ke doi_snapshot.
+ */
+export async function dashboardView(): Promise<DashboardView> {
+  const summary = await prisma.doiSummary.findFirst({ orderBy: { snapshotDate: 'desc' } });
+  const empty = { snapshotDate: null, computedAt: null, trigger: null, summary: null, settings: null, exclusions: [], earliestDataDate: null, po: [], overstock: [], npl: [], phaseOut: [] };
+  if (!summary) return empty;
+
+  const payload = JSON.parse(summary.payload) as {
+    summary: HealthSummary; exclusions: { date: DateKey; reason: string }[]; earliestDataDate: DateKey | null; settings: DoiSettings;
+  };
+  const snap = await latestSnapshot();
+
+  const byRefDoi = (a: SnapshotRow, b: SnapshotRow) => (a.refDoi ?? 0) - (b.refDoi ?? 0) || b.sales90 - a.sales90;
+  return {
+    snapshotDate: toDateKeyUtc(summary.snapshotDate),
+    computedAt: summary.computedAt.toISOString(),
+    trigger: summary.trigger,
+    summary: payload.summary,
+    settings: payload.settings ?? null,
+    exclusions: payload.exclusions ?? [],
+    earliestDataDate: payload.earliestDataDate ?? null,
+    po: snap.rows.filter((r) => r.status === 'CRITICAL' || r.status === 'LOW').sort(byRefDoi).slice(0, 25),
+    overstock: snap.rows.filter((r) => r.status === 'OVERSTOCK').sort((a, b) => b.availableQty - a.availableQty).slice(0, 12),
+    npl: snap.rows.filter((r) => r.isNpl).sort((a, b) => (b.ageDays ?? 0) - (a.ageDays ?? 0)).slice(0, 10),
+    phaseOut: snap.rows.filter((r) => r.status === 'PHASE_OUT').sort((a, b) => (b.phaseOutLateDays ?? 0) - (a.phaseOutLateDays ?? 0) || (b.phaseOutExcessQty ?? 0) - (a.phaseOutExcessQty ?? 0)).slice(0, 10),
   };
 }
 

@@ -1,13 +1,32 @@
 {
+  "regions": [
+    "sin1"
+  ],
   "crons": [
-    { "path": "/api/cron/sales", "schedule": "0 18 * * *" },
-    { "path": "/api/cron/compute", "schedule": "30 0 * * *" }
+    {
+      "path": "/api/cron/sales",
+      "schedule": "0 18 * * *"
+    },
+    {
+      "path": "/api/cron/compute",
+      "schedule": "30 0 * * *"
+    }
   ],
   "functions": {
-    "src/app/api/cron/sales/route.ts": { "maxDuration": 300 },
-    "src/app/api/cron/compute/route.ts": { "maxDuration": 300 },
-    "src/app/api/compute/route.ts": { "maxDuration": 300 },
-    "src/app/api/sync/route.ts": { "maxDuration": 300 },
-    "src/app/api/import/sales/route.ts": { "maxDuration": 300 }
+    "src/app/api/cron/sales/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/cron/compute/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/compute/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/sync/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/import/sales/route.ts": {
+      "maxDuration": 300
+    }
   }
 }

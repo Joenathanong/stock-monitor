@@ -1,10 +1,11 @@
 'use client';
 import Link from 'next/link';
+import { useState } from 'react';
 import { AbcChip, Alert, Bars, Empty, Kpi, RefreshButton, STATUS_COLOR, STATUS_ORDER, STATUS_TEXT, StatusChip, fmt, fmtDateTime, fmtDoi, useApi } from '@/components/ui';
 import { DataGrid, type Column } from '@/components/DataGrid';
-import type { SnapshotRow, SnapshotView } from '@/lib/query';
+import type { DashboardView, SnapshotRow } from '@/lib/query';
 
-type Resp = SnapshotView & { ok: boolean };
+type Resp = DashboardView & { ok: boolean };
 
 const skuCol: Column<SnapshotRow> = { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 220, isTitle: true,
   render: (r) => <span className="font-semibold" title={r.name}>{r.sku}</span> };
@@ -35,20 +36,27 @@ const NPL_COLS: Column<SnapshotRow>[] = [
   { key: 'status', label: 'Status', get: (r) => STATUS_TEXT[r.status], width: 110, render: (r) => <StatusChip status={r.status} /> },
 ];
 
+const PO_OUT_COLS: Column<SnapshotRow>[] = [
+  { ...skuCol, width: 200 },
+  { key: 'stock', label: 'Stok', get: (r) => r.availableQty, type: 'number', mono: true, width: 80 },
+  { key: 'target', label: 'Target habis', get: (r) => r.phaseOutTargetDate, type: 'date', mono: true, width: 120 },
+  { key: 'excess', label: 'Sisa saat target', get: (r) => r.phaseOutExcessQty, type: 'number', mono: true, width: 130 },
+  { key: 'late', label: 'Telat', get: (r) => r.phaseOutLateDays, type: 'number', mono: true, width: 80,
+    render: (r) => (r.phaseOutLateDays ?? 0) > 0 ? <span className="text-negative">{r.phaseOutLateDays} hr</span> : <span className="empty">—</span> },
+];
+
 export default function Dashboard() {
-  const { data, error, loading, reload } = useApi<Resp>('/api/monitoring');
+  const { data, error, loading, reload } = useApi<Resp>('/api/dashboard');
+  const [withPhaseOut, setWithPhaseOut] = useState(false);
   const s = data?.summary;
   const set = data?.settings;
+  // Kedua versi total sudah dihitung saat compute, jadi toggle ini tidak menghitung ulang apa pun.
+  const tot = s ? (withPhaseOut ? s.totalWithPhaseOut : s.total) : null;
 
-  const critical = (data?.rows ?? [])
-    .filter((r) => r.status === 'CRITICAL' || r.status === 'LOW')
-    .sort((a, b) => (a.refDoi ?? 0) - (b.refDoi ?? 0) || b.sales90 - a.sales90)
-    .slice(0, 25);
-  const overstock = (data?.rows ?? [])
-    .filter((r) => r.status === 'OVERSTOCK')
-    .sort((a, b) => b.availableQty - a.availableQty)
-    .slice(0, 12);
-  const npl = (data?.rows ?? []).filter((r) => r.isNpl).sort((a, b) => (b.ageDays ?? 0) - (a.ageDays ?? 0)).slice(0, 10);
+  const critical = data?.po ?? [];
+  const overstock = data?.overstock ?? [];
+  const npl = data?.npl ?? [];
+  const phaseOut = data?.phaseOut ?? [];
 
   return (
     <div className="space-y-5">
@@ -61,7 +69,15 @@ export default function Dashboard() {
               : 'Belum ada perhitungan'}
           </div>
         </div>
-        <RefreshButton onDone={reload} />
+        <div className="flex flex-wrap items-center gap-3">
+          {s && s.byStatus.PHASE_OUT > 0 ? (
+            <label className="flex items-center gap-2 text-[13px]" title="Secara default SKU phase out tidak dihitung di DOI total & ABC">
+              <input type="checkbox" checked={withPhaseOut} onChange={(e) => setWithPhaseOut(e.target.checked)} />
+              Hitung termasuk Phase Out
+            </label>
+          ) : null}
+          <RefreshButton onDone={reload} />
+        </div>
       </div>
 
       {error ? <Alert tone="error">{error}</Alert> : null}
@@ -74,10 +90,10 @@ export default function Dashboard() {
       {s ? (
         <>
           <div className="kpi-grid">
-            <Kpi label="SKU dihitung" value={fmt(s.total.skuCount)} hint={`${fmt(s.byStatus.EXCLUDED)} dikecualikan`} />
-            <Kpi label="Total stok (Available)" value={fmt(s.total.stock)} hint={`+ ${fmt(s.total.transit)} dalam perjalanan`} />
-            <Kpi label="DOI total — Opsi 1" value={fmtDoi(s.total.doi1)} unit="hari" hint={`ADS total ${fmt(s.total.ads1, 1)}/hari · 3 bln ex campaign`} />
-            <Kpi label="DOI total — Opsi 2" value={fmtDoi(s.total.doi2)} unit="hari" hint={`ADS total ${fmt(s.total.ads2, 1)}/hari · max(8w,4w,2w)`} />
+            <Kpi label="SKU dihitung" value={fmt(tot!.skuCount)} hint={`${fmt(s.byStatus.EXCLUDED)} dikecualikan · ${fmt(s.byStatus.PHASE_OUT)} phase out`} />
+            <Kpi label="Total stok (Available)" value={fmt(tot!.stock)} hint={`+ ${fmt(tot!.transit)} dalam perjalanan`} />
+            <Kpi label="DOI total — Opsi 1" value={fmtDoi(tot!.doi1)} unit="hari" hint={`ADS total ${fmt(tot!.ads1, 1)}/hari · 3 bln ex campaign`} />
+            <Kpi label="DOI total — Opsi 2" value={fmtDoi(tot!.doi2)} unit="hari" hint={`ADS total ${fmt(tot!.ads2, 1)}/hari · max(8w,4w,2w)`} />
             <Kpi label="Perlu open PO" value={fmt(s.byStatus.CRITICAL + s.byStatus.LOW)} hint={`${fmt(s.byStatus.CRITICAL)} kritis · ${fmt(s.byStatus.LOW)} low`} tone="text-negative" />
             <Kpi label="Produk baru (NPL)" value={fmt(s.npl)} hint={`${fmt(s.byStatus.NPL_WAIT)} data belum cukup`} />
           </div>
@@ -141,6 +157,22 @@ export default function Dashboard() {
                 <div className="p-3"><DataGrid<SnapshotRow> id="dash-npl" compact rows={npl} columns={NPL_COLS} rowKey={(r) => r.sku} emptyText="Tidak ada produk baru." /></div>
               </div>
             </div>
+
+            {s.phaseOut.count ? (
+              <div className="card overflow-hidden">
+                <div className="flex items-center justify-between px-4 pt-4">
+                  <div>
+                    <div className="card-title">Phase Out — pantau sell-down</div>
+                    <div className="mt-0.5 text-[12px] text-label">
+                      {fmt(s.phaseOut.count)} SKU · stok {fmt(s.phaseOut.stock)} pcs · perkiraan sisa saat target {fmt(s.phaseOut.excessQty)} pcs
+                      {s.phaseOut.lateCount ? <span className="text-negative"> · {fmt(s.phaseOut.lateCount)} melewati target</span> : null}
+                    </div>
+                  </div>
+                  <Link href="/phase-out" className="text-[12.5px] text-primary hover:underline">Kelola →</Link>
+                </div>
+                <div className="p-3"><DataGrid<SnapshotRow> id="dash-phaseout" compact rows={phaseOut} columns={PO_OUT_COLS} rowKey={(r) => r.sku} emptyText="Tidak ada." /></div>
+              </div>
+            ) : null}
           </div>
 
           <div className="card card-pad">

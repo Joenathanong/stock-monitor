@@ -85,6 +85,20 @@ model TransitStock {
 
 /// Master per SKU: lead time kirim (hari) dan penanda dikecualikan.
 /// SKU tanpa baris di sini memakai default global dari Pengaturan.
+/// Produk yang masuk masa phase out: masih dijual sampai habis, tidak di-PO lagi.
+model PhaseOut {
+  sku            String    @id @db.VarChar(120)
+  effectiveDate  DateTime  @db.Date
+  reason         String?   @db.VarChar(120)
+  replacementSku String?   @db.VarChar(120)
+  targetOutDate  DateTime? @db.Date
+  disposition    String    @default("SELL_DOWN") @db.VarChar(20)
+  note           String?   @db.VarChar(300)
+  updatedAt      DateTime  @default(now()) @updatedAt
+
+  @@map("phase_out")
+}
+
 model SkuMaster {
   sku          String   @id @db.VarChar(120)
   leadTimeDays Int?
@@ -143,6 +157,10 @@ model DoiSnapshot {
   abcShare       Float    @default(0)
   abcCumShare    Float    @default(0)
   runOutDate     DateTime? @db.Date
+  isPhaseOut        Boolean   @default(false)
+  phaseOutTargetDate DateTime? @db.Date
+  phaseOutExcessQty  Int?
+  phaseOutLateDays   Int?
   computedAt     DateTime @default(now())
 
   @@id([snapshotDate, sku])

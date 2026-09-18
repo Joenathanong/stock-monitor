@@ -116,13 +116,14 @@ export async function computeAll(now = new Date()): Promise<ComputeOutput> {
   const settings = await getSettings();
   const windowDays = longestWindow(settings);
 
-  const [stock, sales, stockouts, transitRows, masterRows, manualEx] = await Promise.all([
+  const [stock, sales, stockouts, transitRows, masterRows, manualEx, phaseOutRows] = await Promise.all([
     loadStock(settings),
     loadSales(settings, today, windowDays),
     loadStockouts(settings, today, windowDays),
     prisma.transitStock.findMany(),
     prisma.skuMaster.findMany(),
     prisma.exclusionDate.findMany(),
+    prisma.phaseOut.findMany(),
   ]);
 
   const exclusionMap = buildExclusionMap(
@@ -134,6 +135,12 @@ export async function computeAll(now = new Date()): Promise<ComputeOutput> {
 
   const transit = new Map(transitRows.map((r) => [r.sku, r.qty]));
   const master = new Map(masterRows.map((r) => [r.sku, r]));
+  const phaseOut = new Map(phaseOutRows.map((r) => [r.sku, {
+    effectiveDate: toDateKeyUtc(r.effectiveDate),
+    targetOutDate: r.targetOutDate ? toDateKeyUtc(r.targetOutDate) : null,
+    replacementSku: r.replacementSku,
+    disposition: r.disposition,
+  }]));
 
   const rows = stock.map((st) => {
     const m = master.get(st.sku);
@@ -148,6 +155,7 @@ export async function computeAll(now = new Date()): Promise<ComputeOutput> {
         transitQty: transit.get(st.sku) ?? 0,
         leadTimeDays: m?.leadTimeDays ?? null,
         isExcluded: m?.isExcluded ?? false,
+        phaseOut: phaseOut.get(st.sku) ?? null,
         salesByDate: sales.salesBySku.get(st.sku) ?? {},
         firstSalesDate: sales.firstBySku.get(st.sku) ?? null,
         stockoutDates: stockouts.get(st.sku),
@@ -162,7 +170,7 @@ export async function computeAll(now = new Date()): Promise<ComputeOutput> {
     today,
     settings,
     rows,
-    summary: summarize(rows),
+    summary: summarize(rows, settings.excludePhaseOut),
     exclusions: [...exclusionMap.entries()].map(([date, reason]) => ({ date, reason })).sort((a, b) => a.date.localeCompare(b.date)),
     earliestDataDate: sales.earliestDataDate,
   };
@@ -177,12 +185,13 @@ export async function persistSnapshot(out: ComputeOutput, trigger: string) {
   const cols =
     '(snapshotDate, sku, name, sapCode, availableQty, qtyOnHand, qtyOnOrder, transitQty, leadTimeDays, firstSalesDate, ageDays, isNpl, nplNote, ' +
     'sales90, salesEx, daysEx, ads1, ads8w, ads4w, ads2w, ads2, ads2Source, doi1, doi2, doi1Transit, doi2Transit, refDoi, refDoiTransit, status, action, ' +
-    'suggested1, suggested2, abcClass, abcShare, abcCumShare, runOutDate, computedAt)';
-  const n = 37;
+    'suggested1, suggested2, abcClass, abcShare, abcCumShare, runOutDate, isPhaseOut, phaseOutTargetDate, phaseOutExcessQty, phaseOutLateDays, computedAt)';
+  const n = 41;
   const update = [
     'name', 'sapCode', 'availableQty', 'qtyOnHand', 'qtyOnOrder', 'transitQty', 'leadTimeDays', 'firstSalesDate', 'ageDays', 'isNpl', 'nplNote',
     'sales90', 'salesEx', 'daysEx', 'ads1', 'ads8w', 'ads4w', 'ads2w', 'ads2', 'ads2Source', 'doi1', 'doi2', 'doi1Transit', 'doi2Transit', 'refDoi', 'refDoiTransit',
-    'status', 'action', 'suggested1', 'suggested2', 'abcClass', 'abcShare', 'abcCumShare', 'runOutDate', 'computedAt',
+    'status', 'action', 'suggested1', 'suggested2', 'abcClass', 'abcShare', 'abcCumShare', 'runOutDate',
+    'isPhaseOut', 'phaseOutTargetDate', 'phaseOutExcessQty', 'phaseOutLateDays', 'computedAt',
   ].map((c) => `${c}=VALUES(${c})`).join(', ');
 
   for (let i = 0; i < out.rows.length; i += BATCH) {
@@ -194,7 +203,8 @@ export async function persistSnapshot(out: ComputeOutput, trigger: string) {
       r.sales90, r.w1.sum, r.w1.days, r.ads1, r.w8.ads, r.w4.ads, r.w2.ads, r.ads2, r.ads2Source,
       r.doi1, r.doi2, r.doi1Transit, r.doi2Transit, r.refDoi, r.refDoiTransit, r.status, r.action.slice(0, 60),
       r.suggested1, r.suggested2, r.abcClass, r.abcShare, r.abcCumShare,
-      r.runOutDate ? keyToUtcDate(r.runOutDate) : null, now,
+      r.runOutDate ? keyToUtcDate(r.runOutDate) : null,
+      r.isPhaseOut ? 1 : 0, r.phaseOutTargetDate ? keyToUtcDate(r.phaseOutTargetDate) : null, r.phaseOutExcessQty, r.phaseOutLateDays, now,
     ]);
     await prisma.$executeRawUnsafe(
       `INSERT INTO doi_snapshot ${cols} VALUES ${placeholders} ON DUPLICATE KEY UPDATE ${update}`,

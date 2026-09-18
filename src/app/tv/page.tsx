@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { HealthSummary, ProductStatus } from '@/lib/doi';
 import type { DoiSettings } from '@/lib/settings';
@@ -10,6 +10,10 @@ import { getTheme, setTheme, type Theme } from '@/lib/theme';
  * Data dari /api/public/tv. Tombol: ← → ganti slide, spasi jeda, F layar penuh.
  * Parameter URL: ?slide=15 (detik) &rows=12 (baris/slide) &key=<PUBLIC_TV_TOKEN>.
  */
+
+/** Tinggi satu baris tabel TV dan ruang tetap (header tabel + garis) — dipakai menghitung baris yang muat. */
+const TV_ROW_H = 47;
+const TABLE_CHROME_H = 96;
 
 type Row = {
   sku: string; name: string; abc: 'A' | 'B' | 'C'; stock: number; transit: number;
@@ -82,8 +86,26 @@ function Tv() {
 
   useEffect(() => { load(); }, [load]);
 
+  const mainRef = useRef<HTMLElement>(null);
+  const [fitRows, setFitRows] = useState(12);
+
+  // Berapa baris yang benar-benar muat di layar ini — .tv-root overflow:hidden,
+  // jadi kelebihan baris akan terpotong, bukan bisa digulir.
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const measure = () => setFitRows(Math.max(4, Math.floor((el.clientHeight - TABLE_CHROME_H) / TV_ROW_H)));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const slideSeconds = Number(params.get('slide')) || data?.tv.slideSeconds || 15;
-  const rowsPerSlide = Number(params.get('rows')) || data?.tv.rowsPerSlide || 12;
+  const wantRows = Number(params.get('rows')) || data?.tv.rowsPerSlide || 12;
+  const rowsPerSlide = Math.max(4, Math.min(wantRows, fitRows));
+  // Daftar di slide ringkasan ikut menyusut agar tidak terdorong keluar layar.
+  const topSales = Math.max(3, Math.min(8, fitRows - 7));
   const refreshMinutes = data?.tv.refreshMinutes || 5;
 
   // muat ulang data berkala
@@ -117,7 +139,7 @@ function Tv() {
             <Kpi label="Overstock" value={nf(s.byStatus.OVERSTOCK)} unit="SKU" hint={`> ${set?.targetDoiDays ?? 14} hari`} tone="var(--accent-violet)" />
             <Kpi label="Produk baru" value={nf(s.npl)} unit="SKU" hint={`${nf(s.byStatus.NPL_WAIT)} data belum cukup`} tone="var(--primary)" />
           </div>
-          <div className="grid min-h-0 grid-cols-1 gap-3 overflow-y-auto md:grid-cols-2 xl:grid-cols-3 xl:gap-4 xl:overflow-visible">
+          <div className="grid min-h-0 grid-cols-1 gap-3 overflow-y-auto md:grid-cols-2 xl:grid-cols-3 xl:gap-4 xl:overflow-hidden">
             <Panel title="Status SKU">
               <Bars items={ORDER.map((k) => ({ label: STATUS_TEXT[k], value: s.byStatus[k], color: STATUS_COLOR[k] }))} />
             </Panel>
@@ -137,7 +159,7 @@ function Tv() {
               </table>
               <div className="mt-5 mb-2 text-[17px] font-semibold text-ink">Penjualan tertinggi 3 bulan</div>
               <div className="space-y-2">
-                {[...rows].sort((a, b) => b.sales90 - a.sales90).slice(0, 8).map((r, i) => (
+                {[...rows].sort((a, b) => b.sales90 - a.sales90).slice(0, topSales).map((r, i) => (
                   <div key={r.sku} className="grid grid-cols-[28px_1fr_auto_auto] items-center gap-3 text-[16px]">
                     <span className="text-muted">{i + 1}.</span>
                     <span className="truncate font-medium">{r.sku}</span>
@@ -163,7 +185,7 @@ function Tv() {
             <thead><tr><th>SKU</th><th>ABC</th><th className="num">Stok</th><th className="num">Transit</th><th className="num">ADS</th><th className="num">DOI</th><th className="num">DOI+T</th><th className="num">LT</th><th className="num">Saran Qty</th><th>Status</th></tr></thead>
             <tbody>{part.map((r) => (
               <tr key={r.sku}>
-                <td><div className="font-semibold">{r.sku}</div><div className="truncate text-[14px] text-label" style={{ maxWidth: 520 }}>{r.name}</div></td>
+                <td className="font-semibold" title={r.name}>{r.sku}</td>
                 <td><Abc cls={r.abc} /></td>
                 <td className="num">{nf(r.stock)}</td><td className="num">{r.transit ? nf(r.transit) : '—'}</td>
                 <td className="num">{nf(Math.max(r.ads1, r.ads2), 1)}</td>
@@ -184,7 +206,7 @@ function Tv() {
           <thead><tr><th>SKU</th><th>ABC</th><th className="num">Stok</th><th className="num">ADS 1</th><th className="num">ADS 2</th><th className="num">DOI 1</th><th className="num">DOI 2</th><th className="num">Penjualan 3 bln</th></tr></thead>
           <tbody>{over.map((r) => (
             <tr key={r.sku}>
-              <td><div className="font-semibold">{r.sku}</div><div className="truncate text-[14px] text-label" style={{ maxWidth: 520 }}>{r.name}</div></td>
+              <td className="font-semibold" title={r.name}>{r.sku}</td>
               <td><Abc cls={r.abc} /></td>
               <td className="num font-bold">{nf(r.stock)}</td><td className="num">{nf(r.ads1, 1)}</td><td className="num">{nf(r.ads2, 1)}</td>
               <td className="num">{doi(r.doi1)}</td><td className="num">{doi(r.doi2)}</td><td className="num">{nf(r.sales90)}</td>
@@ -202,7 +224,7 @@ function Tv() {
             <thead><tr><th>SKU</th><th>Jual pertama</th><th className="num">Umur</th><th className="num">Stok</th><th className="num">ADS 1</th><th className="num">ADS 2</th><th className="num">DOI</th><th>Status</th></tr></thead>
             <tbody>{npl.map((r) => (
               <tr key={r.sku}>
-                <td><div className="font-semibold">{r.sku}</div><div className="truncate text-[14px] text-label" style={{ maxWidth: 520 }}>{r.name}</div></td>
+                <td className="font-semibold" title={r.name}>{r.sku}</td>
                 <td>{r.first}</td><td className="num">{r.age} hr</td><td className="num">{nf(r.stock)}</td>
                 <td className="num">{nf(r.ads1, 1)}</td><td className="num">{nf(r.ads2, 1)}</td><td className="num font-bold">{doi(r.refDoi)}</td>
                 <td><Chip status={r.status} /></td>
@@ -221,7 +243,7 @@ function Tv() {
             <thead><tr><th>SKU</th><th>ABC</th><th className="num">Stok</th><th>Jual terakhir diketahui</th><th>Saran</th></tr></thead>
             <tbody>{dead.map((r) => (
               <tr key={r.sku}>
-                <td><div className="font-semibold">{r.sku}</div><div className="truncate text-[14px] text-label" style={{ maxWidth: 520 }}>{r.name}</div></td>
+                <td className="font-semibold" title={r.name}>{r.sku}</td>
                 <td><Abc cls={r.abc} /></td><td className="num font-bold">{nf(r.stock)}</td><td>—</td><td>{r.action}</td>
               </tr>))}</tbody>
           </table>
@@ -229,7 +251,7 @@ function Tv() {
       });
     }
     return out;
-  }, [data, rowsPerSlide]);
+  }, [data, rowsPerSlide, topSales]);
 
   // rotasi otomatis
   useEffect(() => {
@@ -273,7 +295,7 @@ function Tv() {
         </div>
       </header>
 
-      <main className="tv-main">
+      <main className="tv-main" ref={mainRef}>
         {error ? <Empty>{error}</Empty> : !data ? <Empty>Memuat…</Empty> : !slide ? <Empty>Belum ada perhitungan. Jalankan Refresh dari aplikasi.</Empty> : (
           <div key={slide.key} className="tv-slide">{slide.render()}</div>
         )}
@@ -305,18 +327,18 @@ function toggleFullscreen() {
 
 function Kpi({ label, value, unit, hint, tone }: { label: string; value: string; unit?: string; hint?: string; tone?: string }) {
   return (
-    <div className="tv-card px-5 py-4">
-      <div className="text-[15px] font-medium text-label">{label}</div>
-      <div className="mt-1 flex items-baseline gap-2">
-        <span className="text-[44px] font-bold leading-none tabular-nums" style={{ color: tone ?? 'var(--ink)' }}>{value}</span>
-        {unit ? <span className="text-[16px] text-label">{unit}</span> : null}
+    <div className="tv-card min-w-0 px-5 py-4">
+      <div className="truncate text-[15px] font-medium text-label">{label}</div>
+      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+        <span className="whitespace-nowrap font-bold leading-none tabular-nums" style={{ color: tone ?? 'var(--ink)', fontSize: 'clamp(20px, 2.15vw, 44px)' }}>{value}</span>
+        {unit ? <span className="shrink-0 text-[16px] text-label">{unit}</span> : null}
       </div>
-      {hint ? <div className="mt-1 text-[14px] text-label">{hint}</div> : null}
+      {hint ? <div className="truncate mt-1 text-[14px] text-label" title={hint}>{hint}</div> : null}
     </div>
   );
 }
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div className="tv-card flex min-h-0 flex-col p-5"><div className="mb-3 text-[19px] font-semibold text-ink">{title}</div><div className="min-h-0 flex-1">{children}</div></div>;
+  return <div className="tv-card flex min-h-0 flex-col p-5"><div className="mb-3 text-[19px] font-semibold text-ink">{title}</div><div className="min-h-0 flex-1 overflow-y-auto">{children}</div></div>;
 }
 function Bars({ items }: { items: { label: string; value: number; color: string }[] }) {
   const max = Math.max(1, ...items.map((i) => i.value));

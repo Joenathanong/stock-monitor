@@ -275,22 +275,25 @@ body {
 .grid-chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: var(--r-pill); font-size: 11px; font-weight: 600; background: var(--primary-subtle); color: var(--primary-subtle-fg); border: 1px solid var(--primary-border); }
 .grid-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
 .grid-scroll { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-gutter: stable; }
-.grid { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: var(--grid-fs); color: var(--ink); }
-.grid th { position: sticky; top: 0; z-index: var(--z-sticky); background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 8px; font-size: 11px; font-weight: 600; color: var(--ink-label); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.grid th.num, .grid td.num { text-align: right; font-variant-numeric: tabular-nums; }
-.grid td { height: var(--row-h-grid); padding: 6px 8px; border-bottom: 1px solid var(--grid-line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.grid td.mono { font-family: var(--font-mono); }
-.grid tbody tr:nth-child(odd) td { background: var(--row-odd); }
-.grid tbody tr:nth-child(even) td { background: var(--row-even); }
-.grid tbody tr:hover td { background: var(--bg-hover); }
-.grid tbody tr.is-selected td { background: var(--bg-selected); }
-.grid tbody tr.is-selected td:first-child { box-shadow: inset 2px 0 0 var(--primary); }
-.grid th.sticky-col, .grid td.sticky-col { position: sticky; left: 0; z-index: calc(var(--z-sticky) + 0); }
-.grid th.sticky-col { z-index: calc(var(--z-sticky) + 1); }
-.grid td.sticky-col { background: var(--bg-surface); }
-.grid td .empty { color: var(--ink-muted); }
-.grid tr.is-expand td { white-space: normal; height: auto; background: var(--bg-sunken); }
+.dgrid { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: var(--grid-fs); color: var(--ink); }
+.dgrid th { position: sticky; top: 0; z-index: var(--z-sticky); background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 8px; font-size: 11px; font-weight: 600; color: var(--ink-label); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dgrid th.num, .dgrid td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.dgrid td { height: var(--row-h-grid); padding: 6px 8px; border-bottom: 1px solid var(--grid-line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dgrid td.mono { font-family: var(--font-mono); }
+.dgrid tbody tr:nth-child(odd) td { background: var(--row-odd); }
+.dgrid tbody tr:nth-child(even) td { background: var(--row-even); }
+.dgrid tbody tr:hover td { background: var(--bg-hover); }
+.dgrid tbody tr.is-selected td { background: var(--bg-selected); }
+.dgrid tbody tr.is-selected td:first-child { box-shadow: inset 2px 0 0 var(--primary); }
+.dgrid th.sticky-col, .dgrid td.sticky-col { position: sticky; left: 0; z-index: calc(var(--z-sticky) + 0); }
+.dgrid th.sticky-col { z-index: calc(var(--z-sticky) + 1); }
+.dgrid td.sticky-col { background: var(--bg-surface); }
+.dgrid td .empty { color: var(--ink-muted); }
+.dgrid tr.is-expand td { white-space: normal; height: auto; background: var(--bg-sunken); }
 .grid-th-inner { display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* Kolom angka: judul rata kanan persis di atas angkanya (ikon pindah ke kiri label). */
+.dgrid th.num .grid-th-inner { flex-direction: row-reverse; }
+.dgrid th.num .grid-th-btn { text-align: right; }
 .grid-th-btn { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: inherit; background: transparent; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
 .grid-th-btn:hover { color: var(--primary); }
 .grid-sort { flex: none; font-size: 10px; opacity: .35; }
@@ -303,8 +306,8 @@ body {
 .col-resize { position: absolute; top: 0; right: 0; width: 8px; height: 100%; cursor: col-resize; touch-action: none; z-index: 3; }
 .col-resize::after { content: ""; position: absolute; right: 0; top: 0; width: 1px; height: 100%; background: transparent; }
 .col-resize:hover::after, .col-resize[data-drag]::after { background: var(--primary); }
-.grid th { position: sticky; }
-.grid th.has-resize { position: sticky; }
+.dgrid th { position: sticky; }
+.dgrid th.has-resize { position: sticky; }
 .grid-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; background: var(--bg-sunken); border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--ink-label); }
 .grid-pop { position: fixed; width: 250px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-grid); box-shadow: var(--shadow-1); padding: 10px; z-index: var(--z-tooltip); font-size: 13px; color: var(--ink); }
 .grid-pop h4 { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-label); margin: 0 0 8px; font-weight: 600; }
@@ -315,17 +318,17 @@ body {
 .grid-toast { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg-surface); padding: 8px 14px; border-radius: var(--r-pill); font-size: 13px; z-index: var(--z-toast); box-shadow: var(--shadow-2); }
 @media (max-width: 767.98px) {
   .grid-scroll { overflow: visible; }
-  .grid { table-layout: auto; font-size: 14px; }
-  .grid thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .grid, .grid tbody, .grid tr, .grid td { display: block; width: 100% !important; }
-  .grid tbody tr { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-0); padding: 12px 14px; margin: 10px; }
-  .grid tbody tr td { background: transparent !important; border: 0; padding: 4px 0; height: auto; display: flex; gap: 12px; align-items: baseline; min-height: var(--tap); white-space: normal; overflow: visible; }
-  .grid td::before { content: attr(data-label); flex: none; width: 110px; color: var(--ink-label); font-size: 12px; font-weight: 600; }
-  .grid td.title { font-size: 16px; font-weight: 600; min-height: auto; display: block; }
-  .grid td.title::before { content: none; }
-  .grid td.num { justify-content: space-between; text-align: left; }
-  .grid td.p2, .grid td.p3, .grid td.is-hidden-mobile { display: none; }
-  .grid tr.is-expand { padding: 0; border: 0; box-shadow: none; }
-  .grid tr.is-expand td::before { content: none; }
+  .dgrid { table-layout: auto; font-size: 14px; }
+  .dgrid thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .dgrid, .dgrid tbody, .dgrid tr, .dgrid td { display: block; width: 100% !important; }
+  .dgrid tbody tr { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-0); padding: 12px 14px; margin: 10px; }
+  .dgrid tbody tr td { background: transparent !important; border: 0; padding: 4px 0; height: auto; display: flex; gap: 12px; align-items: baseline; min-height: var(--tap); white-space: normal; overflow: visible; }
+  .dgrid td::before { content: attr(data-label); flex: none; width: 110px; color: var(--ink-label); font-size: 12px; font-weight: 600; }
+  .dgrid td.title { font-size: 16px; font-weight: 600; min-height: auto; display: block; }
+  .dgrid td.title::before { content: none; }
+  .dgrid td.num { justify-content: space-between; text-align: left; }
+  .dgrid td.p2, .dgrid td.p3, .dgrid td.is-hidden-mobile { display: none; }
+  .dgrid tr.is-expand { padding: 0; border: 0; box-shadow: none; }
+  .dgrid tr.is-expand td::before { content: none; }
   .grid-toolbar .grid-count { margin-left: 0; width: 100%; }
 }

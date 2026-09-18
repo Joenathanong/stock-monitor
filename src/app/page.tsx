@@ -7,7 +7,7 @@ import type { SnapshotRow, SnapshotView } from '@/lib/query';
 type Resp = SnapshotView & { ok: boolean };
 
 const skuCol: Column<SnapshotRow> = { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 220, isTitle: true,
-  render: (r) => <><div className="font-semibold">{r.sku}</div><div className="truncate font-sans text-[11px] font-normal text-label">{r.name}</div></> };
+  render: (r) => <span className="font-semibold" title={r.name}>{r.sku}</span> };
 const PO_COLS: Column<SnapshotRow>[] = [
   skuCol,
   { key: 'abc', label: 'ABC', get: (r) => r.abcClass, width: 60, render: (r) => <AbcChip cls={r.abcClass} /> },
@@ -94,7 +94,7 @@ export default function Dashboard() {
             </div>
             <div className="card overflow-hidden">
               <div className="card-title px-4 pt-4">Analisis ABC (qty 3 bulan)</div>
-              <div className="table-scroll"><table className="grid mt-2">
+              <div className="table-scroll"><table className="dgrid mt-2">
                 <thead><tr><th>Kelas</th><th className="num">SKU</th><th className="num">Pangsa</th><th className="num">Stok</th><th className="num">DOI 1</th><th className="num">DOI 2</th></tr></thead>
                 <tbody>
                   {(['A', 'B', 'C'] as const).map((c) => {

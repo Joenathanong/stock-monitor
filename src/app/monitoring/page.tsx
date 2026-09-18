@@ -33,7 +33,7 @@ function Monitoring() {
 
   const columns = useMemo<Column<SnapshotRow>[]>(() => [
     { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 240, sticky: true, isTitle: true,
-      render: (r) => <><div className="font-semibold">{r.sku}</div><div className="truncate font-sans text-[11px] font-normal text-label">{r.name}</div></> },
+      render: (r) => <span className="font-semibold" title={r.name}>{r.sku}</span> },
     { key: 'abc', label: 'ABC', get: (r) => r.abcClass, width: 64, render: (r) => <AbcChip cls={r.abcClass} /> },
     { key: 'status', label: 'Status', get: (r) => STATUS_TEXT[r.status] ?? r.status, width: 130, render: (r) => <StatusChip status={r.status} /> },
     { key: 'stock', label: 'Stok', get: (r) => r.availableQty, type: 'number', mono: true, width: 80, title: 'Available Qty OCS (On Hand − On Order)' },
@@ -124,6 +124,7 @@ function Detail({ r, earliest }: { r: SnapshotRow; earliest: string | null }) {
       </div>
       <div>
         <div className="font-semibold text-primary">Produk & ABC</div>
+        <div className="text-label">{r.name}</div>
         <div>Jual pertama: {r.firstSalesDate ?? '—'} {r.ageDays !== null ? `(${r.ageDays} hari)` : ''} {truncated ? '· ≥ awal data' : ''} {r.nplNote ? `· ${r.nplNote}` : ''}</div>
         <div>Pangsa penjualan {fmt(r.abcShare, 2)}% · kumulatif {fmt(r.abcCumShare, 1)}% → kelas {r.abcClass}</div>
         <div>SAP: {r.sapCode ?? '—'}</div>

@@ -4,7 +4,7 @@
  * Wajib di setiap tabel: sort (klik label, Shift = bertingkat), filter per kolom
  * (popover operator), lebar kolom bisa ditarik (pointer events, <col>), menu Kolom,
  * pencarian global, klik ganda sel = salin, dan penyimpanan tampilan
- * di localStorage['ieg-grid:<id>'] = {widths, sort, filters, hidden}.
+ * di localStorage['ieg-grid2:<id>'] = {widths, sort, filters, hidden}.
  * Di bawah 768px baris menjadi kartu; resize dimatikan, sort/filter lewat toolbar.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -33,6 +33,8 @@ export type Column<T> = {
   noFilter?: boolean;
   /** Sembunyikan di kartu HP. */
   hideMobile?: boolean;
+  /** Batas lebar saat auto-fit (default 320px). */
+  maxWidth?: number;
 };
 
 type Op = 'eq' | 'ne' | 'contains' | 'starts' | 'gt' | 'lt' | 'between' | 'empty' | 'notEmpty';
@@ -116,7 +118,8 @@ const FunnelIcon = () => (
 
 export function DataGrid<T>(props: DataGridProps<T>) {
   const { id, rows, columns, rowKey, expanded, renderExpanded, onRowClick, rowClass, pageSize = 100, compact, emptyText, loading, toolbarExtra, preFilter, footerNote } = props;
-  const storeKey = `ieg-grid:${id}`;
+  // v2: kunci dinaikkan agar lebar kolom lama yang rusak tidak ikut terbawa.
+  const storeKey = `ieg-grid2:${id}`;
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [sort, setSort] = useState<SortEntry[]>([]);
   const [filters, setFilters] = useState<Record<string, Filter>>({});
@@ -128,6 +131,7 @@ export function DataGrid<T>(props: DataGridProps<T>) {
   const [toast, setToast] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [fill, setFill] = useState(true);
+  const autoFitted = useRef(false);
   const tableRef = useRef<HTMLTableElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -137,7 +141,7 @@ export function DataGrid<T>(props: DataGridProps<T>) {
       const raw = localStorage.getItem(storeKey);
       if (raw) {
         const s = JSON.parse(raw) as Saved;
-        if (s.widths) { setWidths(s.widths); setFill(false); }
+        if (s.widths && Object.keys(s.widths).length) { setWidths(s.widths); setFill(false); autoFitted.current = true; }
         if (s.sort) setSort(s.sort);
         if (s.filters) setFilters(s.filters);
         if (s.hidden) setHidden(s.hidden);
@@ -233,21 +237,32 @@ export function DataGrid<T>(props: DataGridProps<T>) {
     for (const c of visibleCols) {
       if (keys && !keys.includes(c.key)) continue;
       canvas.font = `600 11px ${font.fontFamily}`;
-      let w = canvas.measureText(c.label).width + 44;
+      // cadangan: padding 16 + ikon sort & filter + jarak ≈ 56px, agar judul tak terpotong
+      let w = canvas.measureText(c.label).width + 56;
       canvas.font = c.mono ? mono : sans;
       for (const r of processed.slice(0, 300)) {
         const v = c.get(r); if (v === null || v === undefined) continue;
         const t = c.type === 'number' ? nfmt.format(Number(v)) : String(v);
         w = Math.max(w, canvas.measureText(t).width + 18);
       }
-      next[c.key] = Math.min(480, Math.max(MIN_W, Math.round(w)));
+      next[c.key] = Math.min(c.maxWidth ?? 320, Math.max(MIN_W, Math.round(w)));
     }
     setWidths((prev) => ({ ...prev, ...next }));
     setFill(false);
   }, [visibleCols, processed]);
 
+  // Lebar kolom mengikuti isi secara otomatis saat data pertama kali masuk.
+  useEffect(() => {
+    if (!loaded || autoFitted.current || loading || !processed.length) return;
+    autoFitted.current = true;
+    autoFit();
+  }, [loaded, loading, processed.length, autoFit]);
+
+  const totalW = visibleCols.reduce((a, c) => a + (widths[c.key] ?? c.width ?? 120), 0);
+
   function resetView() {
     setWidths({}); setSort([]); setFilters({}); setHidden([]); setFill(true);
+    autoFitted.current = false;
     try { localStorage.removeItem(storeKey); } catch { /* ignore */ }
   }
 
@@ -321,7 +336,7 @@ export function DataGrid<T>(props: DataGridProps<T>) {
       ) : null}
 
       <div ref={scrollRef} className="grid-scroll">
-        <table ref={tableRef} className="grid" style={{ width: fill ? '100%' : Math.max(0, visibleCols.reduce((s, c) => s + (widths[c.key] ?? c.width ?? 120), 0)) }}>
+        <table ref={tableRef} className="dgrid" style={fill ? { width: '100%' } : { width: totalW, minWidth: '100%' }}>
           <colgroup>{visibleCols.map((c) => <col key={c.key} style={{ width: widths[c.key] ?? c.width ?? undefined }} />)}</colgroup>
           <thead>
             <tr>

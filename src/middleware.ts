@@ -3,11 +3,11 @@ import { verifySession, SESSION_COOKIE, canWrite } from '@/lib/auth';
 
 /**
  * Tanpa sesi: halaman login, API auth, cron (dilindungi CRON_SECRET), dan
- * dashboard TV publik (/tv + /api/public/*).
+ * dashboard TV publik (/tv), dashboard baca-saja (/dashboard), dan /api/public/*.
  * Halaman & API pengguna hanya untuk ADMIN. Metode tulis ditolak untuk VIEWER.
  */
 const PUBLIC_PREFIX = ['/api/cron/', '/api/auth/', '/api/public/'];
-const PUBLIC_EXACT = ['/login', '/tv'];
+const PUBLIC_EXACT = ['/login', '/tv', '/dashboard'];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

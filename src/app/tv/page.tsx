@@ -4,6 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import type { HealthSummary, ProductStatus } from '@/lib/doi';
 import type { DoiSettings } from '@/lib/settings';
 import { getTheme, setTheme, type Theme } from '@/lib/theme';
+import { doiLabel, doiTotalLabel, show1, show2 } from '@/components/ui';
 
 /**
  * Dashboard TV — layar penuh, tanpa login, berganti slide otomatis.
@@ -120,6 +121,9 @@ function Tv() {
     f(); const t = setInterval(f, 1000); return () => clearInterval(t);
   }, []);
 
+  const disp = data?.settings?.doiDisplay ?? 'BOTH';
+  const d1 = show1(disp), d2 = show2(disp);
+
   const slides = useMemo<Slide[]>(() => {
     if (!data?.summary) return [];
     const s = data.summary;
@@ -132,8 +136,8 @@ function Tv() {
       render: () => (
         <div className="grid h-full grid-rows-[auto_1fr] gap-5">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6 xl:gap-4">
-            <Kpi label="DOI total — Opsi 1" value={`${doi(s.total.doi1)}`} unit="hari" hint="3 bln ex campaign" />
-            <Kpi label="DOI total — Opsi 2" value={`${doi(s.total.doi2)}`} unit="hari" hint="max 8w / 4w / 2w" />
+            {d1 ? <Kpi label={doiTotalLabel(1, disp)} value={`${doi(s.total.doi1)}`} unit="hari" hint="3 bln ex campaign" /> : null}
+            {d2 ? <Kpi label={doiTotalLabel(2, disp)} value={`${doi(s.total.doi2)}`} unit="hari" hint="max 8w / 4w / 2w" /> : null}
             <Kpi label="Total stok" value={nf(s.total.stock)} unit="pcs" hint={`+ ${nf(s.total.transit)} transit`} />
             <Kpi label="Perlu open PO" value={nf(s.byStatus.CRITICAL + s.byStatus.LOW)} unit="SKU" hint={`${nf(s.byStatus.CRITICAL)} kritis · ${nf(s.byStatus.LOW)} low`} tone="var(--negative)" />
             <Kpi label="Overstock" value={nf(s.byStatus.OVERSTOCK)} unit="SKU" hint={`> ${set?.targetDoiDays ?? 14} hari`} tone="var(--accent-violet)" />
@@ -149,11 +153,11 @@ function Tv() {
             </Panel>
             <Panel title="Analisis ABC (qty 3 bulan)">
               <table className="tv-table">
-                <thead><tr><th>Kelas</th><th className="num">SKU</th><th className="num">Pangsa</th><th className="num">Stok</th><th className="num">DOI 1</th><th className="num">DOI 2</th></tr></thead>
+                <thead><tr><th>Kelas</th><th className="num">SKU</th><th className="num">Pangsa</th><th className="num">Stok</th>{d1 ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}</tr></thead>
                 <tbody>
                   {(['A', 'B', 'C'] as const).map((c) => {
                     const k = s.byAbc[c]; const tot = s.byAbc.A.sales + s.byAbc.B.sales + s.byAbc.C.sales;
-                    return <tr key={c}><td><Abc cls={c} /></td><td className="num">{nf(k.count)}</td><td className="num">{tot ? nf((k.sales / tot) * 100, 1) : 0}%</td><td className="num">{nf(k.stock)}</td><td className="num">{doi(k.total.doi1)}</td><td className="num">{doi(k.total.doi2)}</td></tr>;
+                    return <tr key={c}><td><Abc cls={c} /></td><td className="num">{nf(k.count)}</td><td className="num">{tot ? nf((k.sales / tot) * 100, 1) : 0}%</td><td className="num">{nf(k.stock)}</td>{d1 ? <td className="num">{doi(k.total.doi1)}</td> : null}{d2 ? <td className="num">{doi(k.total.doi2)}</td> : null}</tr>;
                   })}
                 </tbody>
               </table>
@@ -203,13 +207,13 @@ function Tv() {
       key: 'overstock', title: 'Overstock Terbesar', subtitle: `${nf(s.byStatus.OVERSTOCK)} SKU di atas ${set?.targetDoiDays ?? 14} hari`,
       render: () => over.length ? (
         <table className="tv-table">
-          <thead><tr><th>SKU</th><th>ABC</th><th className="num">Stok</th><th className="num">ADS 1</th><th className="num">ADS 2</th><th className="num">DOI 1</th><th className="num">DOI 2</th><th className="num">Penjualan 3 bln</th></tr></thead>
+          <thead><tr><th>SKU</th><th>ABC</th><th className="num">Stok</th>{d1 ? <th className="num">{doiLabel('ADS', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('ADS', 2, disp)}</th> : null}{d1 ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}<th className="num">Penjualan 3 bln</th></tr></thead>
           <tbody>{over.map((r) => (
             <tr key={r.sku}>
               <td className="font-semibold" title={r.name}>{r.sku}</td>
               <td><Abc cls={r.abc} /></td>
-              <td className="num font-bold">{nf(r.stock)}</td><td className="num">{nf(r.ads1, 1)}</td><td className="num">{nf(r.ads2, 1)}</td>
-              <td className="num">{doi(r.doi1)}</td><td className="num">{doi(r.doi2)}</td><td className="num">{nf(r.sales90)}</td>
+              <td className="num font-bold">{nf(r.stock)}</td>{d1 ? <td className="num">{nf(r.ads1, 1)}</td> : null}{d2 ? <td className="num">{nf(r.ads2, 1)}</td> : null}
+              {d1 ? <td className="num">{doi(r.doi1)}</td> : null}{d2 ? <td className="num">{doi(r.doi2)}</td> : null}<td className="num">{nf(r.sales90)}</td>
             </tr>))}</tbody>
         </table>
       ) : <Empty>Tidak ada overstock.</Empty>,
@@ -221,12 +225,12 @@ function Tv() {
         key: 'npl', title: 'Produk Baru (NPL)', subtitle: `${nf(s.npl)} SKU berumur jual < ${set?.nplDays ?? 90} hari`,
         render: () => (
           <table className="tv-table">
-            <thead><tr><th>SKU</th><th>Jual pertama</th><th className="num">Umur</th><th className="num">Stok</th><th className="num">ADS 1</th><th className="num">ADS 2</th><th className="num">DOI</th><th>Status</th></tr></thead>
+            <thead><tr><th>SKU</th><th>Jual pertama</th><th className="num">Umur</th><th className="num">Stok</th>{d1 ? <th className="num">{doiLabel('ADS', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('ADS', 2, disp)}</th> : null}<th className="num">DOI</th><th>Status</th></tr></thead>
             <tbody>{npl.map((r) => (
               <tr key={r.sku}>
                 <td className="font-semibold" title={r.name}>{r.sku}</td>
                 <td>{r.first}</td><td className="num">{r.age} hr</td><td className="num">{nf(r.stock)}</td>
-                <td className="num">{nf(r.ads1, 1)}</td><td className="num">{nf(r.ads2, 1)}</td><td className="num font-bold">{doi(r.refDoi)}</td>
+                {d1 ? <td className="num">{nf(r.ads1, 1)}</td> : null}{d2 ? <td className="num">{nf(r.ads2, 1)}</td> : null}<td className="num font-bold">{doi(r.refDoi)}</td>
                 <td><Chip status={r.status} /></td>
               </tr>))}</tbody>
           </table>
@@ -251,7 +255,7 @@ function Tv() {
       });
     }
     return out;
-  }, [data, rowsPerSlide, topSales]);
+  }, [data, rowsPerSlide, topSales, disp, d1, d2]);
 
   // rotasi otomatis
   useEffect(() => {

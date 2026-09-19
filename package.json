@@ -13,6 +13,7 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
+    "db:reset-phase-out": "tsx scripts/reset-phase-out.ts",
     "test": "tsx --test src/lib/*.test.ts",
     "check:db": "tsx scripts/check-db.ts",
     "check:ocs": "tsx scripts/check-ocs.ts",

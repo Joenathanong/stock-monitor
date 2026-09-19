@@ -6,6 +6,7 @@
 import { prisma } from './prisma';
 import { DEFAULT_SETTINGS, longestWindow, toDoiSettings, type DoiSettings, type SettingsMap } from './settings';
 import { assignAbc, computeSku, summarize, type DoiResult, type HealthSummary } from './doi';
+import { sapKey } from './phase-out';
 import { buildExclusionMap } from './exclusion';
 import { addDays, keyToUtcDate, todayKey, toDateKeyUtc, type DateKey } from './dates';
 import { acquireLock, finishLog, lockOwner, releaseLock, startLog, syncStock } from './sync';
@@ -135,12 +136,15 @@ export async function computeAll(now = new Date()): Promise<ComputeOutput> {
 
   const transit = new Map(transitRows.map((r) => [r.sku, r.qty]));
   const master = new Map(masterRows.map((r) => [r.sku, r]));
-  const phaseOut = new Map(phaseOutRows.map((r) => [r.sku, {
-    effectiveDate: toDateKeyUtc(r.effectiveDate),
+  // Dua jalur pencocokan: lewat SKU langsung, atau lewat 6 digit terakhir kode SAP.
+  const toEntry = (r: (typeof phaseOutRows)[number]) => ({
+    effectiveDate: r.effectiveDate ? toDateKeyUtc(r.effectiveDate) : null,
     targetOutDate: r.targetOutDate ? toDateKeyUtc(r.targetOutDate) : null,
     replacementSku: r.replacementSku,
     disposition: r.disposition,
-  }]));
+  });
+  const poBySku = new Map(phaseOutRows.filter((r) => r.matchType === 'SKU').map((r) => [r.matchValue, toEntry(r)]));
+  const poBySap = new Map(phaseOutRows.filter((r) => r.matchType === 'SAP').map((r) => [r.matchValue, toEntry(r)]));
 
   const rows = stock.map((st) => {
     const m = master.get(st.sku);
@@ -155,7 +159,7 @@ export async function computeAll(now = new Date()): Promise<ComputeOutput> {
         transitQty: transit.get(st.sku) ?? 0,
         leadTimeDays: m?.leadTimeDays ?? null,
         isExcluded: m?.isExcluded ?? false,
-        phaseOut: phaseOut.get(st.sku) ?? null,
+        phaseOut: poBySku.get(st.sku) ?? poBySap.get(sapKey(st.sapCode) ?? '\u0000') ?? null,
         salesByDate: sales.salesBySku.get(st.sku) ?? {},
         firstSalesDate: sales.firstBySku.get(st.sku) ?? null,
         stockoutDates: stockouts.get(st.sku),

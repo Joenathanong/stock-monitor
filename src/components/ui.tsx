@@ -163,3 +163,18 @@ export function Bars({ items, color = 'var(--c1)' }: { items: { label: string; v
     </div>
   );
 }
+
+/** Opsi DOI mana yang ditampilkan — setelan `doi_display` di Pengaturan. */
+export type DoiDisplay = 'OPSI1' | 'OPSI2' | 'BOTH';
+export const show1 = (d: DoiDisplay | undefined) => d !== 'OPSI2';
+export const show2 = (d: DoiDisplay | undefined) => d !== 'OPSI1';
+/**
+ * Saat hanya satu opsi ditampilkan, nomornya tidak perlu ditulis — metodenya sudah
+ * jelas dari Pengaturan dan dari keterangan kecil di bawah angka.
+ */
+export const doiLabel = (base: string, n: 1 | 2, d?: DoiDisplay) =>
+  d === 'OPSI1' || d === 'OPSI2' ? base : `${base} ${n}`;
+
+/** Judul KPI: "DOI Total" bila satu opsi, "DOI total — Opsi 1/2" bila keduanya. */
+export const doiTotalLabel = (n: 1 | 2, d?: DoiDisplay) =>
+  d === 'OPSI1' || d === 'OPSI2' ? 'DOI Total' : `DOI total — Opsi ${n}`;

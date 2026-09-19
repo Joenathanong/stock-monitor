@@ -4,6 +4,7 @@ import { assignAbc, computeSku, summarize, totalDoi, windowStat, type DoiContext
 import { toDoiSettings } from './settings';
 import { addDays, type DateKey } from './dates';
 import { buildExclusionMap, ruleReason } from './exclusion';
+import { phaseOutKey, sapKey } from './phase-out';
 
 const TODAY: DateKey = '2026-09-15';
 const S = toDoiSettings();
@@ -252,4 +253,36 @@ test('phase out: ringkasan menyimpan dua versi total', () => {
   assert.equal(sum.phaseOut.stock, 5000);
   assert.equal(sum.phaseOut.excessQty, 4900); // 5000 - 10*10
   assert.equal(sum.phaseOut.lateCount, 1);
+});
+
+// ------------------------------------------------- Pencocokan kode SAP
+
+test('kode SAP: kunci diambil dari 6 digit terakhir', () => {
+  // Dua kode untuk barang yang sama, beda 4 karakter di depan.
+  assert.equal(sapKey('1222123456'), '123456');
+  assert.equal(sapKey('1201123456'), '123456');
+  assert.equal(sapKey('1222123456'), sapKey('1201123456'));
+});
+
+test('kode SAP: pemisah dan huruf kecil dinormalkan', () => {
+  assert.equal(sapKey('1222-123 456'), '123456');
+  assert.equal(sapKey(' 1201.123456 '), '123456');
+  assert.equal(sapKey('abc-def123'), 'DEF123');
+});
+
+test('kode SAP: kode terlalu pendek atau kosong ditolak', () => {
+  assert.equal(sapKey('12345'), null);
+  assert.equal(sapKey(''), null);
+  assert.equal(sapKey(null), null);
+  assert.equal(sapKey(undefined), null);
+});
+
+test('kode SAP: barang berbeda tidak tertukar', () => {
+  assert.notEqual(sapKey('1222123456'), sapKey('1222654321'));
+});
+
+test('kunci baris phase out dipisahkan per jenis pencocokan', () => {
+  assert.equal(phaseOutKey('SAP', '123456'), 'SAP:123456');
+  assert.equal(phaseOutKey('SKU', '123456'), 'SKU:123456');
+  assert.notEqual(phaseOutKey('SAP', '123456'), phaseOutKey('SKU', '123456'));
 });

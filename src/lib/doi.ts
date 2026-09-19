@@ -60,7 +60,7 @@ export type SkuInput = {
   leadTimeDays?: number | null;
   isExcluded?: boolean;
   /** Data phase out bila SKU sedang dihabiskan. */
-  phaseOut?: { effectiveDate: DateKey; targetOutDate: DateKey | null; replacementSku: string | null; disposition: string } | null;
+  phaseOut?: { effectiveDate: DateKey | null; targetOutDate: DateKey | null; replacementSku: string | null; disposition: string } | null;
   /** Penjualan harian `YYYY-MM-DD` → qty di dalam jendela terpanjang. Hari tanpa penjualan boleh tidak ada. */
   salesByDate: Record<DateKey, number>;
   /** Tanggal penjualan pertama sepanjang histori (bukan hanya di jendela). Null bila belum pernah terjual. */

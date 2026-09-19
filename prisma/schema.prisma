@@ -86,9 +86,13 @@ model TransitStock {
 /// Master per SKU: lead time kirim (hari) dan penanda dikecualikan.
 /// SKU tanpa baris di sini memakai default global dari Pengaturan.
 /// Produk yang masuk masa phase out: masih dijual sampai habis, tidak di-PO lagi.
+/// Dicocokkan lewat kode SAP (6 digit terakhir) atau lewat SKU langsung.
 model PhaseOut {
-  sku            String    @id @db.VarChar(120)
-  effectiveDate  DateTime  @db.Date
+  key            String    @id @db.VarChar(140)
+  matchType      String    @default("SAP") @db.VarChar(3)
+  matchValue     String    @db.VarChar(120)
+  sapCode        String?   @db.VarChar(60)
+  effectiveDate  DateTime? @db.Date
   reason         String?   @db.VarChar(120)
   replacementSku String?   @db.VarChar(120)
   targetOutDate  DateTime? @db.Date
@@ -96,6 +100,7 @@ model PhaseOut {
   note           String?   @db.VarChar(300)
   updatedAt      DateTime  @default(now()) @updatedAt
 
+  @@index([matchType, matchValue])
   @@map("phase_out")
 }
 

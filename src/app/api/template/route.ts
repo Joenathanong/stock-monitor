@@ -10,6 +10,19 @@ export async function GET(req: Request) {
   const today = todayKey();
 
   const specs: Record<string, { sheet: string; columns: { header: string; key: string; width?: number }[]; rows: Record<string, unknown>[] }> = {
+    phaseout: {
+      sheet: 'Phase Out',
+      columns: [
+        { header: 'Kode SAP', key: 'sap', width: 20 },
+        { header: 'Alasan', key: 'reason', width: 30 },
+        { header: 'SKU Pengganti', key: 'rep', width: 28 },
+        { header: 'Catatan', key: 'note', width: 30 },
+      ],
+      rows: [
+        { sap: '1222123456', reason: 'Diganti formula baru', rep: '', note: 'Pencocokan pakai 6 digit terakhir' },
+        { sap: '1201123456', reason: 'Kode kedua barang yang sama', rep: '', note: 'Boleh ikut diunggah, hasilnya sama' },
+      ],
+    },
     transit: {
       sheet: 'Stok Dalam Perjalanan',
       columns: [
@@ -53,7 +66,7 @@ export async function GET(req: Request) {
   };
 
   const spec = specs[kind];
-  if (!spec) return fail('kind harus salah satu dari: transit, leadtime, sales');
+  if (!spec) return fail('kind harus salah satu dari: transit, leadtime, sales, phaseout');
 
   const buffer = await writeSheet(spec.sheet, spec.columns, spec.rows);
   return new Response(new Uint8Array(buffer), {

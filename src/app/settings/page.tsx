@@ -58,6 +58,16 @@ const GROUPS: { title: string; fields: Field[] }[] = [
     ],
   },
   {
+    title: 'Tampilan',
+    fields: [
+      { key: 'doi_display', label: 'Opsi DOI yang ditampilkan', type: 'select', options: [
+        { v: 'BOTH', l: 'Keduanya — Opsi 1 & Opsi 2' },
+        { v: 'OPSI1', l: 'Opsi 1 saja — 3 bulan ex campaign' },
+        { v: 'OPSI2', l: 'Opsi 2 saja — max(8w, 4w, 2w)' },
+      ] },
+    ],
+  },
+  {
     title: 'Phase out',
     fields: [
       { key: 'exclude_phase_out', label: 'Keluarkan SKU phase out dari DOI total & kelas ABC', type: 'bool' },

@@ -30,6 +30,9 @@ export const DEFAULT_SETTINGS = {
 
   exclude_phase_out: 1,         // SKU phase out tidak dihitung di DOI total & ABC
 
+  // --- Tampilan ---
+  doi_display: 'BOTH',          // opsi DOI yang ditampilkan di layar: OPSI1 | OPSI2 | BOTH
+
   // --- ABC ---
   abc_a_pct: 70,                // kumulatif ≤ 70% → A
   abc_b_pct: 90,                // kumulatif ≤ 90% → B, sisanya C
@@ -72,6 +75,8 @@ export type DoiSettings = {
   abcAPct: number;
   abcBPct: number;
   excludePhaseOut: boolean;
+  /** Opsi DOI yang ditampilkan (tidak mengubah perhitungan, hanya tampilan). */
+  doiDisplay: 'OPSI1' | 'OPSI2' | 'BOTH';
   salesSyncLookbackDays: number;
   salesIncludeReady: boolean;
   salesIncludeReturn: boolean;
@@ -89,6 +94,7 @@ const str = (raw: SettingsMap, key: SettingKey): string => String(raw[key] ?? DE
 /** Ubah baris `app_setting` mentah menjadi objek bertipe yang dipakai mesin DOI. */
 export function toDoiSettings(raw: SettingsMap = {}): DoiSettings {
   const basis = str(raw, 'action_basis').toUpperCase();
+  const disp = str(raw, 'doi_display').toUpperCase();
   return {
     areaScope: str(raw, 'area_scope'),
     includeInactive: bool(raw, 'include_inactive'),
@@ -111,6 +117,7 @@ export function toDoiSettings(raw: SettingsMap = {}): DoiSettings {
     abcAPct: num(raw, 'abc_a_pct'),
     abcBPct: num(raw, 'abc_b_pct'),
     excludePhaseOut: bool(raw, 'exclude_phase_out'),
+    doiDisplay: disp === 'OPSI1' || disp === 'OPSI2' ? disp : 'BOTH',
     salesSyncLookbackDays: Math.max(1, num(raw, 'sales_sync_lookback_days')),
     salesIncludeReady: bool(raw, 'sales_include_ready'),
     salesIncludeReturn: bool(raw, 'sales_include_return'),

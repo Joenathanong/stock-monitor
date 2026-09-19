@@ -52,6 +52,20 @@ function Monitoring() {
     ...(s2 ? [{ key: 'sug2', label: doiLabel('Saran', 2, disp), get: (r: SnapshotRow) => r.suggested2, type: 'number' as const, mono: true, width: 80, prio: 'p2' as const, title: 'Qty PO untuk mencapai target DOI (Opsi 2)', render: (r: SnapshotRow) => r.suggested2 ? fmt(r.suggested2) : <span className="empty">—</span> }] : []),
     { key: 'action', label: 'Saran tindakan', get: (r) => r.action + (r.nplNote ? ` · ${r.nplNote}` : ''), width: 240, prio: 'p2',
       render: (r) => <span title={r.action}>{r.action}{r.nplNote ? <span className="ml-1 text-primary">· {r.nplNote}</span> : null}</span> },
+    { key: 'poket', label: 'Ket. Phase Out', get: (r) => r.isPhaseOut ? [r.phaseOutSapCode, r.phaseOutReason, r.phaseOutNote].filter(Boolean).join(' · ') : null,
+      width: 250, prio: 'p2', title: 'Kode SAP, alasan, dan catatan dari daftar Phase Out',
+      render: (r) => {
+        if (!r.isPhaseOut) return <span className="empty">—</span>;
+        const ket = [r.phaseOutReason, r.phaseOutNote].filter(Boolean).join(' · ');
+        const full = [r.phaseOutSapCode, ket].filter(Boolean).join(' · ') || 'Phase out';
+        return (
+          <span title={full}>
+            {r.phaseOutSapCode ? <span className="font-mono text-[11px] text-label">{r.phaseOutSapCode}</span> : null}
+            {r.phaseOutSapCode && ket ? ' · ' : null}
+            {ket || (r.phaseOutSapCode ? null : <span className="text-label">tanpa keterangan</span>)}
+          </span>
+        );
+      } },
     ...(s1 ? [{ key: 'doi1t', label: `${doiLabel('DOI', 1, disp)}+T`, get: (r: SnapshotRow) => r.doi1Transit, type: 'number' as const, mono: true, width: 76, prio: 'p3' as const, title: 'DOI Opsi 1 termasuk stok dalam perjalanan', render: (r: SnapshotRow) => fmtDoi(r.doi1Transit) }] : []),
     ...(s2 ? [{ key: 'doi2t', label: `${doiLabel('DOI', 2, disp)}+T`, get: (r: SnapshotRow) => r.doi2Transit, type: 'number' as const, mono: true, width: 76, prio: 'p3' as const, title: 'DOI Opsi 2 termasuk stok dalam perjalanan', render: (r: SnapshotRow) => fmtDoi(r.doi2Transit) }] : []),
     { key: 'first', label: 'Jual pertama', get: (r) => r.firstSalesDate, type: 'date', mono: true, width: 120, prio: 'p3',
@@ -139,6 +153,17 @@ function Detail({ r, earliest, disp }: { r: SnapshotRow; earliest: string | null
         <div>Dalam perjalanan: {fmt(r.transitQty)} · lead time {r.leadTimeDays} hari</div>
         <div>Perkiraan habis: {r.runOutDate ?? '—'}</div>
       </div>
+      {r.isPhaseOut ? (
+        <div>
+          <div className="font-semibold" style={{ color: 'var(--critical)' }}>Phase Out</div>
+          <div>Kode SAP: {r.phaseOutSapCode ?? '—'}</div>
+          <div>Alasan: {r.phaseOutReason ?? '—'}{r.phaseOutNote ? ` · ${r.phaseOutNote}` : ''}</div>
+          <div>Target habis: {r.phaseOutTargetDate ?? '—'}
+            {(r.phaseOutLateDays ?? 0) > 0 ? <span className="text-negative"> · telat {r.phaseOutLateDays} hari, sisa ±{fmt(r.phaseOutExcessQty)} pcs</span> : null}
+          </div>
+          <div className="text-label">Tidak diberi saran PO dan tidak dihitung di DOI total.</div>
+        </div>
+      ) : null}
       <div>
         <div className="font-semibold text-primary">Produk & ABC</div>
         <div className="text-label">{r.name}</div>

@@ -47,6 +47,10 @@ export async function GET(req: Request) {
       { header: 'Saran Qty PO (Opsi 1)', key: 'sug1', width: 20 },
       { header: 'Saran Qty PO (Opsi 2)', key: 'sug2', width: 20 },
       { header: 'Perkiraan Habis', key: 'runOut', width: 16 },
+      { header: 'Phase Out', key: 'po', width: 11 },
+      { header: 'Phase Out — Target Habis', key: 'poTarget', width: 23 },
+      { header: 'Phase Out — Sisa saat Target', key: 'poExcess', width: 27 },
+      { header: 'Phase Out — Telat (hari)', key: 'poLate', width: 22 },
       { header: 'Pangsa Penjualan %', key: 'share', width: 18 },
       { header: 'Kumulatif %', key: 'cum', width: 12 },
     ],
@@ -59,6 +63,8 @@ export async function GET(req: Request) {
       doi1: r.doi1, doi2: r.doi2, doi1T: r.doi1Transit, doi2T: r.doi2Transit,
       status: STATUS_LABEL[r.status] ?? r.status, action: r.action, sug1: r.suggested1, sug2: r.suggested2,
       runOut: r.runOutDate, share: r.abcShare, cum: r.abcCumShare,
+      po: r.isPhaseOut ? 'Ya' : '', poTarget: r.phaseOutTargetDate ?? '',
+      poExcess: r.phaseOutExcessQty ?? '', poLate: r.phaseOutLateDays ?? '',
     })),
   );
 

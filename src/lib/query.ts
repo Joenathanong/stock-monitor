@@ -3,6 +3,7 @@
  * tidak ada yang menghitung ulang saat dibuka.
  */
 import { prisma } from './prisma';
+import { sapKey } from './phase-out';
 import { toDateKeyUtc, type DateKey } from './dates';
 import type { HealthSummary, ProductStatus } from './doi';
 import type { DoiSettings } from './settings';
@@ -44,6 +45,10 @@ export type SnapshotRow = {
   abcCumShare: number;
   runOutDate: DateKey | null;
   isPhaseOut: boolean;
+  /** Keterangan dari tabel phase_out — kode SAP yang dipakai mencocokkan, alasan, catatan. */
+  phaseOutSapCode: string | null;
+  phaseOutReason: string | null;
+  phaseOutNote: string | null;
   phaseOutTargetDate: DateKey | null;
   phaseOutExcessQty: number | null;
   phaseOutLateDays: number | null;
@@ -69,7 +74,15 @@ export async function latestSnapshot(): Promise<SnapshotView> {
   const payload = JSON.parse(summary.payload) as {
     summary: HealthSummary; exclusions: { date: DateKey; reason: string }[]; earliestDataDate: DateKey | null; settings: DoiSettings;
   };
-  const rows = await prisma.doiSnapshot.findMany({ where: { snapshotDate: summary.snapshotDate }, orderBy: { sku: 'asc' } });
+  const [rows, poRows] = await Promise.all([
+    prisma.doiSnapshot.findMany({ where: { snapshotDate: summary.snapshotDate }, orderBy: { sku: 'asc' } }),
+    prisma.phaseOut.findMany().catch(() => []),
+  ]);
+  // Keterangan phase out dicocokkan sama persis seperti saat compute: lewat SKU,
+  // atau lewat 6 digit terakhir kode SAP.
+  const poBySku = new Map(poRows.filter((p) => p.matchType === 'SKU').map((p) => [p.matchValue, p]));
+  const poBySap = new Map(poRows.filter((p) => p.matchType === 'SAP').map((p) => [p.matchValue, p]));
+  const poFor = (sku: string, sap: string | null) => poBySku.get(sku) ?? poBySap.get(sapKey(sap) ?? '\u0000') ?? null;
   return {
     snapshotDate: toDateKeyUtc(summary.snapshotDate),
     computedAt: summary.computedAt.toISOString(),
@@ -77,7 +90,7 @@ export async function latestSnapshot(): Promise<SnapshotView> {
     summary: normalizeSummary(payload.summary),
     exclusions: payload.exclusions ?? [],
     earliestDataDate: payload.earliestDataDate ?? null,
-    settings: payload.settings ?? null,
+    settings: await withLiveDisplay(payload.settings ?? null),
     rows: rows.map((r) => ({
       sku: r.sku,
       name: r.name,
@@ -115,6 +128,9 @@ export async function latestSnapshot(): Promise<SnapshotView> {
       abcCumShare: r.abcCumShare,
       runOutDate: r.runOutDate ? toDateKeyUtc(r.runOutDate) : null,
       isPhaseOut: r.isPhaseOut,
+      phaseOutSapCode: poFor(r.sku, r.sapCode)?.sapCode ?? null,
+      phaseOutReason: poFor(r.sku, r.sapCode)?.reason ?? null,
+      phaseOutNote: poFor(r.sku, r.sapCode)?.note ?? null,
       phaseOutTargetDate: r.phaseOutTargetDate ? toDateKeyUtc(r.phaseOutTargetDate) : null,
       phaseOutExcessQty: r.phaseOutExcessQty,
       phaseOutLateDays: r.phaseOutLateDays,
@@ -134,6 +150,22 @@ export type DashboardView = {
  * `totalWithPhaseOut` di payload-nya. Tanpa ini halaman akan error sampai
  * pengguna menekan Refresh — jadi nilai lama diisi default yang masuk akal.
  */
+/**
+ * `doi_display` hanya mengatur tampilan, tapi settings di payload snapshot dibekukan
+ * saat compute — tanpa ini, mengganti pilihan di Pengaturan tidak berefek apa pun
+ * sampai Hitung ulang dijalankan. Nilai lainnya sengaja tetap dari snapshot, karena
+ * itulah parameter yang benar-benar dipakai menghitung angkanya.
+ */
+async function withLiveDisplay(frozen: DoiSettings | null): Promise<DoiSettings | null> {
+  if (!frozen) return null;
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: 'doi_display' } });
+    const v = (row?.value ?? '').toUpperCase();
+    if (v === 'OPSI1' || v === 'OPSI2' || v === 'BOTH') return { ...frozen, doiDisplay: v };
+  } catch { /* tampilan bukan hal kritis — pakai nilai snapshot */ }
+  return frozen;
+}
+
 function normalizeSummary(sum: HealthSummary | null): HealthSummary | null {
   if (!sum) return null;
   const byStatus = { ...sum.byStatus } as HealthSummary['byStatus'];
@@ -167,7 +199,7 @@ export async function dashboardView(): Promise<DashboardView> {
     computedAt: summary.computedAt.toISOString(),
     trigger: summary.trigger,
     summary: normalizeSummary(payload.summary),
-    settings: payload.settings ?? null,
+    settings: await withLiveDisplay(payload.settings ?? null),
     exclusions: payload.exclusions ?? [],
     earliestDataDate: payload.earliestDataDate ?? null,
     po: snap.rows.filter((r) => r.status === 'CRITICAL' || r.status === 'LOW').sort(byRefDoi).slice(0, 25),

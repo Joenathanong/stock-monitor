@@ -17,7 +17,7 @@ const LINKS: Item[] = [
   { href: '/sku-master', label: 'Lead Time & SKU', module: 'Master Data', icon: 'clock', group: 'Master data' },
   { href: '/phase-out', label: 'Phase Out', module: 'Master Data', icon: 'sunset', group: 'Master data' },
   { href: '/sales', label: 'Data Penjualan', module: 'Data Sumber', icon: 'chart', group: 'Data' },
-  { href: '/settings', label: 'Pengaturan', module: 'Sistem', icon: 'cog', group: 'Sistem' },
+  { href: '/settings', label: 'Pengaturan', module: 'Sistem', icon: 'cog', admin: true, group: 'Sistem' },
   { href: '/users', label: 'Pengguna', module: 'Sistem', icon: 'users', admin: true, group: 'Sistem' },
   { href: '/account', label: 'Akun Saya', module: 'Sistem', icon: 'user', group: 'Sistem' },
 ];

@@ -33,7 +33,6 @@ function PublicDashboard() {
           <span className="truncate text-[15px] font-semibold">IEG DOI Monitor</span>
         </div>
         <div className="flex items-center gap-2">
-          <a className="btn btn-sm" href={key ? `/tv?key=${encodeURIComponent(key)}` : '/tv'}>Dashboard TV</a>
           <button className="btn btn-sm" onClick={toggle} aria-label="Ganti tema">
             {theme === 'morning' ? '☾ Evening' : '☀ Morning'}
           </button>
@@ -41,7 +40,9 @@ function PublicDashboard() {
         </div>
       </header>
       <main className="pub-main">
-        <DashboardBody apiUrl={`/api/public/dashboard${key ? `?key=${encodeURIComponent(key)}` : ''}`} readOnly />
+        <div className="pub-page">
+          <DashboardBody apiUrl={`/api/public/dashboard${key ? `?key=${encodeURIComponent(key)}` : ''}`} readOnly />
+        </div>
       </main>
     </div>
   );

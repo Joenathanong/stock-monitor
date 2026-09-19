@@ -87,8 +87,7 @@ const GROUPS: { title: string; fields: Field[] }[] = [
     title: 'Dashboard TV (/tv — tanpa login)',
     fields: [
       { key: 'tv_slide_seconds', label: 'Detik per slide', type: 'number' },
-      { key: 'tv_rows_per_slide', label: 'Baris tabel per slide', type: 'number', hint: 'Daftar panjang dipecah ke beberapa slide.' },
-      { key: 'tv_refresh_minutes', label: 'Muat ulang data tiap (menit)', type: 'number' },
+            { key: 'tv_refresh_minutes', label: 'Muat ulang data tiap (menit)', type: 'number' },
     ],
   },
 ];

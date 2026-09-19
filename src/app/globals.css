@@ -334,11 +334,22 @@ body {
 }
 
 /* ---------- Dashboard publik (/dashboard) — tanpa sidebar ---------- */
-.pub-root { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; background: var(--bg-canvas); color: var(--ink); }
+.pub-root {
+  /* tinggi PASTI, bukan min-height — kalau tumbuh mengikuti isi, .pub-main ikut
+     membesar dan tidak pernah meluap, sehingga tidak ada yang bisa digulir. */
+  height: 100vh; height: 100dvh;
+  display: flex; flex-direction: column; background: var(--bg-canvas); color: var(--ink);
+}
 .pub-top {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   height: var(--topbar-h); padding: 0 var(--pad-page); flex: none;
   background: var(--bg-surface); border-bottom: 1px solid var(--border);
   padding-top: env(safe-area-inset-top, 0px);
 }
-.pub-main { flex: 1; min-height: 0; padding: var(--pad-page); max-width: 1440px; width: 100%; margin-inline: auto; }
+.pub-main {
+  flex: 1; min-width: 0; min-height: 0;
+  /* html/body dikunci overflow:hidden, jadi area ini harus jadi scroller-nya sendiri
+     — sama seperti .app-main. Tanpa ini isi di bawah lipatan tidak bisa dijangkau. */
+  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable;
+}
+.pub-page { max-width: 1440px; width: 100%; margin-inline: auto; padding: var(--pad-page); }

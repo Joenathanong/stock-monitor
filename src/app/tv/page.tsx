@@ -12,9 +12,6 @@ import { doiLabel, doiTotalLabel, show1, show2 } from '@/components/ui';
  * Parameter URL: ?slide=15 (detik) &rows=12 (baris/slide) &key=<PUBLIC_TV_TOKEN>.
  */
 
-/** Tinggi satu baris tabel TV dan ruang tetap (header tabel + garis) — dipakai menghitung baris yang muat. */
-const TV_ROW_H = 47;
-const TABLE_CHROME_H = 96;
 
 type Row = {
   sku: string; name: string; abc: 'A' | 'B' | 'C'; stock: number; transit: number;
@@ -90,23 +87,40 @@ function Tv() {
   const mainRef = useRef<HTMLElement>(null);
   const [fitRows, setFitRows] = useState(12);
 
-  // Berapa baris yang benar-benar muat di layar ini — .tv-root overflow:hidden,
-  // jadi kelebihan baris akan terpotong, bukan bisa digulir.
+  // Berapa baris yang benar-benar muat — .tv-root overflow:hidden, jadi kelebihan
+  // baris terpotong dan tidak bisa digulir. Tinggi baris DIUKUR dari tabel yang
+  // sedang tampil, bukan ditebak angka tetap: ukuran teks TV ikut besar layar,
+  // jadi angka tetap pasti meleset di resolusi lain.
   useEffect(() => {
     const el = mainRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const measure = () => setFitRows(Math.max(4, Math.floor((el.clientHeight - TABLE_CHROME_H) / TV_ROW_H)));
+    const measure = () => {
+      const avail = el.clientHeight;
+      if (avail <= 0) return;
+      const tr = el.querySelector('.tv-table tbody tr');
+      const th = el.querySelector('.tv-table thead');
+      const rem = parseFloat(getComputedStyle(el).fontSize) || 16;
+      const rowH = tr ? tr.getBoundingClientRect().height : rem * 2.2;
+      const chrome = (th ? th.getBoundingClientRect().height : rem * 2.4) + rem * 0.8;
+      if (rowH <= 0) return;
+      const fit = Math.max(3, Math.floor((avail - chrome) / rowH));
+      setFitRows((prev) => (prev === fit ? prev : fit));
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    const t = setTimeout(measure, 250);   // ukur ulang setelah tabel benar-benar tergambar
+    return () => { ro.disconnect(); clearTimeout(t); };
+  }, [idx, data]);
 
   const slideSeconds = Number(params.get('slide')) || data?.tv.slideSeconds || 15;
-  const wantRows = Number(params.get('rows')) || data?.tv.rowsPerSlide || 12;
-  const rowsPerSlide = Math.max(4, Math.min(wantRows, fitRows));
+  // Jumlah baris mengikuti tinggi layar supaya slide terisi penuh — layar 1080p
+  // memuat jauh lebih banyak daripada 720p, dan memakai angka tetap menyisakan
+  // ruang kosong besar di layar besar. ?rows=N memaksa angka tertentu.
+  const forcedRows = Number(params.get('rows')) || 0;
+  const rowsPerSlide = Math.max(3, forcedRows || fitRows);
   // Daftar di slide ringkasan ikut menyusut agar tidak terdorong keluar layar.
-  const topSales = Math.max(3, Math.min(8, fitRows - 7));
+  const topSales = Math.max(3, Math.min(8, fitRows - 4));
   const refreshMinutes = data?.tv.refreshMinutes || 5;
 
   // muat ulang data berkala
@@ -134,8 +148,8 @@ function Tv() {
     out.push({
       key: 'ringkasan', title: 'Ringkasan DOI', subtitle: `Area ${set?.areaScope ?? ''} · ${nf(s.total.skuCount)} SKU`,
       render: () => (
-        <div className="grid h-full grid-rows-[auto_1fr] gap-5">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6 xl:gap-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="tv-kpis">
             {d1 ? <Kpi label={doiTotalLabel(1, disp)} value={`${doi(s.total.doi1)}`} unit="hari" hint="3 bln ex campaign" /> : null}
             {d2 ? <Kpi label={doiTotalLabel(2, disp)} value={`${doi(s.total.doi2)}`} unit="hari" hint="max 8w / 4w / 2w" /> : null}
             <Kpi label="Total stok" value={nf(s.total.stock)} unit="pcs" hint={`+ ${nf(s.total.transit)} transit`} />
@@ -143,7 +157,7 @@ function Tv() {
             <Kpi label="Overstock" value={nf(s.byStatus.OVERSTOCK)} unit="SKU" hint={`> ${set?.targetDoiDays ?? 14} hari`} tone="var(--accent-violet)" />
             <Kpi label="Produk baru" value={nf(s.npl)} unit="SKU" hint={`${nf(s.byStatus.NPL_WAIT)} data belum cukup`} tone="var(--primary)" />
           </div>
-          <div className="grid min-h-0 grid-cols-1 gap-3 overflow-y-auto md:grid-cols-2 xl:grid-cols-3 xl:gap-4 xl:overflow-hidden">
+          <div className="tv-panels min-h-0 flex-1">
             <Panel title="Status SKU">
               <Bars items={ORDER.map((k) => ({ label: STATUS_TEXT[k], value: s.byStatus[k] ?? 0, color: STATUS_COLOR[k] }))} />
             </Panel>
@@ -152,7 +166,7 @@ function Tv() {
               <div className="mt-4 text-[15px] text-label">Target DOI {set?.targetDoiDays} hari · safety {set?.safetyDays} hari · lead time default {set?.defaultLeadTimeDays} hari</div>
             </Panel>
             <Panel title="Analisis ABC (qty 3 bulan)">
-              <table className="tv-table">
+              <div className="tv-tablewrap tv-tablewrap-mini"><table className="tv-table tv-table-mini">
                 <thead><tr><th>Kelas</th><th className="num">SKU</th><th className="num">Pangsa</th><th className="num">Stok</th>{d1 ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}</tr></thead>
                 <tbody>
                   {(['A', 'B', 'C'] as const).map((c) => {
@@ -160,14 +174,14 @@ function Tv() {
                     return <tr key={c}><td><Abc cls={c} /></td><td className="num">{nf(k.count)}</td><td className="num">{tot ? nf((k.sales / tot) * 100, 1) : 0}%</td><td className="num">{nf(k.stock)}</td>{d1 ? <td className="num">{doi(k.total.doi1)}</td> : null}{d2 ? <td className="num">{doi(k.total.doi2)}</td> : null}</tr>;
                   })}
                 </tbody>
-              </table>
-              <div className="mt-5 mb-2 text-[17px] font-semibold text-ink">Penjualan tertinggi 3 bulan</div>
-              <div className="space-y-2">
+              </table></div>
+              <div className="tv-list-title">Penjualan tertinggi 3 bulan</div>
+              <div className="tv-list">
                 {[...rows].sort((a, b) => b.sales90 - a.sales90).slice(0, topSales).map((r, i) => (
-                  <div key={r.sku} className="grid grid-cols-[28px_1fr_auto_auto] items-center gap-3 text-[16px]">
-                    <span className="text-muted">{i + 1}.</span>
-                    <span className="truncate font-medium">{r.sku}</span>
-                    <span className="tabular-nums text-label">{nf(r.sales90)} pcs</span>
+                  <div key={r.sku} className="tv-list-row">
+                    <span className="tv-list-no">{i + 1}.</span>
+                    <span className="tv-list-sku" title={r.name}>{r.sku}</span>
+                    <span className="tv-list-val">{nf(r.sales90)} pcs</span>
                     <Chip status={r.status} />
                   </div>
                 ))}
@@ -185,11 +199,11 @@ function Tv() {
       out.push({
         key: `po-${p}`, title: 'Prioritas Open PO', subtitle: `${nf(po.length)} SKU kritis / low stock${poPages > 1 ? ` · halaman ${p + 1}/${poPages}` : ''}`,
         render: () => part.length ? (
-          <table className="tv-table">
-            <thead><tr><th>SKU</th><th>ABC</th><th className="num">Stok</th><th className="num">Transit</th><th className="num">ADS</th><th className="num">DOI</th><th className="num">DOI+T</th><th className="num">LT</th><th className="num">Saran Qty</th><th>Status</th></tr></thead>
+          <div className="tv-tablewrap"><table className="tv-table">
+            <thead><tr><th className="c-sku">SKU</th><th className="c-abc">ABC</th><th className="num">Stok</th><th className="num">Transit</th><th className="num">ADS</th><th className="num">DOI</th><th className="num">DOI+T</th><th className="num">LT</th><th className="num">Saran Qty</th><th className="c-status">Status</th></tr></thead>
             <tbody>{part.map((r) => (
               <tr key={r.sku}>
-                <td className="font-semibold" title={r.name}>{r.sku}</td>
+                <td className="sku" title={r.name}>{r.sku}</td>
                 <td><Abc cls={r.abc} /></td>
                 <td className="num">{nf(r.stock)}</td><td className="num">{r.transit ? nf(r.transit) : '—'}</td>
                 <td className="num">{nf(Math.max(r.ads1, r.ads2), 1)}</td>
@@ -197,7 +211,7 @@ function Tv() {
                 <td className="num">{r.lt}</td><td className="num font-bold">{nf(r.sug)}</td>
                 <td><Chip status={r.status} /></td>
               </tr>))}</tbody>
-          </table>
+          </table></div>
         ) : <Empty>Tidak ada SKU yang perlu open PO.</Empty>,
       });
     }
@@ -206,16 +220,16 @@ function Tv() {
     out.push({
       key: 'overstock', title: 'Overstock Terbesar', subtitle: `${nf(s.byStatus.OVERSTOCK)} SKU di atas ${set?.targetDoiDays ?? 14} hari`,
       render: () => over.length ? (
-        <table className="tv-table">
-          <thead><tr><th>SKU</th><th>ABC</th><th className="num">Stok</th>{d1 ? <th className="num">{doiLabel('ADS', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('ADS', 2, disp)}</th> : null}{d1 ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}<th className="num">Penjualan 3 bln</th></tr></thead>
+        <div className="tv-tablewrap"><table className="tv-table">
+          <thead><tr><th className="c-sku">SKU</th><th className="c-abc">ABC</th><th className="num">Stok</th>{d1 ? <th className="num">{doiLabel('ADS', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('ADS', 2, disp)}</th> : null}{d1 ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}<th className="num">Penjualan 3 bln</th></tr></thead>
           <tbody>{over.map((r) => (
             <tr key={r.sku}>
-              <td className="font-semibold" title={r.name}>{r.sku}</td>
+              <td className="sku" title={r.name}>{r.sku}</td>
               <td><Abc cls={r.abc} /></td>
               <td className="num font-bold">{nf(r.stock)}</td>{d1 ? <td className="num">{nf(r.ads1, 1)}</td> : null}{d2 ? <td className="num">{nf(r.ads2, 1)}</td> : null}
               {d1 ? <td className="num">{doi(r.doi1)}</td> : null}{d2 ? <td className="num">{doi(r.doi2)}</td> : null}<td className="num">{nf(r.sales90)}</td>
             </tr>))}</tbody>
-        </table>
+        </table></div>
       ) : <Empty>Tidak ada overstock.</Empty>,
     });
 
@@ -224,16 +238,16 @@ function Tv() {
       out.push({
         key: 'npl', title: 'Produk Baru (NPL)', subtitle: `${nf(s.npl)} SKU berumur jual < ${set?.nplDays ?? 90} hari`,
         render: () => (
-          <table className="tv-table">
-            <thead><tr><th>SKU</th><th>Jual pertama</th><th className="num">Umur</th><th className="num">Stok</th>{d1 ? <th className="num">{doiLabel('ADS', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('ADS', 2, disp)}</th> : null}<th className="num">DOI</th><th>Status</th></tr></thead>
+          <div className="tv-tablewrap"><table className="tv-table">
+            <thead><tr><th className="c-sku">SKU</th><th>Jual pertama</th><th className="num">Umur</th><th className="num">Stok</th>{d1 ? <th className="num">{doiLabel('ADS', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('ADS', 2, disp)}</th> : null}<th className="num">DOI</th><th className="c-status">Status</th></tr></thead>
             <tbody>{npl.map((r) => (
               <tr key={r.sku}>
-                <td className="font-semibold" title={r.name}>{r.sku}</td>
+                <td className="sku" title={r.name}>{r.sku}</td>
                 <td>{r.first}</td><td className="num">{r.age} hr</td><td className="num">{nf(r.stock)}</td>
                 {d1 ? <td className="num">{nf(r.ads1, 1)}</td> : null}{d2 ? <td className="num">{nf(r.ads2, 1)}</td> : null}<td className="num font-bold">{doi(r.refDoi)}</td>
                 <td><Chip status={r.status} /></td>
               </tr>))}</tbody>
-          </table>
+          </table></div>
         ),
       });
     }
@@ -243,14 +257,14 @@ function Tv() {
       out.push({
         key: 'dead', title: 'Dead Stock', subtitle: `${nf(s.byStatus.DEAD_STOCK)} SKU tanpa penjualan ${set?.deadStockWindowDays ?? 90} hari`,
         render: () => (
-          <table className="tv-table">
-            <thead><tr><th>SKU</th><th>ABC</th><th className="num">Stok</th><th>Jual terakhir diketahui</th><th>Saran</th></tr></thead>
+          <div className="tv-tablewrap"><table className="tv-table">
+            <thead><tr><th className="c-sku">SKU</th><th className="c-abc">ABC</th><th className="num">Stok</th><th>Jual terakhir diketahui</th><th>Saran</th></tr></thead>
             <tbody>{dead.map((r) => (
               <tr key={r.sku}>
-                <td className="font-semibold" title={r.name}>{r.sku}</td>
+                <td className="sku" title={r.name}>{r.sku}</td>
                 <td><Abc cls={r.abc} /></td><td className="num font-bold">{nf(r.stock)}</td><td>—</td><td>{r.action}</td>
               </tr>))}</tbody>
-          </table>
+          </table></div>
         ),
       });
     }
@@ -283,16 +297,16 @@ function Tv() {
     <div className="tv-root">
       <style>{TV_CSS}</style>
       <header className="tv-head">
-        <div className="flex items-center gap-4">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="tv-accent" />
-          <div>
-            <div className="text-[22px] font-bold leading-tight text-ink md:text-[28px]">{slide?.title ?? 'IEG DOI Monitor'}</div>
-            <div className="text-[15px] text-label">{slide?.subtitle ?? ''}</div>
+          <div className="min-w-0">
+            <div className="tv-title truncate">{slide?.title ?? 'IEG DOI Monitor'}</div>
+            <div className="tv-sub truncate">{slide?.subtitle ?? ''}</div>
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-[26px] font-semibold tabular-nums text-ink">{clock}</div>
-          <div className="text-[14px] text-label">
+        <div className="min-w-0">
+          <div className="tv-clock">{clock}</div>
+          <div className="tv-sub truncate text-right">
             {data?.computedAt ? <>Snapshot {data.snapshotDate} · dihitung {timeWib(data.computedAt)}</> : 'Belum ada snapshot'}
             {paused ? ' · JEDA' : ''}
           </div>
@@ -310,13 +324,13 @@ function Tv() {
           {slides.map((s, i) => <button key={s.key} className={`tv-dot ${i === safeIdx ? 'is-active' : ''}`} onClick={() => { setIdx(i); setTick((x) => x + 1); }} aria-label={s.title} />)}
         </div>
         <div className="tv-progress"><div key={`${safeIdx}-${tick}`} className={`tv-progress-bar ${paused ? 'is-paused' : ''}`} style={{ animationDuration: `${slideSeconds}s` }} /></div>
-        <div className="flex items-center gap-2 text-[13px] text-label">
-          <button className="tv-btn" onClick={() => { setIdx((i) => (i - 1 + slides.length) % Math.max(1, slides.length)); setTick((x) => x + 1); }}>‹</button>
+        <div className="flex min-w-0 items-center gap-2">
+          <button className="tv-btn" onClick={() => { setIdx((i) => (i - 1 + slides.length) % Math.max(1, slides.length)); setTick((x) => x + 1); }} aria-label="Slide sebelumnya">‹</button>
           <button className="tv-btn" onClick={() => setPaused((p) => !p)}>{paused ? 'Lanjut' : 'Jeda'}</button>
-          <button className="tv-btn" onClick={() => { setIdx((i) => (i + 1) % Math.max(1, slides.length)); setTick((x) => x + 1); }}>›</button>
+          <button className="tv-btn" onClick={() => { setIdx((i) => (i + 1) % Math.max(1, slides.length)); setTick((x) => x + 1); }} aria-label="Slide berikutnya">›</button>
           <button className="tv-btn" onClick={toggleFullscreen}>Layar penuh</button>
           <button className="tv-btn" onClick={toggleTheme} aria-label="Ganti tema">{theme === 'evening' ? '☀ Morning' : '☾ Evening'}</button>
-          <span className="ml-2 hidden lg:inline">{safeIdx + 1}/{slides.length} · {slideSeconds} dtk/slide · data tiap {refreshMinutes} mnt · IEG DOI Monitor</span>
+          <span className="tv-footnote ml-1">{safeIdx + 1}/{slides.length} · {slideSeconds} dtk/slide · data tiap {refreshMinutes} mnt</span>
         </div>
       </footer>
     </div>
@@ -331,28 +345,27 @@ function toggleFullscreen() {
 
 function Kpi({ label, value, unit, hint, tone }: { label: string; value: string; unit?: string; hint?: string; tone?: string }) {
   return (
-    <div className="tv-card min-w-0 px-5 py-4">
-      <div className="truncate text-[15px] font-medium text-label">{label}</div>
-      <div className="mt-1 flex min-w-0 items-baseline gap-2">
-        <span className="whitespace-nowrap font-bold leading-none tabular-nums" style={{ color: tone ?? 'var(--ink)', fontSize: 'clamp(20px, 2.15vw, 44px)' }}>{value}</span>
-        {unit ? <span className="shrink-0 text-[16px] text-label">{unit}</span> : null}
+    <div className="tv-card tv-kpi">
+      <div className="tv-kpi-label">{label}</div>
+      <div className="tv-kpi-value" style={{ color: tone ?? 'var(--ink)' }}>
+        {value}{unit ? <span className="tv-kpi-unit">{unit}</span> : null}
       </div>
-      {hint ? <div className="truncate mt-1 text-[14px] text-label" title={hint}>{hint}</div> : null}
+      {hint ? <div className="tv-kpi-hint" title={hint}>{hint}</div> : null}
     </div>
   );
 }
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div className="tv-card flex min-h-0 flex-col p-5"><div className="mb-3 text-[19px] font-semibold text-ink">{title}</div><div className="min-h-0 flex-1 overflow-y-auto">{children}</div></div>;
+  return <div className="tv-card tv-panel"><div className="tv-panel-title">{title}</div><div className="tv-panel-body">{children}</div></div>;
 }
 function Bars({ items }: { items: { label: string; value: number; color: string }[] }) {
   const max = Math.max(1, ...items.map((i) => i.value));
   return (
-    <div className="space-y-4">
+    <div className="tv-bars">
       {items.map((i) => (
-        <div key={i.label} className="grid grid-cols-[170px_1fr_80px] items-center gap-3 text-[19px]">
-          <div className="truncate text-label">{i.label}</div>
-          <div className="h-6 rounded" style={{ background: 'var(--chart-track)' }}><div className="h-6 rounded" style={{ width: `${(i.value / max) * 100}%`, background: i.color }} /></div>
-          <div className="text-right text-[22px] font-bold tabular-nums">{nf(i.value)}</div>
+        <div key={i.label} className="tv-bar-row">
+          <div className="tv-bar-label">{i.label}</div>
+          <div className="tv-bar-track"><div className="tv-bar-fill" style={{ width: `${(i.value / max) * 100}%`, background: i.color }} /></div>
+          <div className="tv-bar-value">{nf(i.value)}</div>
         </div>
       ))}
     </div>
@@ -371,41 +384,110 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 const TV_CSS = `
-.tv-root{height:100vh;height:100dvh;display:flex;flex-direction:column;background:var(--bg-canvas);color:var(--ink);overflow:hidden}
-.tv-head{display:flex;align-items:center;justify-content:space-between;height:88px;padding:0 32px;background:var(--bg-surface);border-bottom:1px solid var(--border);flex:none}
-.tv-accent{display:inline-block;width:5px;height:34px;border-radius:3px;background:var(--grad-brand)}
-.tv-main{flex:1;min-height:0;padding:20px 32px}
-.tv-slide{height:100%;animation:tvFade .45s ease}
-@keyframes tvFade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.tv-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow-0)}
-.tv-table{width:100%;border-collapse:separate;border-spacing:0;font-size:18px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;border-top:2px solid transparent;border-image:var(--grad-brand) 1}
+/* Semua ukuran memakai em dari .tv-root, dan font-size root ikut layar.
+   Satu angka yang berubah membuat seluruh slide ikut menyesuaikan — inilah yang
+   membuat tampilan tetap rapi dari 1280x720 sampai layar 4K. */
+.tv-root{
+  font-size:clamp(11px, 0.52vw + 0.55vh, 24px);
+  height:100vh;height:100dvh;display:flex;flex-direction:column;
+  background:var(--bg-canvas);color:var(--ink);overflow:hidden;
+}
+.tv-head{display:flex;align-items:center;justify-content:space-between;gap:1em;
+  min-height:3.6em;padding:.6em 1.6em;background:var(--bg-surface);border-bottom:1px solid var(--border);flex:none}
+.tv-title{font-size:1.9em;font-weight:700;line-height:1.15;letter-spacing:-.01em}
+.tv-sub{font-size:.95em;color:var(--ink-label);margin-top:.15em}
+.tv-clock{font-size:1.9em;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15;text-align:right}
+.tv-accent{display:inline-block;width:.25em;height:1.7em;border-radius:.15em;background:var(--grad-brand);flex:none}
+.tv-main{flex:1;min-height:0;padding:.9em 1.6em;display:flex;flex-direction:column}
+.tv-slide{flex:1;min-height:0;display:flex;flex-direction:column;animation:tvFade .4s ease}
+@keyframes tvFade{from{opacity:0;transform:translateY(.3em)}to{opacity:1;transform:none}}
+
+.tv-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow-0);min-width:0}
+
+/* KPI: jumlah kolom ikut lebar layar, tidak dipatok enam. */
+.tv-kpis{display:grid;gap:.7em;grid-template-columns:repeat(auto-fit,minmax(11em,1fr))}
+.tv-kpi{padding:.7em .9em;min-width:0}
+.tv-kpi-label{font-size:.92em;color:var(--ink-label);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tv-kpi-value{font-size:2.4em;font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tv-kpi-unit{font-size:.42em;font-weight:600;color:var(--ink-label);margin-left:.3em}
+.tv-kpi-hint{font-size:.85em;color:var(--ink-label);margin-top:.2em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Panel: melebar/menyempit sendiri, tidak dipatok tiga kolom. */
+.tv-panels{display:grid;gap:.7em;min-height:0;grid-template-columns:repeat(auto-fit,minmax(20em,1fr))}
+.tv-panel{display:flex;flex-direction:column;min-height:0;padding:.9em 1em}
+.tv-panel-title{font-size:1.15em;font-weight:700;margin-bottom:.6em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tv-panel-body{flex:1;min-height:0;overflow:hidden}
+
+/* Tabel: lebar kolom pasti, teks panjang dipotong rapi — bukan didorong keluar. */
+.tv-tablewrap{flex:1;min-height:0;overflow:hidden;border:1px solid var(--border);border-radius:var(--r-md);
+  border-top:2px solid transparent;border-image:var(--grad-brand) 1;background:var(--bg-surface)}
+.tv-table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:1.02em}
 .tv-table thead tr{background:var(--bg-surface-alt)}
-.tv-table th{font-size:14px;font-weight:600;color:var(--ink-label);letter-spacing:.04em;text-transform:uppercase;text-align:left;padding:12px 16px;border-bottom:1px solid var(--border-strong);white-space:nowrap}
-.tv-table td{padding:9px 16px;border-bottom:1px solid var(--border-subtle);white-space:nowrap}
+.tv-table th{font-size:.78em;font-weight:700;color:var(--ink-label);letter-spacing:.05em;text-transform:uppercase;
+  text-align:left;padding:.75em 1em;border-bottom:1px solid var(--border-strong);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.tv-table td{padding:.5em 1em;border-bottom:1px solid var(--border-subtle);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
 .tv-table tbody tr:last-child td{border-bottom:0}
+/* Tabel kecil di dalam panel: lebar kolom mengikuti isi, bukan dibagi rata —
+   kalau dipaksa rata, judul seperti "Pangsa" ikut terpotong di layar sempit. */
+.tv-table-mini{table-layout:auto;font-size:.92em}
+.tv-tablewrap-mini{flex:none;overflow:auto}
+.tv-table-mini th,.tv-table-mini td{padding:.4em .55em}
+.tv-table th.c-sku{width:24%}
+.tv-table th.c-abc{width:5.5em}
+.tv-table th.c-status{width:11.5em}
+.tv-table td .tv-chip{max-width:100%}
 .tv-table .num{text-align:right;font-variant-numeric:tabular-nums}
-.tv-chip{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 12px;border-radius:999px;font-size:14px;font-weight:600;border:1px solid;white-space:nowrap}
-.tv-chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.tv-table .sku{font-weight:600}
+.tv-table th.num{text-align:right}
+
+.tv-chip{display:inline-flex;align-items:center;gap:.4em;padding:.15em .6em;border-radius:999px;
+  font-size:.82em;font-weight:700;border:1px solid;white-space:nowrap;max-width:100%}
+.tv-chip::before{content:"";width:.42em;height:.42em;border-radius:50%;background:currentColor;flex:none}
 .tv-chip-plain::before{content:none}
-.tv-foot{display:flex;align-items:center;gap:20px;height:56px;padding:0 32px;background:var(--bg-sunken);border-top:1px solid var(--border-subtle);flex:none;padding-bottom:env(safe-area-inset-bottom,0px)}
-.tv-dot{width:10px;height:10px;border-radius:50%;background:var(--primary-border);border:0;cursor:pointer;padding:0}
-.tv-dot.is-active{background:var(--primary);width:26px;border-radius:6px}
-.tv-progress{flex:1;height:4px;border-radius:2px;background:var(--chart-track);overflow:hidden}
+
+.tv-list-title{font-size:1.05em;font-weight:700;margin:.9em 0 .45em}
+.tv-list{display:flex;flex-direction:column;gap:.3em}
+.tv-list-row{display:grid;grid-template-columns:1.6em minmax(0,1fr) auto auto;align-items:center;gap:.6em;font-size:.95em}
+.tv-list-no{color:var(--ink-muted);font-variant-numeric:tabular-nums}
+.tv-list-sku{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tv-list-val{color:var(--ink-label);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tv-bars{display:flex;flex-direction:column;gap:.55em}
+.tv-bar-row{display:grid;grid-template-columns:minmax(5em,8em) 1fr minmax(2.5em,4em);align-items:center;gap:.6em;font-size:1em}
+.tv-bar-label{color:var(--ink-label);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tv-bar-track{height:1.1em;border-radius:.3em;background:var(--chart-track);overflow:hidden}
+.tv-bar-fill{height:100%;border-radius:.3em}
+.tv-bar-value{text-align:right;font-size:1.05em;font-weight:700;font-variant-numeric:tabular-nums}
+
+.tv-foot{display:flex;align-items:center;gap:1em;min-height:2.6em;padding:.3em 1.6em;background:var(--bg-sunken);
+  border-top:1px solid var(--border-subtle);flex:none;padding-bottom:max(.3em,env(safe-area-inset-bottom,0px))}
+.tv-dot{width:.55em;height:.55em;border-radius:50%;background:var(--primary-border);border:0;cursor:pointer;padding:0;flex:none}
+.tv-dot.is-active{background:var(--primary);width:1.5em;border-radius:.3em}
+.tv-progress{flex:1;height:.22em;border-radius:.11em;background:var(--chart-track);overflow:hidden;min-width:3em}
 .tv-progress-bar{height:100%;width:0;background:var(--grad-brand);animation:tvGrow linear forwards}
 .tv-progress-bar.is-paused{animation-play-state:paused}
 @keyframes tvGrow{from{width:0}to{width:100%}}
-.tv-btn{height:max(30px,var(--tap));padding:0 12px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--bg-surface);color:var(--primary);font-size:13px;font-weight:500;cursor:pointer}
+.tv-btn{min-height:2em;padding:0 .7em;border:1px solid var(--border);border-radius:var(--r-sm);
+  background:var(--bg-surface);color:var(--primary);font-size:.85em;font-weight:600;cursor:pointer;white-space:nowrap}
 .tv-btn:hover{background:var(--primary-subtle)}
 .tv-btn:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
-@media (max-width:1023.98px){
-  .tv-head{height:auto;min-height:64px;padding:8px 16px}
-  .tv-main{padding:12px 16px}
-  .tv-foot{padding:0 16px}
-  .tv-table{font-size:15px}
-  .tv-table th,.tv-table td{padding:8px 10px}
+.tv-footnote{font-size:.82em;color:var(--ink-label);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Layar sempit: yang tidak penting disingkirkan supaya angka tetap terbaca. */
+@media (max-width:900px){
+  .tv-head{padding:.5em .9em}
+  .tv-main{padding:.6em .9em}
+  .tv-foot{padding:.3em .9em}
+  .tv-table th,.tv-table td{padding:.45em .6em}
+  .tv-footnote{display:none}
 }
-@media (max-width:767.98px){
-  .tv-head > div:last-child{display:none}
-  .tv-foot span{display:none}
+@media (max-width:640px){
+  .tv-clock{font-size:1.4em}
+  .tv-panels{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  .tv-slide{animation:none}
+  .tv-progress-bar{animation:none;width:100%}
 }
 `;

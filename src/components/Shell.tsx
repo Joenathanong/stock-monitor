@@ -9,7 +9,7 @@ import { getTheme, setTheme, type Theme } from '@/lib/theme';
  * sidebar satu komponen tiga mode — Drawer (<768) · Rail (768–1279) · Expanded (≥1280,
  * boleh diciutkan & disimpan) — tombol tema Morning/Evening di topbar.
  */
-type Item = { href: string; label: string; module: string; icon: keyof typeof ICONS; admin?: boolean; group: string };
+type Item = { href: string; label: string; module: string; icon: keyof typeof ICONS; admin?: boolean; group: string; hidden?: boolean };
 const LINKS: Item[] = [
   { href: '/', label: 'Dashboard', module: 'Ringkasan', icon: 'home', group: 'Monitoring' },
   { href: '/monitoring', label: 'Tabel DOI', module: 'Perhitungan', icon: 'table', group: 'Monitoring' },
@@ -20,6 +20,8 @@ const LINKS: Item[] = [
   { href: '/settings', label: 'Pengaturan', module: 'Sistem', icon: 'cog', admin: true, group: 'Sistem' },
   { href: '/users', label: 'Pengguna', module: 'Sistem', icon: 'users', admin: true, group: 'Sistem' },
   { href: '/account', label: 'Akun Saya', module: 'Sistem', icon: 'user', group: 'Sistem' },
+  // Halaman anak — tidak tampil di menu, tapi judul topbar tetap benar.
+  { href: '/sku', label: 'Analisis SKU', module: 'Perhitungan', icon: 'chart', group: 'Monitoring', hidden: true },
 ];
 
 const ICONS = {
@@ -107,7 +109,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   if (bare) return <>{children}</>;
 
   const current = LINKS.find((l) => (l.href === '/' ? path === '/' : path.startsWith(l.href)));
-  const visible = LINKS.filter((l) => !l.admin || me?.role === 'ADMIN');
+  const visible = LINKS.filter((l) => !l.hidden && (!l.admin || me?.role === 'ADMIN'));
   const groups = [...new Set(visible.map((l) => l.group))];
   // Mode sidebar: Drawer (<768, tampil penuh di dalam drawer) · Rail (768–1279 selalu, atau diciutkan di ≥1280) · Expanded
   const mode: 'expanded' | 'rail' = narrow ? 'expanded' : !wide ? 'rail' : collapsed ? 'rail' : 'expanded';

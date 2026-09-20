@@ -177,12 +177,14 @@ body {
 
 @layer components {
   .page-title { @apply flex items-center gap-3 text-[24px] font-bold text-ink; }
-  .page-title::before { content: ""; width: 4px; height: 22px; border-radius: 2px; background: var(--grad-brand); }
+  .page-title::before { content: ""; width: 4px; height: 22px; border-radius: 2px; background: var(--grad-brand); flex: none; }
   @media (max-width: 767.98px) { .page-title { font-size: 20px; } }
 
   .card { @apply rounded-card border bg-surface shadow-e0; }
   .card-pad { @apply p-3 sm:p-4 lg:p-5; }
   .card-title { @apply text-[15px] font-semibold text-ink; }
+  .card-head { @apply flex flex-wrap items-baseline justify-between gap-2 px-4 py-3; border-bottom: 1px solid var(--border-subtle); }
+  .card-body { @apply p-4; }
 
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-control border bg-surface px-3 text-[13px] font-medium text-primary
@@ -353,3 +355,25 @@ body {
   overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable;
 }
 .pub-page { max-width: 1440px; width: 100%; margin-inline: auto; padding: var(--pad-page); }
+
+/* ---------- Grafik analisis SKU ---------- */
+.chart-wrap { position: relative; width: 100%; }
+.chart-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart-tip {
+  position: absolute; top: 4px; transform: translateX(-50%);
+  min-width: 128px; padding: 7px 10px; pointer-events: none; z-index: var(--z-tooltip);
+  background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md);
+  box-shadow: var(--shadow-1); font-size: 12px; line-height: 1.45; color: var(--ink); white-space: nowrap;
+}
+/* Batang bertumpuk: celah 2px berwarna permukaan memisahkan segmen, bukan garis. */
+.split-bar {
+  display: flex; width: 100%; height: 20px; border-radius: 6px; overflow: hidden;
+  background: var(--chart-track); gap: 2px;
+}
+.split-bar > span { display: block; min-width: 3px; height: 100%; }
+.split-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+/* Kartu angka ringkas di atas grafik */
+.stat-tile { background: var(--bg-surface-alt); border: 1px solid var(--border-subtle); border-radius: var(--r-md); padding: 10px 12px; }
+.stat-tile .k { font-size: 11.5px; font-weight: 500; color: var(--ink-label); }
+.stat-tile .v { margin-top: 2px; font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
+.stat-tile .h { margin-top: 1px; font-size: 11.5px; color: var(--ink-label); }

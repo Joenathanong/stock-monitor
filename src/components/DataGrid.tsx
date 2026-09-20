@@ -4,7 +4,9 @@
  * Wajib di setiap tabel: sort (klik label, Shift = bertingkat), filter per kolom
  * (popover operator), lebar kolom bisa ditarik (pointer events, <col>), menu Kolom,
  * pencarian global, klik ganda sel = salin, dan penyimpanan tampilan
- * di localStorage['ieg-grid2:<id>'] = {widths, sort, filters, hidden}.
+ * di localStorage['ieg-grid3:<id>'] = {widths, sort, filters, hidden}.
+ * Bawaannya tabel selebar kontainer; lebar kolom baru dipakai kalau pemakai
+ * menariknya sendiri (klik ganda gagang = paskan satu kolom ke isinya).
  * Di bawah 768px baris menjadi kartu; resize dimatikan, sort/filter lewat toolbar.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -120,7 +122,7 @@ const FunnelIcon = () => (
 export function DataGrid<T>(props: DataGridProps<T>) {
   const { id, rows, columns, rowKey, expanded, renderExpanded, onRowClick, rowClass, pageSize = 100, compact, emptyText, loading, toolbarExtra, preFilter, footerNote } = props;
   // v2: kunci dinaikkan agar lebar kolom lama yang rusak tidak ikut terbawa.
-  const storeKey = `ieg-grid2:${id}`;
+  const storeKey = `ieg-grid3:${id}`;
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [sort, setSort] = useState<SortEntry[]>([]);
   const [filters, setFilters] = useState<Record<string, Filter>>({});
@@ -131,8 +133,12 @@ export function DataGrid<T>(props: DataGridProps<T>) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // Bawaan: tabel selalu selebar kontainer. Lebar kolom hanya berubah kalau
+  // pemakai menariknya sendiri (atau klik ganda gagang = pas isi satu kolom).
   const [fill, setFill] = useState(true);
-  const autoFitted = useRef(false);
+  // Lebar minimum tiap kolom supaya JUDULNYA tidak terpotong jadi "Sa…".
+  // Bukan auto-fit isi — hanya menjaga kepala tabel tetap terbaca.
+  const [headerMin, setHeaderMin] = useState<Record<string, number>>({});
   const tableRef = useRef<HTMLTableElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -142,7 +148,7 @@ export function DataGrid<T>(props: DataGridProps<T>) {
       const raw = localStorage.getItem(storeKey);
       if (raw) {
         const s = JSON.parse(raw) as Saved;
-        if (s.widths && Object.keys(s.widths).length) { setWidths(s.widths); setFill(false); autoFitted.current = true; }
+        if (s.widths && Object.keys(s.widths).length) { setWidths(s.widths); setFill(false); }
         if (s.sort) setSort(s.sort);
         if (s.filters) setFilters(s.filters);
         if (s.hidden) setHidden(s.hidden);
@@ -258,18 +264,36 @@ export function DataGrid<T>(props: DataGridProps<T>) {
     setFill(false);
   }, [visibleCols, processed]);
 
-  // Lebar kolom mengikuti isi secara otomatis saat data pertama kali masuk.
+  /**
+   * Judul kolom diukur sekali lewat canvas: teks 600 11px + cadangan 52px untuk
+   * padding (16) serta ikon urut & filter beserta jaraknya (36). Hasilnya dipakai
+   * sebagai lantai lebar kolom, jadi label pendek seperti "LT" atau "Saran 1"
+   * tidak perlu ditulis lebarnya satu per satu di tiap halaman.
+   */
   useEffect(() => {
-    if (!loaded || autoFitted.current || loading || !processed.length) return;
-    autoFitted.current = true;
-    autoFit();
-  }, [loaded, loading, processed.length, autoFit]);
+    const ctx = document.createElement('canvas').getContext('2d');
+    if (!ctx) return;
+    const font = getComputedStyle(tableRef.current ?? document.body);
+    ctx.font = `600 11px ${font.fontFamily}`;
+    const next: Record<string, number> = {};
+    for (const c of visibleCols) next[c.key] = Math.ceil(ctx.measureText(c.label).width) + 52;
+    setHeaderMin((prev) => {
+      const sama = Object.keys(next).length === Object.keys(prev).length
+        && Object.entries(next).every(([k, v]) => prev[k] === v);
+      return sama ? prev : next;
+    });
+  }, [visibleCols]);
 
-  const totalW = visibleCols.reduce((a, c) => a + (widths[c.key] ?? c.width ?? 120), 0);
+  /** Lebar kolom yang dipakai: tarikan pemakai > lebar bawaan, tapi tidak pernah di bawah lantai judul. */
+  const colW = useCallback(
+    (c: Column<T>) => widths[c.key] ?? Math.max(c.width ?? 120, headerMin[c.key] ?? 0),
+    [widths, headerMin],
+  );
+
+  const totalW = visibleCols.reduce((a, c) => a + colW(c), 0);
 
   function resetView() {
     setWidths({}); setSort([]); setFilters({}); setHidden([]); setFill(true);
-    autoFitted.current = false;
     try { localStorage.removeItem(storeKey); } catch { /* ignore */ }
   }
 
@@ -319,8 +343,6 @@ export function DataGrid<T>(props: DataGridProps<T>) {
       {!compact ? (
         <div className="grid-toolbar">
           <input className="input grid-search" placeholder="Cari di semua kolom …" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Pencarian global" />
-          <button className="btn btn-sm hidden md:inline-flex" onClick={() => autoFit()} title="Lebar kolom mengikuti isi">Lebar otomatis</button>
-          <button className="btn btn-sm hidden md:inline-flex" onClick={() => { setWidths({}); setFill(true); }} title="Regangkan ke lebar kontainer">Lebar penuh</button>
           <button className="btn btn-sm" data-colmenu onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setPop(null); setMenu(menu ? null : { x: Math.min(r.left, window.innerWidth - 220), y: r.bottom + 4 }); }} aria-haspopup="menu" aria-expanded={!!menu}>Kolom</button>
           <select className="input md:hidden" style={{ width: 'auto' }} aria-label="Urutkan" value={sort[0] ? `${sort[0].key}:${sort[0].dir}` : ''} onChange={(e) => { const [k, d] = e.target.value.split(':'); setSort(k ? [{ key: k, dir: d as 'asc' | 'desc' }] : []); }}>
             <option value="">Urutkan…</option>
@@ -344,7 +366,7 @@ export function DataGrid<T>(props: DataGridProps<T>) {
 
       <div ref={scrollRef} className="grid-scroll">
         <table ref={tableRef} className="dgrid" style={fill ? { width: '100%' } : { width: totalW, minWidth: '100%' }}>
-          <colgroup>{visibleCols.map((c) => <col key={c.key} style={{ width: widths[c.key] ?? c.width ?? undefined }} />)}</colgroup>
+          <colgroup>{visibleCols.map((c) => <col key={c.key} style={{ width: colW(c) }} />)}</colgroup>
           <thead>
             <tr>
               {visibleCols.map((c) => {

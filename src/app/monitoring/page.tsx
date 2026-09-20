@@ -1,5 +1,6 @@
 'use client';
 import { Suspense, useCallback, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { AbcChip, Alert, Empty, RefreshButton, STATUS_ORDER, STATUS_TEXT, StatusChip, doiLabel, fmt, fmtDateTime, fmtDoi, show1, show2, useApi } from '@/components/ui';
 import { DataGrid, type Column } from '@/components/DataGrid';
@@ -132,6 +133,12 @@ function Detail({ r, earliest, disp }: { r: SnapshotRow; earliest: string | null
   const truncated = !!r.firstSalesDate && !!earliest && r.firstSalesDate <= earliest;
   return (
     <div className="grid gap-4 py-2 text-[12.5px] md:grid-cols-2 xl:grid-cols-4">
+      <div className="md:col-span-2 xl:col-span-4">
+        <Link className="btn btn-sm btn-primary" href={`/sku/${encodeURIComponent(r.sku)}`}>
+          Analisis lengkap SKU ini →
+        </Link>
+        <span className="ml-2 text-label">grafik penjualan harian, riwayat stok & DOI, pecahan platform</span>
+      </div>
       {show1(disp) ? (
       <div>
         <div className="font-semibold text-primary">Opsi 1 — 3 bulan ex campaign</div>

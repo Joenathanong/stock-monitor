@@ -21,7 +21,7 @@ function Monitoring() {
   const { data, error, loading, reload } = useApi<Resp>('/api/monitoring');
   const [status, setStatus] = useState(params.get('status') || 'ALL');
   const [abc, setAbc] = useState('ALL');
-  const [nplOnly, setNplOnly] = useState(false);
+  const [nplOnly, setNplOnly] = useState(params.get('npl') === '1');
   const [hidePhaseOut, setHidePhaseOut] = useState(true);
   const [open, setOpen] = useState<string | null>(null);
   const earliest = data?.earliestDataDate ?? null;

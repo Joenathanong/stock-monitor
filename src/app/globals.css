@@ -277,6 +277,9 @@ body {
 .grid-chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: var(--r-pill); font-size: 11px; font-weight: 600; background: var(--primary-subtle); color: var(--primary-subtle-fg); border: 1px solid var(--primary-border); }
 .grid-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
 .grid-scroll { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-gutter: stable; }
+/* Tabel kecil yang ditulis tangan (tanpa <colgroup>): biarkan lebar mengikuti isi,
+   kalau tidak 6 kolom dibagi rata dan judul seperti "Pangsa" ikut terpotong. */
+.dgrid-auto { table-layout: auto; }
 .dgrid { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: var(--grid-fs); color: var(--ink); }
 .dgrid th { position: sticky; top: 0; z-index: var(--z-sticky); background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 8px; font-size: 11px; font-weight: 600; color: var(--ink-label); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dgrid th.num, .dgrid td.num { text-align: right; font-variant-numeric: tabular-nums; }

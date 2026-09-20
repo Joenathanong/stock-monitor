@@ -143,6 +143,8 @@ export type DashboardView = {
   summary: HealthSummary | null; settings: DoiSettings | null;
   exclusions: { date: DateKey; reason: string }[]; earliestDataDate: DateKey | null;
   po: SnapshotRow[]; overstock: SnapshotRow[]; npl: SnapshotRow[]; phaseOut: SnapshotRow[];
+  /** Jumlah SEBENARNYA tiap kelompok — daftar di atas hanya potongan teratas. */
+  counts: { po: number; overstock: number; npl: number; phaseOut: number };
 };
 
 /**
@@ -185,7 +187,7 @@ function normalizeSummary(sum: HealthSummary | null): HealthSummary | null {
  */
 export async function dashboardView(): Promise<DashboardView> {
   const summary = await prisma.doiSummary.findFirst({ orderBy: { snapshotDate: 'desc' } });
-  const empty = { snapshotDate: null, computedAt: null, trigger: null, summary: null, settings: null, exclusions: [], earliestDataDate: null, po: [], overstock: [], npl: [], phaseOut: [] };
+  const empty = { snapshotDate: null, computedAt: null, trigger: null, summary: null, settings: null, exclusions: [], earliestDataDate: null, po: [], overstock: [], npl: [], phaseOut: [], counts: { po: 0, overstock: 0, npl: 0, phaseOut: 0 } };
   if (!summary) return empty;
 
   const payload = JSON.parse(summary.payload) as {
@@ -194,6 +196,14 @@ export async function dashboardView(): Promise<DashboardView> {
   const snap = await latestSnapshot();
 
   const byRefDoi = (a: SnapshotRow, b: SnapshotRow) => (a.refDoi ?? 0) - (b.refDoi ?? 0) || b.sales90 - a.sales90;
+
+  // Dipilah dulu, baru dipotong — supaya dashboard bisa menyebut "25 dari 148"
+  // dan tidak terlihat seolah datanya hilang dibanding Tabel DOI.
+  const semuaPo = snap.rows.filter((r) => r.status === 'CRITICAL' || r.status === 'LOW');
+  const semuaOver = snap.rows.filter((r) => r.status === 'OVERSTOCK');
+  const semuaNpl = snap.rows.filter((r) => r.isNpl);
+  const semuaPhaseOut = snap.rows.filter((r) => r.status === 'PHASE_OUT');
+
   return {
     snapshotDate: toDateKeyUtc(summary.snapshotDate),
     computedAt: summary.computedAt.toISOString(),
@@ -202,10 +212,11 @@ export async function dashboardView(): Promise<DashboardView> {
     settings: await withLiveDisplay(payload.settings ?? null),
     exclusions: payload.exclusions ?? [],
     earliestDataDate: payload.earliestDataDate ?? null,
-    po: snap.rows.filter((r) => r.status === 'CRITICAL' || r.status === 'LOW').sort(byRefDoi).slice(0, 25),
-    overstock: snap.rows.filter((r) => r.status === 'OVERSTOCK').sort((a, b) => b.availableQty - a.availableQty).slice(0, 12),
-    npl: snap.rows.filter((r) => r.isNpl).sort((a, b) => (b.ageDays ?? 0) - (a.ageDays ?? 0)).slice(0, 10),
-    phaseOut: snap.rows.filter((r) => r.status === 'PHASE_OUT').sort((a, b) => (b.phaseOutLateDays ?? 0) - (a.phaseOutLateDays ?? 0) || (b.phaseOutExcessQty ?? 0) - (a.phaseOutExcessQty ?? 0)).slice(0, 10),
+    po: [...semuaPo].sort(byRefDoi).slice(0, 25),
+    overstock: [...semuaOver].sort((a, b) => b.availableQty - a.availableQty).slice(0, 25),
+    npl: [...semuaNpl].sort((a, b) => (b.ageDays ?? 0) - (a.ageDays ?? 0)).slice(0, 25),
+    phaseOut: [...semuaPhaseOut].sort((a, b) => (b.phaseOutLateDays ?? 0) - (a.phaseOutLateDays ?? 0) || (b.phaseOutExcessQty ?? 0) - (a.phaseOutExcessQty ?? 0)).slice(0, 25),
+    counts: { po: semuaPo.length, overstock: semuaOver.length, npl: semuaNpl.length, phaseOut: semuaPhaseOut.length },
   };
 }
 

@@ -62,6 +62,14 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
   const npl = data?.npl ?? [];
   const phaseOut = data?.phaseOut ?? [];
 
+  // Panel dashboard hanya memuat potongan teratas; tanpa keterangan ini jumlahnya
+  // terlihat berbeda dari Tabel DOI dan seolah ada data yang hilang.
+  const counts = data?.counts;
+  const sisa = (tampil: unknown[], total: number | undefined) =>
+    total !== undefined && total > tampil.length
+      ? <div className="mt-0.5 text-[12px] text-label">{fmt(tampil.length)} teratas dari {fmt(total)} SKU</div>
+      : null;
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -114,8 +122,8 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
             </div>
             <div className="card overflow-hidden">
               <div className="card-title px-4 pt-4">Analisis ABC (qty 3 bulan)</div>
-              <div className="table-scroll"><table className="dgrid mt-2">
-                <thead><tr><th>Kelas</th><th className="num">SKU</th><th className="num">Pangsa</th><th className="num">Stok</th>{show1(disp) ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{show2(disp) ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}</tr></thead>
+              <div className="table-scroll"><table className="dgrid dgrid-auto mt-2">
+                <thead><tr><th>Kelas</th><th className="num">SKU</th><th className="num" title="Pangsa penjualan 3 bulan">%</th><th className="num">Stok</th>{show1(disp) ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{show2(disp) ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}</tr></thead>
                 <tbody>
                   {(['A', 'B', 'C'] as const).map((c) => {
                     const k = s.byAbc[c];
@@ -139,9 +147,12 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
 
           <div className="space-y-4">
             <div className="card overflow-hidden">
-              <div className="flex items-center justify-between px-4 pt-4">
-                <div className="card-title">Prioritas open PO</div>
-                {readOnly ? null : <Link href="/monitoring?status=CRITICAL" className="text-[12.5px] text-primary hover:underline">Lihat semua →</Link>}
+              <div className="flex items-start justify-between gap-3 px-4 pt-4">
+                <div>
+                  <div className="card-title">Prioritas open PO</div>
+                  {sisa(critical, counts?.po)}
+                </div>
+                {readOnly ? null : <Link href="/monitoring?status=PO" className="shrink-0 text-[12.5px] text-primary hover:underline">Lihat semua →</Link>}
               </div>
               <div className="p-3">
                 <DataGrid<SnapshotRow> id="dash-po" compact rows={critical} columns={PO_COLS} rowKey={(r) => r.sku} emptyText="Tidak ada SKU kritis / low stock." />
@@ -150,14 +161,23 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
 
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="card overflow-hidden">
-                <div className="flex items-center justify-between px-4 pt-4">
-                  <div className="card-title">Overstock terbesar</div>
-                  {readOnly ? null : <Link href="/monitoring?status=OVERSTOCK" className="text-[12.5px] text-primary hover:underline">Lihat semua →</Link>}
+                <div className="flex items-start justify-between gap-3 px-4 pt-4">
+                  <div>
+                    <div className="card-title">Overstock terbesar</div>
+                    {sisa(overstock, counts?.overstock)}
+                  </div>
+                  {readOnly ? null : <Link href="/monitoring?status=OVERSTOCK" className="shrink-0 text-[12.5px] text-primary hover:underline">Lihat semua →</Link>}
                 </div>
                 <div className="p-3"><DataGrid<SnapshotRow> id="dash-over" compact rows={overstock} columns={OVER_COLS} rowKey={(r) => r.sku} emptyText="Tidak ada overstock." /></div>
               </div>
               <div className="card overflow-hidden">
-                <div className="card-title px-4 pt-4">Produk baru (NPL)</div>
+                <div className="flex items-start justify-between gap-3 px-4 pt-4">
+                  <div>
+                    <div className="card-title">Produk baru (NPL)</div>
+                    {sisa(npl, counts?.npl)}
+                  </div>
+                  {readOnly ? null : <Link href="/monitoring?npl=1" className="shrink-0 text-[12.5px] text-primary hover:underline">Lihat semua →</Link>}
+                </div>
                 <div className="p-3"><DataGrid<SnapshotRow> id="dash-npl" compact rows={npl} columns={NPL_COLS} rowKey={(r) => r.sku} emptyText="Tidak ada produk baru." /></div>
               </div>
             </div>
@@ -171,8 +191,14 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
                       {fmt(poSum.count)} SKU · stok {fmt(poSum.stock)} pcs · perkiraan sisa saat target {fmt(poSum.excessQty)} pcs
                       {poSum.lateCount ? <span className="text-negative"> · {fmt(poSum.lateCount)} melewati target</span> : null}
                     </div>
+                    {sisa(phaseOut, counts?.phaseOut)}
                   </div>
-                  {readOnly ? null : <Link href="/phase-out" className="text-[12.5px] text-primary hover:underline">Kelola →</Link>}
+                  {readOnly ? null : (
+                    <span className="flex shrink-0 items-center gap-3 text-[12.5px]">
+                      <Link href="/monitoring?status=PHASE_OUT" className="text-primary hover:underline">Lihat semua →</Link>
+                      <Link href="/phase-out" className="text-primary hover:underline">Kelola →</Link>
+                    </span>
+                  )}
                 </div>
                 <div className="p-3"><DataGrid<SnapshotRow> id="dash-phaseout" compact rows={phaseOut} columns={PO_OUT_COLS} rowKey={(r) => r.sku} emptyText="Tidak ada." /></div>
               </div>

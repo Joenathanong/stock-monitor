@@ -143,9 +143,32 @@ export type DashboardView = {
   summary: HealthSummary | null; settings: DoiSettings | null;
   exclusions: { date: DateKey; reason: string }[]; earliestDataDate: DateKey | null;
   po: SnapshotRow[]; overstock: SnapshotRow[]; npl: SnapshotRow[]; phaseOut: SnapshotRow[];
-  /** Jumlah SEBENARNYA tiap kelompok — daftar di atas hanya potongan teratas. */
-  counts: { po: number; overstock: number; npl: number; phaseOut: number };
+  /**
+   * Resume tiap kelompok, dihitung dari SELURUH barisnya — bukan dari 20/25 baris
+   * yang dikirim. Tanpa ini angka resume ikut terpotong dan menyesatkan.
+   */
+  totals: { po: GroupTotals; overstock: GroupTotals; npl: GroupTotals; phaseOut: GroupTotals };
 };
+
+export type GroupTotals = {
+  count: number; stock: number; transit: number; sales90: number;
+  suggested: number; excessQty: number; lateCount: number;
+};
+
+const groupTotals = (rows: SnapshotRow[]): GroupTotals => ({
+  count: rows.length,
+  stock: rows.reduce((a, r) => a + r.availableQty, 0),
+  transit: rows.reduce((a, r) => a + r.transitQty, 0),
+  sales90: rows.reduce((a, r) => a + r.sales90, 0),
+  suggested: rows.reduce((a, r) => a + Math.max(r.suggested1, r.suggested2), 0),
+  excessQty: rows.reduce((a, r) => a + (r.phaseOutExcessQty ?? 0), 0),
+  lateCount: rows.filter((r) => (r.phaseOutLateDays ?? 0) > 0).length,
+});
+
+const NOL: GroupTotals = { count: 0, stock: 0, transit: 0, sales90: 0, suggested: 0, excessQty: 0, lateCount: 0 };
+/** Panel qty-terbesar mengirim 20 baris; prioritas open PO 25 karena urutannya soal urgensi. */
+export const TOP_QTY = 20;
+export const TOP_PO = 25;
 
 /**
  * Snapshot yang dihitung sebelum fitur phase out tidak punya `phaseOut` dan
@@ -187,7 +210,7 @@ function normalizeSummary(sum: HealthSummary | null): HealthSummary | null {
  */
 export async function dashboardView(): Promise<DashboardView> {
   const summary = await prisma.doiSummary.findFirst({ orderBy: { snapshotDate: 'desc' } });
-  const empty = { snapshotDate: null, computedAt: null, trigger: null, summary: null, settings: null, exclusions: [], earliestDataDate: null, po: [], overstock: [], npl: [], phaseOut: [], counts: { po: 0, overstock: 0, npl: 0, phaseOut: 0 } };
+  const empty = { snapshotDate: null, computedAt: null, trigger: null, summary: null, settings: null, exclusions: [], earliestDataDate: null, po: [], overstock: [], npl: [], phaseOut: [], totals: { po: NOL, overstock: NOL, npl: NOL, phaseOut: NOL } };
   if (!summary) return empty;
 
   const payload = JSON.parse(summary.payload) as {
@@ -196,6 +219,8 @@ export async function dashboardView(): Promise<DashboardView> {
   const snap = await latestSnapshot();
 
   const byRefDoi = (a: SnapshotRow, b: SnapshotRow) => (a.refDoi ?? 0) - (b.refDoi ?? 0) || b.sales90 - a.sales90;
+  // Qty stok terbesar; kalau seri, yang penjualannya lebih besar duluan.
+  const byQty = (a: SnapshotRow, b: SnapshotRow) => b.availableQty - a.availableQty || b.sales90 - a.sales90;
 
   // Dipilah dulu, baru dipotong — supaya dashboard bisa menyebut "25 dari 148"
   // dan tidak terlihat seolah datanya hilang dibanding Tabel DOI.
@@ -212,11 +237,17 @@ export async function dashboardView(): Promise<DashboardView> {
     settings: await withLiveDisplay(payload.settings ?? null),
     exclusions: payload.exclusions ?? [],
     earliestDataDate: payload.earliestDataDate ?? null,
-    po: [...semuaPo].sort(byRefDoi).slice(0, 25),
-    overstock: [...semuaOver].sort((a, b) => b.availableQty - a.availableQty).slice(0, 25),
-    npl: [...semuaNpl].sort((a, b) => (b.ageDays ?? 0) - (a.ageDays ?? 0)).slice(0, 25),
-    phaseOut: [...semuaPhaseOut].sort((a, b) => (b.phaseOutLateDays ?? 0) - (a.phaseOutLateDays ?? 0) || (b.phaseOutExcessQty ?? 0) - (a.phaseOutExcessQty ?? 0)).slice(0, 25),
-    counts: { po: semuaPo.length, overstock: semuaOver.length, npl: semuaNpl.length, phaseOut: semuaPhaseOut.length },
+    // Prioritas open PO diurut menurut kegentingan (DOI terkecil), bukan qty —
+    // SKU kritis dengan stok kecil justru yang paling perlu dilihat duluan.
+    po: [...semuaPo].sort(byRefDoi).slice(0, TOP_PO),
+    // Tiga panel berikut: qty stok terbesar, sesuai permintaan PPIC.
+    overstock: [...semuaOver].sort(byQty).slice(0, TOP_QTY),
+    npl: [...semuaNpl].sort(byQty).slice(0, TOP_QTY),
+    phaseOut: [...semuaPhaseOut].sort(byQty).slice(0, TOP_QTY),
+    totals: {
+      po: groupTotals(semuaPo), overstock: groupTotals(semuaOver),
+      npl: groupTotals(semuaNpl), phaseOut: groupTotals(semuaPhaseOut),
+    },
   };
 }
 

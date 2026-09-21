@@ -30,6 +30,7 @@ const overCols = (d: 'OPSI1' | 'OPSI2' | 'BOTH'): Column<SnapshotRow>[] => [
 ];
 const NPL_COLS: Column<SnapshotRow>[] = [
   { ...skuCol, width: 180 },
+  { key: 'stock', label: 'Stok', get: (r) => r.availableQty, type: 'number', mono: true, width: 76 },
   { key: 'first', label: 'Jual pertama', get: (r) => r.firstSalesDate, type: 'date', mono: true, width: 100 },
   { key: 'age', label: 'Umur', get: (r) => r.ageDays, type: 'number', mono: true, width: 60, render: (r) => `${r.ageDays} hr` },
   { key: 'ads1', label: 'ADS 1', get: (r) => r.ads1, type: 'number', mono: true, width: 64, render: (r) => fmt(r.ads1, 1) },
@@ -62,13 +63,9 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
   const npl = data?.npl ?? [];
   const phaseOut = data?.phaseOut ?? [];
 
-  // Panel dashboard hanya memuat potongan teratas; tanpa keterangan ini jumlahnya
-  // terlihat berbeda dari Tabel DOI dan seolah ada data yang hilang.
-  const counts = data?.counts;
-  const sisa = (tampil: unknown[], total: number | undefined) =>
-    total !== undefined && total > tampil.length
-      ? <div className="mt-0.5 text-[12px] text-label">{fmt(tampil.length)} teratas dari {fmt(total)} SKU</div>
-      : null;
+  // Resume dihitung dari SELURUH baris kelompoknya (dikirim server), bukan dari
+  // 20/25 baris yang tampil — kalau tidak, angkanya ikut terpotong.
+  const grp = data?.totals;
 
   return (
     <div className="space-y-5">
@@ -148,12 +145,15 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
           <div className="space-y-4">
             <div className="card overflow-hidden">
               <div className="flex items-start justify-between gap-3 px-4 pt-4">
-                <div>
-                  <div className="card-title">Prioritas open PO</div>
-                  {sisa(critical, counts?.po)}
-                </div>
+                <div className="card-title">Prioritas open PO <TopTag shown={critical.length} total={grp?.po.count} note="paling mendesak" /></div>
                 {readOnly ? null : <Link href="/monitoring?status=PO" className="shrink-0 text-[12.5px] text-primary hover:underline">Lihat semua →</Link>}
               </div>
+              <div className="px-4 pt-3"><Resume items={[
+                { k: 'SKU', v: fmt(grp?.po.count) },
+                { k: 'Stok', v: fmt(grp?.po.stock), u: 'pcs' },
+                { k: 'Transit', v: fmt(grp?.po.transit), u: 'pcs' },
+                { k: 'Saran qty PO', v: fmt(grp?.po.suggested), u: 'pcs', tone: 'text-primary' },
+              ]} /></div>
               <div className="p-3">
                 <DataGrid<SnapshotRow> id="dash-po" compact rows={critical} columns={PO_COLS} rowKey={(r) => r.sku} emptyText="Tidak ada SKU kritis / low stock." />
               </div>
@@ -162,22 +162,26 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="card overflow-hidden">
                 <div className="flex items-start justify-between gap-3 px-4 pt-4">
-                  <div>
-                    <div className="card-title">Overstock terbesar</div>
-                    {sisa(overstock, counts?.overstock)}
-                  </div>
+                  <div className="card-title">Overstock terbesar <TopTag shown={overstock.length} total={grp?.overstock.count} /></div>
                   {readOnly ? null : <Link href="/monitoring?status=OVERSTOCK" className="shrink-0 text-[12.5px] text-primary hover:underline">Lihat semua →</Link>}
                 </div>
+                <div className="px-4 pt-3"><Resume items={[
+                  { k: 'SKU', v: fmt(grp?.overstock.count) },
+                  { k: 'Stok', v: fmt(grp?.overstock.stock), u: 'pcs' },
+                  { k: 'Jual 3 bln', v: fmt(grp?.overstock.sales90), u: 'pcs' },
+                ]} /></div>
                 <div className="p-3"><DataGrid<SnapshotRow> id="dash-over" compact rows={overstock} columns={OVER_COLS} rowKey={(r) => r.sku} emptyText="Tidak ada overstock." /></div>
               </div>
               <div className="card overflow-hidden">
                 <div className="flex items-start justify-between gap-3 px-4 pt-4">
-                  <div>
-                    <div className="card-title">Produk baru (NPL)</div>
-                    {sisa(npl, counts?.npl)}
-                  </div>
+                  <div className="card-title">Produk baru (NPL) <TopTag shown={npl.length} total={grp?.npl.count} /></div>
                   {readOnly ? null : <Link href="/monitoring?npl=1" className="shrink-0 text-[12.5px] text-primary hover:underline">Lihat semua →</Link>}
                 </div>
+                <div className="px-4 pt-3"><Resume items={[
+                  { k: 'SKU', v: fmt(grp?.npl.count) },
+                  { k: 'Stok', v: fmt(grp?.npl.stock), u: 'pcs' },
+                  { k: 'Jual 3 bln', v: fmt(grp?.npl.sales90), u: 'pcs' },
+                ]} /></div>
                 <div className="p-3"><DataGrid<SnapshotRow> id="dash-npl" compact rows={npl} columns={NPL_COLS} rowKey={(r) => r.sku} emptyText="Tidak ada produk baru." /></div>
               </div>
             </div>
@@ -185,14 +189,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
             {poSum.count ? (
               <div className="card overflow-hidden">
                 <div className="flex items-center justify-between px-4 pt-4">
-                  <div>
-                    <div className="card-title">Phase Out — pantau sell-down</div>
-                    <div className="mt-0.5 text-[12px] text-label">
-                      {fmt(poSum.count)} SKU · stok {fmt(poSum.stock)} pcs · perkiraan sisa saat target {fmt(poSum.excessQty)} pcs
-                      {poSum.lateCount ? <span className="text-negative"> · {fmt(poSum.lateCount)} melewati target</span> : null}
-                    </div>
-                    {sisa(phaseOut, counts?.phaseOut)}
-                  </div>
+                  <div className="card-title">Phase Out — pantau sell-down <TopTag shown={phaseOut.length} total={grp?.phaseOut.count} /></div>
                   {readOnly ? null : (
                     <span className="flex shrink-0 items-center gap-3 text-[12.5px]">
                       <Link href="/monitoring?status=PHASE_OUT" className="text-primary hover:underline">Lihat semua →</Link>
@@ -200,6 +197,12 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
                     </span>
                   )}
                 </div>
+                <div className="px-4 pt-3"><Resume items={[
+                  { k: 'SKU', v: fmt(poSum.count) },
+                  { k: 'Stok', v: fmt(poSum.stock), u: 'pcs' },
+                  { k: 'Sisa saat target', v: fmt(poSum.excessQty), u: 'pcs' },
+                  { k: 'Melewati target', v: fmt(poSum.lateCount), u: 'SKU', tone: poSum.lateCount ? 'text-negative' : undefined },
+                ]} /></div>
                 <div className="p-3"><DataGrid<SnapshotRow> id="dash-phaseout" compact rows={phaseOut} columns={PO_OUT_COLS} rowKey={(r) => r.sku} emptyText="Tidak ada." /></div>
               </div>
             ) : null}
@@ -226,4 +229,31 @@ function addDaysStr(key: string, days: number) {
   const d = new Date(`${key}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Resume total satu kelompok. Angkanya dari seluruh baris kelompok, bukan dari
+ * baris yang kebetulan tampil — makanya dihitung di server.
+ */
+function Resume({ items }: { items: { k: string; v: React.ReactNode; u?: string; tone?: string }[] }) {
+  return (
+    <div className="resume-row">
+      {items.map((i) => (
+        <div key={i.k} className="resume-item">
+          <span className="k">{i.k}</span>
+          <span className={`v ${i.tone ?? ''}`}>{i.v}</span>
+          {i.u ? <span className="u">{i.u}</span> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Penanda "TOP 20". Hanya muncul kalau daftarnya MEMANG dipotong — kalau
+ * isinya kurang dari batas, tabel itu sudah lengkap dan labelnya menyesatkan.
+ */
+function TopTag({ shown, total, note = 'qty terbesar' }: { shown: number; total?: number; note?: string }) {
+  if (total === undefined || total <= shown || !shown) return null;
+  return <span className="top-tag">TOP {shown} · {note}</span>;
 }

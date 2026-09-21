@@ -7,7 +7,10 @@ import { AbcChip, Alert, Empty, StatusChip, fmt, useApi } from '@/components/ui'
 import type { PlatformGap, SkuStockout } from '@/lib/stockout';
 import { PLATFORM_LABEL } from '@/lib/stockout';
 
-type Row = SkuStockout & { name: string | null; sapCode: string | null; abcClass: string; status2: string; volatile: boolean };
+type Row = SkuStockout & {
+  name: string | null; sapCode: string | null; abcClass: string; status2: string;
+  volatile: boolean; listed: boolean; listedNote: string | null;
+};
 type Gap = PlatformGap & { name: string | null };
 type Resp = {
   ok: boolean; from: string; to: string; today: string; days: string[]; dataGaps: string[];
@@ -17,7 +20,8 @@ type Resp = {
   summary: {
     skuAnalyzed: number; skuAffected: number; outDays: number; episodes: number;
     lostLow: number; lostHigh: number; ongoing: number; confirmed: number; suspected: number;
-    stockAvailable: number; campaignDays: number; platformGaps: number; platformSkus: number; skippedNoSnapshot: number;
+    stockAvailable: number; campaignDays: number; platformGaps: number; platformSkus: number;
+    unlisted: number; unlistedReasons: Record<string, number>; baselineFromSales: number;
   };
   rows: Row[]; gaps: Gap[]; series: Record<string, number[]>;
 };
@@ -44,6 +48,7 @@ export default function StockoutPage() {
   const [phaseOut, setPhaseOut] = useState(false);
   const [showOpts, setShowOpts] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [onlyUnlisted, setOnlyUnlisted] = useState(false);
   const [q, setQ] = useState(0); // penanda "terapkan"
 
   const url = useMemo(
@@ -61,7 +66,8 @@ export default function StockoutPage() {
   const columns = useMemo<Column<Row>[]>(() => [
     { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 240, sticky: true, isTitle: true,
       render: (r) => <span className="font-semibold" title={r.name ?? undefined}>{r.sku}</span> },
-    { key: 'abc', label: 'ABC', get: (r) => r.abcClass, width: 64, render: (r) => <AbcChip cls={r.abcClass} /> },
+    { key: 'abc', label: 'ABC', get: (r) => r.abcClass || null, width: 64,
+      render: (r) => r.abcClass ? <AbcChip cls={r.abcClass} /> : <span className="empty">—</span> },
     { key: 'st', label: 'Temuan', get: (r) => STATUS_LABEL[r.status], width: 190,
       render: (r) => <span className={`chip ${STATUS_CHIP[r.status]}`}>{r.status === 'TERKONFIRMASI' ? 'Terkonfirmasi' : r.status === 'DUGAAN' ? 'Dugaan' : 'Stok ada'}</span> },
     { key: 'outdays', label: 'Hari kosong', get: (r) => r.outDays, type: 'number', mono: true, width: 110,
@@ -71,9 +77,21 @@ export default function StockoutPage() {
       render: (r) => `${r.longestDays} hr` },
     { key: 'last', label: 'Terakhir kosong', get: (r) => r.lastTo, type: 'date', mono: true, width: 200,
       render: (r) => <>{r.lastTo}{r.ongoing ? <span className="ml-1 chip chip-bad chip-noicon">berlangsung</span> : null}</> },
-    { key: 'ads', label: 'ADS acuan', get: (r) => r.ads, type: 'number', mono: true, width: 110,
-      title: 'ADS dari snapshot terdekat sebelum episode',
-      render: (r) => <>{fmt(r.ads, 1)}{r.adsEstimated ? <span className="ml-1 text-[10px] text-muted" title="Snapshot pada tanggal itu belum ada — dipakai yang paling awal tersedia">≈</span> : null}</> },
+    { key: 'listed', label: 'Terdaftar OCS', get: (r) => r.listed ? 'Ya' : (r.listedNote ?? 'Tidak'), width: 210,
+      title: 'Apakah SKU ini ada di daftar stok OCS yang dihitung — kalau tidak, alasannya',
+      render: (r) => r.listed
+        ? <span className="text-label">Ya</span>
+        : <span className="chip chip-bad" title="Tidak ada di daftar stok yang dihitung — dianalisis dari penjualannya saja">{r.listedNote}</span> },
+    { key: 'ads', label: 'Normal (pcs/hari)', get: (r) => r.ads, type: 'number', mono: true, width: 165,
+      title: 'Angka normal yang dipakai menghitung kehilangan: ADS snapshot, atau median penjualan bila SKU tidak ada di snapshot',
+      render: (r) => (
+        <>
+          {fmt(r.ads, 1)}
+          {r.adsSource === 'PENJUALAN'
+            ? <span className="ml-1 text-[10px] text-muted" title="Tidak ada ADS di snapshot — dipakai median penjualan 28 hari sebelum episode">dr. jual</span>
+            : r.adsEstimated ? <span className="ml-1 text-[10px] text-muted" title="Snapshot pada tanggal itu belum ada — dipakai yang paling awal tersedia">≈</span> : null}
+        </>
+      ) },
     { key: 'adssell', label: 'ADS hari-laku', get: (r) => r.adsSelling, type: 'number', mono: true, width: 120, prio: 'p2',
       title: 'Total penjualan ÷ jumlah hari yang ada penjualannya', render: (r) => fmt(r.adsSelling, 1) },
     { key: 'sellshare', label: 'Hari laku', get: (r) => r.sellSharePct, type: 'number', mono: true, width: 100, prio: 'p2',
@@ -87,7 +105,8 @@ export default function StockoutPage() {
       render: (r) => r.campaignDays ? <span className="text-negative font-semibold">{r.campaignDays} hr</span> : <span className="empty">—</span> },
     { key: 'vol', label: 'Catatan', get: (r) => r.volatile ? 'data masih bisa berubah' : null, width: 180, prio: 'p2',
       render: (r) => r.volatile ? <span className="chip chip-warn" title={`Seluruh episodenya di ${data?.options.volatileDays ?? 7} hari terakhir, yang masih ditarik ulang tiap malam`}>bisa berubah</span> : <span className="empty">—</span> },
-    { key: 'doistat', label: 'Status DOI', get: (r) => r.status2, width: 130, prio: 'p3', render: (r) => <StatusChip status={r.status2} /> },
+    { key: 'doistat', label: 'Status DOI', get: (r) => r.status2 || null, width: 130, prio: 'p3',
+      render: (r) => r.status2 ? <StatusChip status={r.status2} /> : <span className="empty">—</span> },
     { key: 'sap', label: 'SAP', get: (r) => r.sapCode, mono: true, width: 110, prio: 'p3' },
   ], [data]);
 
@@ -181,6 +200,7 @@ export default function StockoutPage() {
             <Tile k="Masih berlangsung" v={fmt(s.ongoing)} h="kosong sampai hari terakhir rentang" tone={s.ongoing ? 'text-negative' : undefined} />
             <Tile k="Terkonfirmasi / dugaan" v={`${fmt(s.confirmed)} / ${fmt(s.suspected)}`} h={`${fmt(s.stockAvailable)} ternyata stoknya ada`} />
             <Tile k="Kosong saat campaign" v={fmt(s.campaignDays)} h="hari double date / gajian" tone={s.campaignDays ? 'text-negative' : undefined} />
+            <Tile k="Tidak terdaftar di OCS" v={fmt(s.unlisted)} h="dihitung dari penjualannya saja" tone={s.unlisted ? 'text-negative' : undefined} />
           </div>
 
           {data.dataGaps.length ? (
@@ -190,10 +210,13 @@ export default function StockoutPage() {
               Hari-hari itu tidak dihitung sebagai stok kosong.
             </Alert>
           ) : null}
-          {s.skippedNoSnapshot ? (
+          {s.unlisted ? (
             <Alert tone="info">
-              {fmt(s.skippedNoSnapshot)} SKU pernah laku di rentang ini tapi sudah tidak ada di daftar stok OCS terakhir,
-              jadi tidak punya ADS dan tidak ikut dianalisis.
+              <b>{fmt(s.unlisted)} SKU tidak ada di daftar stok OCS</b> tapi tetap dianalisis dari penjualannya —
+              angka normalnya memakai median penjualan, bukan ADS.{' '}
+              {Object.entries(s.unlistedReasons).map(([k, v]) => `${k}: ${v}`).join(' · ')}.{' '}
+              <i>Tidak ada di stok OCS</i> dan <i>Nonaktif</i> adalah kandidat kehabisan stok paling kuat;{' '}
+              <i>Kategori</i> selain Sku biasanya item gimmick/hadiah — berhentinya promo, bukan stok.
             </Alert>
           ) : null}
 
@@ -211,6 +234,13 @@ export default function StockoutPage() {
                 columns={columns}
                 rowKey={(r) => r.sku}
                 loading={loading}
+                preFilter={(r) => !onlyUnlisted || !r.listed}
+                toolbarExtra={
+                  <label className="flex items-center gap-2 text-[13px]" title="SKU yang tidak ada di daftar stok OCS — kandidat kehabisan stok paling kuat">
+                    <input type="checkbox" checked={onlyUnlisted} onChange={(e) => setOnlyUnlisted(e.target.checked)} />
+                    Hanya yang tidak terdaftar di OCS
+                  </label>
+                }
                 expanded={open}
                 onRowClick={(r) => setOpen(open === r.sku ? null : r.sku)}
                 renderExpanded={(r) => (
@@ -243,9 +273,11 @@ export default function StockoutPage() {
 
           <div className="text-[12px] text-label">
             Cara baca: sebuah hari dihitung kosong bila qty-nya nol bulat, minimal {data.options.minRunDays} hari berturut-turut,
-            untuk SKU dengan ADS ≥ {fmt(data.options.minAds, 1)} pcs/hari yang laku pada ≥ {fmt(data.options.minSellSharePct)}% hari. Perkiraan kehilangan memakai ADS acuan
-            (basis {data.settings.actionBasis.toLowerCase()}) dari snapshot terdekat sebelum episode — cenderung <i>terlalu kecil</i>,
-            karena hari kosong ikut menjadi pembagi saat ADS dihitung. Kolom optimis memakai ADS hari-laku sebagai batas atasnya.
+            untuk SKU yang normalnya ≥ {fmt(data.options.minAds, 1)} pcs/hari dan laku pada ≥ {fmt(data.options.minSellSharePct)}% hari.
+            Angka <i>normal</i> memakai ADS acuan (basis {data.settings.actionBasis.toLowerCase()}) dari snapshot terdekat sebelum
+            episode; untuk SKU yang tidak ada di snapshot dipakai median penjualan 28 hari sebelum episode ({fmt(s.baselineFromSales)} SKU).
+            Angka konservatif cenderung <i>terlalu kecil</i>, karena hari kosong ikut menjadi pembagi saat ADS dihitung —
+            kolom optimis memakai ADS hari-laku sebagai batas atasnya.
           </div>
         </>
       ) : null}

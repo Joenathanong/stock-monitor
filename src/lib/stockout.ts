@@ -29,10 +29,14 @@ export type DaySales = { qty: number } & Record<Platform, number>;
 /** Keadaan stok pada hari itu menurut stock_daily. */
 export type StockState = 'KOSONG' | 'ADA' | 'TIDAK_TAHU';
 
+/** Dari mana angka "normal"-nya diambil. */
+export type AdsSource = 'SNAPSHOT' | 'PENJUALAN';
+
 export type Episode = {
   from: DateKey; to: DateKey; days: number;
-  /** ADS acuan yang dipakai (dari snapshot terdekat sebelum episode). */
+  /** Angka "normal" yang dipakai: ADS snapshot, atau median penjualan bila tidak ada. */
   ads: number;
+  adsSource: AdsSource;
   /** true bila ADS diambil dari snapshot yang lebih baru dari episodenya. */
   adsEstimated: boolean;
   lostLow: number; lostHigh: number;
@@ -57,8 +61,9 @@ export type SkuStockout = {
   lostLow: number;
   lostHigh: number;
   campaignDays: number;
-  /** ADS acuan terakhir yang dipakai — untuk ditampilkan di tabel. */
+  /** Angka normal terakhir yang dipakai — untuk ditampilkan di tabel. */
   ads: number;
+  adsSource: AdsSource;
   adsEstimated: boolean;
   /** ADS hari-laku: total penjualan ÷ jumlah hari yang ADA penjualannya. */
   adsSelling: number;
@@ -106,13 +111,41 @@ export type SkuInput = {
   byDate: Map<DateKey, DaySales>;
   /** Penjualan pertama sepanjang histori — hari sebelum ini tidak dihitung kosong. */
   firstSalesDate: DateKey | null;
-  /** ADS acuan pada sebuah tanggal (dari doi_snapshot terdekat ≤ tanggal itu). */
+  /**
+   * ADS acuan pada sebuah tanggal (dari doi_snapshot terdekat ≤ tanggal itu).
+   * Boleh mengembalikan 0 — untuk SKU yang tidak ada di snapshot sama sekali,
+   * angka normalnya dihitung sendiri dari penjualan (lihat salesBaseline).
+   */
   adsAt: (d: DateKey) => { ads: number; estimated: boolean };
   /** availableQty pada tanggal itu; null = belum ada riwayat stok. */
   stockAt: (d: DateKey) => number | null;
 };
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/**
+ * Angka "normal" dari penjualan saja — dipakai untuk SKU yang tidak punya ADS
+ * di snapshot (mis. sudah tidak terdaftar di daftar stok OCS). Median hari laku
+ * pada `lookback` hari SEBELUM tanggal acuan: median tahan terhadap lonjakan
+ * campaign, dan jendela sebelum episode membuat stockout tidak mengencerkan
+ * angkanya sendiri.
+ */
+export function salesBaseline(
+  byDate: Map<DateKey, DaySales>, days: DateKey[], before: DateKey, lookback = 28,
+): number {
+  const mulai = addDays(before, -lookback);
+  const nilai = days
+    .filter((d) => d >= mulai && d < before)
+    .map((d) => byDate.get(d)?.qty ?? 0)
+    .filter((q) => q > 0)
+    .sort((a, b) => a - b);
+  if (!nilai.length) {
+    // Jendela sebelumnya kosong (episode di awal rentang) — pakai seluruh rentang.
+    const semua = days.map((d) => byDate.get(d)?.qty ?? 0).filter((q) => q > 0).sort((a, b) => a - b);
+    return semua.length ? round1(semua[Math.floor(semua.length / 2)]) : 0;
+  }
+  return round1(nilai[Math.floor(nilai.length / 2)]);
+}
 
 /** Potong deret hari menjadi kelompok-kelompok berurutan yang memenuhi `hit`. */
 function runs(days: DateKey[], hit: (d: DateKey) => boolean): DateKey[][] {
@@ -149,8 +182,9 @@ export function analyzeSku(input: SkuInput, opt: StockoutOptions): { sku: SkuSto
   // adsSelling TIDAK dipakai menyaring — produk yang laku 1 pcs seminggu sekali
   // punya adsSelling 1 dan akan lolos, padahal justru itu yang harus dibuang.
   const adsNow = input.adsAt(last);
+  const acuanNow = adsNow.ads > 0 ? adsNow.ads : salesBaseline(input.byDate, hariDipakai, last);
   const sellShare = hariDipakai.length ? sellDays / hariDipakai.length : 0;
-  if (adsNow.ads < opt.minAds) return { sku: null, gaps: [] };
+  if (acuanNow < opt.minAds) return { sku: null, gaps: [] };
   if (sellShare < opt.minSellShare) return { sku: null, gaps: [] };
 
   // ---- 1. Episode stok kosong: qty total nol berturut-turut
@@ -158,7 +192,10 @@ export function analyzeSku(input: SkuInput, opt: StockoutOptions): { sku: SkuSto
   for (const run of runs(hariDipakai, (d) => qtyOf(d) === 0)) {
     if (run.length < opt.minRunDays) continue;
     const from = run[0], to = run[run.length - 1];
-    const { ads, estimated } = input.adsAt(from);
+    const dariSnapshot = input.adsAt(from);
+    const adsSource: AdsSource = dariSnapshot.ads > 0 ? 'SNAPSHOT' : 'PENJUALAN';
+    const ads = dariSnapshot.ads > 0 ? dariSnapshot.ads : salesBaseline(input.byDate, hariDipakai, from);
+    const estimated = adsSource === 'SNAPSHOT' && dariSnapshot.estimated;
     if (ads < opt.minAds) continue;
 
     let zero = 0, positive = 0;
@@ -172,7 +209,7 @@ export function analyzeSku(input: SkuInput, opt: StockoutOptions): { sku: SkuSto
       : positive > 0 ? 'ADA' : 'TIDAK_TAHU';
 
     episodes.push({
-      from, to, days: run.length, ads, adsEstimated: estimated,
+      from, to, days: run.length, ads, adsSource, adsEstimated: estimated,
       lostLow: Math.round(run.length * ads),
       lostHigh: Math.round(run.length * Math.max(ads, adsSelling)),
       stockState, stockZeroDays: zero, stockPositiveDays: positive,
@@ -222,7 +259,7 @@ export function analyzeSku(input: SkuInput, opt: StockoutOptions): { sku: SkuSto
       lostLow: episodes.reduce((a, e) => a + e.lostLow, 0),
       lostHigh: episodes.reduce((a, e) => a + e.lostHigh, 0),
       campaignDays: episodes.reduce((a, e) => a + e.campaignDays, 0),
-      ads: terakhir.ads, adsEstimated: episodes.some((e) => e.adsEstimated),
+      ads: terakhir.ads, adsSource: terakhir.adsSource, adsEstimated: episodes.some((e) => e.adsEstimated),
       adsSelling, sellDays, totalQty, sellSharePct: round1(sellShare * 100),
       status: konfirmasi > 0 ? 'TERKONFIRMASI' : stokAda > 0 && stokAda >= episodes.length / 2 ? 'STOK_ADA' : 'DUGAAN',
     },

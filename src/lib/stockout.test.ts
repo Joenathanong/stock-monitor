@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeSku, clampRange, findDataGaps, type DaySales, type SkuInput, type StockoutOptions } from './stockout';
+import { analyzeSku, clampRange, findDataGaps, salesBaseline, type DaySales, type SkuInput, type StockoutOptions } from './stockout';
 import { addDays, rangeKeys, type DateKey } from './dates';
 
 const TO: DateKey = '2026-09-20';
@@ -159,4 +159,44 @@ test('clampRange menutup rentang di kemarin dan membatasi panjangnya', () => {
   const r = clampRange('2026-01-01', '2026-12-31', '2026-09-21', 180);
   assert.equal(r.to, '2026-09-20');
   assert.equal(r.from, addDays('2026-09-20', -179));
+});
+
+// ---- SKU tanpa ADS di snapshot (mis. sudah tidak terdaftar di daftar stok OCS)
+
+test('tanpa ADS snapshot, angka normal diambil dari median penjualan', () => {
+  const { sku } = analyzeSku(
+    input((_d, i) => (i >= 20 && i <= 24 ? 0 : 40), { adsAt: () => ({ ads: 0, estimated: false }) }),
+    opt(),
+  );
+  assert.ok(sku, 'SKU tanpa ADS snapshot TIDAK boleh dibuang — justru itu yang dicari');
+  assert.equal(sku.adsSource, 'PENJUALAN');
+  assert.equal(sku.episodes[0].adsSource, 'PENJUALAN');
+  assert.equal(sku.outDays, 5);
+  assert.ok(sku.ads > 0, 'baseline harus terisi dari penjualan');
+  assert.equal(sku.lostLow, 5 * sku.ads);
+});
+
+test('median kebal terhadap lonjakan campaign', () => {
+  // 27 hari @20, satu hari @2000 (campaign) -> median tetap 20, rata-rata ~93
+  const byDate = new Map<DateKey, DaySales>();
+  DAYS.forEach((d, i) => byDate.set(d, day(i === 3 ? 2000 : 20)));
+  const b = salesBaseline(byDate, DAYS, DAYS[DAYS.length - 1]);
+  assert.equal(b, 20);
+});
+
+test('baseline memakai jendela SEBELUM episode, bukan seluruh rentang', () => {
+  // 14 hari pertama @10, lalu naik ke @100, episode di ujung
+  const byDate = new Map<DateKey, DaySales>();
+  DAYS.forEach((d, i) => byDate.set(d, day(i < 14 ? 10 : 100)));
+  const b = salesBaseline(byDate, DAYS, DAYS[DAYS.length - 1], 10);
+  assert.equal(b, 100, 'sepuluh hari terakhir sebelum acuan semuanya 100');
+});
+
+test('ADS snapshot tetap menang bila tersedia', () => {
+  const { sku } = analyzeSku(
+    input((_d, i) => (i >= 20 && i <= 24 ? 0 : 40), { adsAt: () => ({ ads: 7, estimated: false }) }),
+    opt(),
+  );
+  assert.equal(sku?.adsSource, 'SNAPSHOT');
+  assert.equal(sku?.ads, 7);
 });

@@ -43,9 +43,9 @@ export async function GET(req: Request) {
     today, MAX_DAYS,
   );
 
-  const minRunDays = numParam(url.searchParams.get('minRun'), 2, 1, 60);
+  const minRunDays = numParam(url.searchParams.get('minRun'), 1, 1, 60);
   const minAds = numParam(url.searchParams.get('minAds'), 1, 0, 10_000);
-  const minSellShare = numParam(url.searchParams.get('minSell'), 50, 0, 100) / 100;
+  const minSellShare = numParam(url.searchParams.get('minSell'), 80, 0, 100) / 100;
   const platformMinRunDays = numParam(url.searchParams.get('minRunPlatform'), 3, 2, 60);
   const platformMinShare = numParam(url.searchParams.get('minShare'), 5, 0, 100) / 100;
   const withPhaseOut = url.searchParams.get('phaseOut') === '1';
@@ -73,7 +73,7 @@ export async function GET(req: Request) {
     prisma.exclusionDate.findMany(),
     // TANPA saringan kategori/aktif/clearance — justru dipakai menjelaskan
     // kenapa sebuah SKU tidak muncul di daftar stok yang dihitung.
-    prisma.stockCurrent.findMany({ select: { sku: true, areaId: true, name: true, sapCode: true, category: true, isActive: true } }),
+    prisma.stockCurrent.findMany({ select: { sku: true, areaId: true, category: true, isActive: true } }),
   ]);
 
   if (!snap.rows.length) return fail('Belum ada snapshot DOI — jalankan Refresh dulu', 409);
@@ -144,13 +144,6 @@ export async function GET(req: Request) {
     if (!settings.includeInactive && diArea.every((r) => !r.isActive)) return 'Nonaktif di OCS';
     return 'Tidak ada di snapshot terakhir';
   };
-  const infoOcs = (sku: string) => {
-    const semua = ocsBySku.get(sku) ?? [];
-    const diArea = settings.areaScope === 'All' ? semua : semua.filter((r) => r.areaId === settings.areaScope);
-    const pilih = diArea[0] ?? semua[0] ?? null;
-    return { name: pilih?.name ?? null, sapCode: pilih?.sapCode ?? null };
-  };
-
   const excluded = new Set(master.filter((m) => m.isExcluded).map((m) => m.sku));
   const campaign = new Set(
     buildExclusionMap(from, to,
@@ -164,33 +157,21 @@ export async function GET(req: Request) {
 
   type Row = SkuStockout & {
     name: string | null; sapCode: string | null; abcClass: string; status2: string;
-    volatile: boolean; listed: boolean; listedNote: string | null;
+    volatile: boolean;
+    /** Kosong di SEMUA shop — selalu ya untuk baris di tabel stok kosong. */
+    outAllShops: boolean;
+    /** SKU ini JUGA punya hari di mana hanya sebagian shop yang nol. */
+    outSomeShops: boolean;
   };
   const rows: Row[] = [];
-  const gaps: (PlatformGap & { name: string | null })[] = [];
+  const gaps: (PlatformGap & { name: string | null; outAllShops: boolean; outSomeShops: boolean })[] = [];
   const series: Record<string, number[]> = {};
 
-  // SKU yang tidak ada di snapshot tetap dianalisis — justru SKU yang menghilang
-  // dari daftar stok OCS adalah kandidat kehabisan stok yang paling kuat.
-  // Tanggal penjualan pertamanya diambil sendiri karena snapshot tidak punya.
-  const tanpaSnapshot = [...byDate.keys()].filter((sku) => !info.has(sku));
-  const firstSales = new Map<string, DateKey>();
-  if (tanpaSnapshot.length) {
-    const g = await prisma.salesDaily.groupBy({
-      by: ['sku'], where: { sku: { in: tanpaSnapshot }, ...areaClause },
-      _min: { salesDate: true },
-    });
-    for (const r of g) if (r._min.salesDate) firstSales.set(r.sku, toDateKeyUtc(r._min.salesDate));
-  }
-
-  const daftar: { sku: string; name: string | null; sapCode: string | null; abcClass: string; status2: string; firstSalesDate: DateKey | null; listed: boolean }[] = [
-    ...snap.rows
-      .filter((r) => (withPhaseOut || !r.isPhaseOut) && (withExcluded || !(excluded.has(r.sku) || r.status === 'EXCLUDED')))
-      .map((r) => ({ sku: r.sku, name: r.name, sapCode: r.sapCode, abcClass: r.abcClass, status2: r.status, firstSalesDate: r.firstSalesDate, listed: true })),
-    ...tanpaSnapshot
-      .filter((sku) => withExcluded || !excluded.has(sku))
-      .map((sku) => ({ sku, ...infoOcs(sku), abcClass: '', status2: '', firstSalesDate: firstSales.get(sku) ?? null, listed: false })),
-  ];
+  // Hanya SKU yang ada di Tabel DOI (= SKU aktif hasil snapshot). SKU yang laku
+  // di rentang tapi tidak ada di daftar itu dihitung dan dijelaskan alasannya,
+  // tapi tidak ikut dianalisis.
+  const daftar = snap.rows
+    .filter((r) => (withPhaseOut || !r.isPhaseOut) && (withExcluded || !(excluded.has(r.sku) || r.status === 'EXCLUDED')));
 
   for (const r of daftar) {
     const sales = byDate.get(r.sku);
@@ -204,14 +185,16 @@ export async function GET(req: Request) {
       stockAt: (d) => stockBy.get(r.sku)?.get(d) ?? null,
     }, opt);
 
-    for (const g of hasil.gaps) gaps.push({ ...g, name: r.name });
+    const sebagian = hasil.gaps.length > 0;
+    for (const g of hasil.gaps) {
+      gaps.push({ ...g, name: r.name, outAllShops: !!hasil.sku, outSomeShops: true });
+    }
     if (!hasil.sku) continue;
 
     rows.push({
       ...hasil.sku,
-      name: r.name, sapCode: r.sapCode, abcClass: r.abcClass, status2: r.status2,
-      listed: r.listed,
-      listedNote: r.listed ? null : alasanTidakTerdaftar(r.sku),
+      name: r.name, sapCode: r.sapCode, abcClass: r.abcClass, status2: r.status,
+      outAllShops: true, outSomeShops: sebagian,
       // Seluruh episodenya jatuh di jendela yang masih ditarik ulang tiap malam.
       volatile: hasil.sku.episodes.every((e) => e.from > addDays(today, -VOLATILE_DAYS - 1)),
     });
@@ -221,10 +204,14 @@ export async function GET(req: Request) {
   rows.sort((a, b) => b.lostLow - a.lostLow || b.outDays - a.outDays);
   gaps.sort((a, b) => b.days - a.days || b.lostQty - a.lostQty);
 
-  // Rincian alasan, supaya pemakai tahu mana yang "hilang dari OCS" (sinyal kuat)
-  // dan mana yang cuma item gimmick berkategori lain (bukan OOS).
+  // SKU yang laku di rentang tapi tidak ada di Tabel DOI — tidak ikut dianalisis,
+  // tapi alasannya dijelaskan supaya tidak terasa ada data yang hilang diam-diam.
+  const diLuarTabel = [...byDate.keys()].filter((sku) => !info.has(sku));
   const alasan: Record<string, number> = {};
-  for (const r of rows) if (r.listedNote) alasan[r.listedNote] = (alasan[r.listedNote] ?? 0) + 1;
+  for (const sku of diLuarTabel) {
+    const a = alasanTidakTerdaftar(sku);
+    alasan[a] = (alasan[a] ?? 0) + 1;
+  }
 
   return json(safe({
     ok: true,
@@ -247,8 +234,9 @@ export async function GET(req: Request) {
       campaignDays: rows.reduce((a, r) => a + r.campaignDays, 0),
       platformGaps: gaps.length,
       platformSkus: new Set(gaps.map((g) => g.sku)).size,
-      unlisted: rows.filter((r) => !r.listed).length,
-      unlistedReasons: alasan,
+      bothProblems: rows.filter((r) => r.outSomeShops).length,
+      outsideTable: diLuarTabel.length,
+      outsideReasons: alasan,
       baselineFromSales: rows.filter((r) => r.adsSource === 'PENJUALAN').length,
     },
     rows, gaps, series,

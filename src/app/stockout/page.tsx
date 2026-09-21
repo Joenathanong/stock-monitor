@@ -9,9 +9,9 @@ import { PLATFORM_LABEL } from '@/lib/stockout';
 
 type Row = SkuStockout & {
   name: string | null; sapCode: string | null; abcClass: string; status2: string;
-  volatile: boolean; listed: boolean; listedNote: string | null;
+  volatile: boolean; outAllShops: boolean; outSomeShops: boolean;
 };
-type Gap = PlatformGap & { name: string | null };
+type Gap = PlatformGap & { name: string | null; outAllShops: boolean; outSomeShops: boolean };
 type Resp = {
   ok: boolean; from: string; to: string; today: string; days: string[]; dataGaps: string[];
   snapshotDate: string | null; stockSince: string | null;
@@ -21,7 +21,7 @@ type Resp = {
     skuAnalyzed: number; skuAffected: number; outDays: number; episodes: number;
     lostLow: number; lostHigh: number; ongoing: number; confirmed: number; suspected: number;
     stockAvailable: number; campaignDays: number; platformGaps: number; platformSkus: number;
-    unlisted: number; unlistedReasons: Record<string, number>; baselineFromSales: number;
+    bothProblems: number; outsideTable: number; outsideReasons: Record<string, number>; baselineFromSales: number;
   };
   rows: Row[]; gaps: Gap[]; series: Record<string, number[]>;
 };
@@ -42,13 +42,12 @@ export default function StockoutPage() {
   const today = new Date().toISOString().slice(0, 10);
   const [from, setFrom] = useState(addDays(today, -90));
   const [to, setTo] = useState(addDays(today, -1));
-  const [minRun, setMinRun] = useState(2);
+  const [minRun, setMinRun] = useState(1);
   const [minAds, setMinAds] = useState(1);
-  const [minSell, setMinSell] = useState(50);
+  const [minSell, setMinSell] = useState(80);
   const [phaseOut, setPhaseOut] = useState(false);
   const [showOpts, setShowOpts] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
-  const [onlyUnlisted, setOnlyUnlisted] = useState(false);
   const [q, setQ] = useState(0); // penanda "terapkan"
 
   const url = useMemo(
@@ -77,11 +76,12 @@ export default function StockoutPage() {
       render: (r) => `${r.longestDays} hr` },
     { key: 'last', label: 'Terakhir kosong', get: (r) => r.lastTo, type: 'date', mono: true, width: 200,
       render: (r) => <>{r.lastTo}{r.ongoing ? <span className="ml-1 chip chip-bad chip-noicon">berlangsung</span> : null}</> },
-    { key: 'listed', label: 'Terdaftar OCS', get: (r) => r.listed ? 'Ya' : (r.listedNote ?? 'Tidak'), width: 210,
-      title: 'Apakah SKU ini ada di daftar stok OCS yang dihitung — kalau tidak, alasannya',
-      render: (r) => r.listed
-        ? <span className="text-label">Ya</span>
-        : <span className="chip chip-bad" title="Tidak ada di daftar stok yang dihitung — dianalisis dari penjualannya saja">{r.listedNote}</span> },
+    { key: 'allshop', label: 'Kosong di semua shop', get: (r) => r.outAllShops ? 'Ya' : 'Tidak', width: 190,
+      title: 'Ada hari dengan penjualan nol di SELURUH shop sekaligus — ciri kehabisan stok',
+      render: (r) => <YaTidak ya={r.outAllShops} tone="bad" /> },
+    { key: 'someshop', label: 'Kosong di beberapa shop', get: (r) => r.outSomeShops ? 'Ya' : 'Tidak', width: 205,
+      title: 'SKU ini JUGA punya hari di mana hanya sebagian shop yang nol — itu masalah listing, bukan stok',
+      render: (r) => <YaTidak ya={r.outSomeShops} tone="warn" /> },
     { key: 'ads', label: 'Normal (pcs/hari)', get: (r) => r.ads, type: 'number', mono: true, width: 165,
       title: 'Angka normal yang dipakai menghitung kehilangan: ADS snapshot, atau median penjualan bila SKU tidak ada di snapshot',
       render: (r) => (
@@ -114,6 +114,12 @@ export default function StockoutPage() {
     { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 240, sticky: true, isTitle: true },
     { key: 'pf', label: 'Platform', get: (r) => PLATFORM_LABEL[r.platform], width: 120,
       render: (r) => <span className="chip chip-info">{PLATFORM_LABEL[r.platform]}</span> },
+    { key: 'allshop', label: 'Kosong di semua shop', get: (r) => r.outAllShops ? 'Ya' : 'Tidak', width: 190,
+      title: 'SKU ini juga punya hari kosong di seluruh shop — kalau Ya, ada masalah stok DAN masalah listing',
+      render: (r) => <YaTidak ya={r.outAllShops} tone="bad" /> },
+    { key: 'someshop', label: 'Kosong di beberapa shop', get: (r) => 'Ya', width: 205, noFilter: true,
+      title: 'Selalu Ya di tabel ini — memang itu definisinya',
+      render: () => <YaTidak ya tone="warn" /> },
     { key: 'from', label: 'Mulai', get: (r) => r.from, type: 'date', mono: true, width: 110 },
     { key: 'to', label: 'Sampai', get: (r) => r.to, type: 'date', mono: true, width: 110,
       render: (r) => <>{r.to}{r.ongoing ? <span className="ml-1 chip chip-bad chip-noicon">berlangsung</span> : null}</> },
@@ -200,7 +206,7 @@ export default function StockoutPage() {
             <Tile k="Masih berlangsung" v={fmt(s.ongoing)} h="kosong sampai hari terakhir rentang" tone={s.ongoing ? 'text-negative' : undefined} />
             <Tile k="Terkonfirmasi / dugaan" v={`${fmt(s.confirmed)} / ${fmt(s.suspected)}`} h={`${fmt(s.stockAvailable)} ternyata stoknya ada`} />
             <Tile k="Kosong saat campaign" v={fmt(s.campaignDays)} h="hari double date / gajian" tone={s.campaignDays ? 'text-negative' : undefined} />
-            <Tile k="Tidak terdaftar di OCS" v={fmt(s.unlisted)} h="dihitung dari penjualannya saja" tone={s.unlisted ? 'text-negative' : undefined} />
+            <Tile k="Kena dua-duanya" v={fmt(s.bothProblems)} h="kosong total + ada shop yang berhenti sendiri" tone={s.bothProblems ? 'text-negative' : undefined} />
           </div>
 
           {data.dataGaps.length ? (
@@ -210,19 +216,17 @@ export default function StockoutPage() {
               Hari-hari itu tidak dihitung sebagai stok kosong.
             </Alert>
           ) : null}
-          {s.unlisted ? (
+          {s.outsideTable ? (
             <Alert tone="info">
-              <b>{fmt(s.unlisted)} SKU tidak ada di daftar stok OCS</b> tapi tetap dianalisis dari penjualannya —
-              angka normalnya memakai median penjualan, bukan ADS.{' '}
-              {Object.entries(s.unlistedReasons).map(([k, v]) => `${k}: ${v}`).join(' · ')}.{' '}
-              <i>Tidak ada di stok OCS</i> dan <i>Nonaktif</i> adalah kandidat kehabisan stok paling kuat;{' '}
-              <i>Kategori</i> selain Sku biasanya item gimmick/hadiah — berhentinya promo, bukan stok.
+              Analisis ini hanya memuat <b>SKU aktif yang ada di Tabel DOI</b>.{' '}
+              {fmt(s.outsideTable)} SKU lain pernah laku di rentang ini tapi tidak ada di daftar itu, jadi tidak ikut dihitung —{' '}
+              {Object.entries(s.outsideReasons).map(([k, v]) => `${k}: ${v}`).join(' · ')}.
             </Alert>
           ) : null}
 
           <section className="card overflow-hidden">
             <div className="card-head">
-              <h2 className="card-title">Stok kosong — semua platform nol</h2>
+              <h2 className="card-title">Stok kosong — kosong di semua shop</h2>
               <span className="text-[12px] text-label">
                 {data.stockSince ? <>terkonfirmasi lewat riwayat stok sejak {data.stockSince}; sebelum itu hanya dugaan</> : 'belum ada riwayat stok — seluruh temuan masih berupa dugaan'}
               </span>
@@ -234,13 +238,6 @@ export default function StockoutPage() {
                 columns={columns}
                 rowKey={(r) => r.sku}
                 loading={loading}
-                preFilter={(r) => !onlyUnlisted || !r.listed}
-                toolbarExtra={
-                  <label className="flex items-center gap-2 text-[13px]" title="SKU yang tidak ada di daftar stok OCS — kandidat kehabisan stok paling kuat">
-                    <input type="checkbox" checked={onlyUnlisted} onChange={(e) => setOnlyUnlisted(e.target.checked)} />
-                    Hanya yang tidak terdaftar di OCS
-                  </label>
-                }
                 expanded={open}
                 onRowClick={(r) => setOpen(open === r.sku ? null : r.sku)}
                 renderExpanded={(r) => (
@@ -254,9 +251,9 @@ export default function StockoutPage() {
 
           <section className="card overflow-hidden">
             <div className="card-head">
-              <h2 className="card-title">Masalah listing — sebagian platform saja</h2>
+              <h2 className="card-title">Masalah listing — kosong di beberapa shop saja</h2>
               <span className="text-[12px] text-label">
-                Platform ini nol beberapa hari padahal platform lain tetap laku · minimal {data.options.platformMinRunDays} hari &amp; pangsa ≥ {fmt(data.options.platformMinSharePct)}%
+                Shop ini nol beberapa hari padahal shop lain tetap laku · minimal {data.options.platformMinRunDays} hari &amp; pangsa ≥ {fmt(data.options.platformMinSharePct)}%
               </span>
             </div>
             <div className="p-3">
@@ -272,8 +269,10 @@ export default function StockoutPage() {
           </section>
 
           <div className="text-[12px] text-label">
-            Cara baca: sebuah hari dihitung kosong bila qty-nya nol bulat, minimal {data.options.minRunDays} hari berturut-turut,
-            untuk SKU yang normalnya ≥ {fmt(data.options.minAds, 1)} pcs/hari dan laku pada ≥ {fmt(data.options.minSellSharePct)}% hari.
+            Cara baca: hanya SKU aktif di Tabel DOI yang dianalisis. Sebuah hari dihitung kosong bila qty-nya nol bulat —
+            {data.options.minRunDays <= 1 ? ' satu hari nol pun sudah dilaporkan' : ` minimal ${data.options.minRunDays} hari berturut-turut`},
+            untuk SKU yang normalnya ≥ {fmt(data.options.minAds, 1)} pcs/hari dan laku pada ≥ {fmt(data.options.minSellSharePct)}% hari
+            (itulah arti "laku hampir setiap hari").
             Angka <i>normal</i> memakai ADS acuan (basis {data.settings.actionBasis.toLowerCase()}) dari snapshot terdekat sebelum
             episode; untuk SKU yang tidak ada di snapshot dipakai median penjualan 28 hari sebelum episode ({fmt(s.baselineFromSales)} SKU).
             Angka konservatif cenderung <i>terlalu kecil</i>, karena hari kosong ikut menjadi pembagi saat ADS dihitung —
@@ -355,4 +354,10 @@ function Tile({ k, v, h, tone }: { k: string; v: React.ReactNode; h?: React.Reac
       {h ? <div className="h">{h}</div> : null}
     </div>
   );
+}
+
+/** Keterangan dua-nilai. "Tidak" sengaja dibuat redup supaya yang "Ya" langsung menonjol. */
+function YaTidak({ ya, tone }: { ya: boolean; tone: 'bad' | 'warn' }) {
+  if (!ya) return <span className="text-label">Tidak</span>;
+  return <span className={`chip chip-${tone}`}>Ya</span>;
 }

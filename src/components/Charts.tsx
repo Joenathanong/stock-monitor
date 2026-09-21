@@ -286,6 +286,59 @@ export function PlatformSplit({ parts }: { parts: { label: string; value: number
   );
 }
 
+/**
+ * Pita hari: satu kotak per tanggal. Warna deret tunggal (muda → tua) untuk
+ * qty, merah untuk hari tanpa penjualan, abu untuk hari yang datanya bolong.
+ * Hari campaign diberi garis di atasnya — nol di hari campaign paling mahal.
+ */
+export function DayStrip({ dates, values, out, campaign, gaps, height = 30 }: {
+  dates: string[]; values: number[];
+  out: boolean[]; campaign?: (boolean | undefined)[]; gaps?: (boolean | undefined)[];
+  height?: number;
+}) {
+  const { ref, W } = useWidth();
+  const [hover, setHover] = useState<{ i: number; fx: number } | null>(null);
+  const step = W / Math.max(1, dates.length);
+  const max = Math.max(1, ...values);
+  const h = height;
+
+  return (
+    <div className="chart-wrap" ref={ref}>
+      <svg viewBox={`0 0 ${W} ${h}`} className="chart-svg" style={{ height: h }} role="img"
+        aria-label="Pita penjualan harian; kotak merah = hari tanpa penjualan"
+        onMouseLeave={() => setHover(null)}
+        onMouseMove={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          const fx = (e.clientX - r.left) / r.width;
+          const i = Math.floor((fx * W) / step);
+          setHover(i >= 0 && i < dates.length ? { i, fx } : null);
+        }}>
+        {dates.map((d, i) => {
+          const w = Math.max(1, step - 1.5);
+          const x = step * i;
+          const kosong = out[i], bolong = gaps?.[i];
+          const fill = bolong ? 'var(--chart-track)' : kosong ? 'var(--negative)' : 'var(--c1)';
+          const op = bolong ? 1 : kosong ? 0.85 : 0.25 + 0.75 * (values[i] / max);
+          return (
+            <g key={d}>
+              <rect x={x} y={campaign?.[i] ? 4 : 0} width={w} height={campaign?.[i] ? h - 4 : h}
+                rx={2} fill={fill} opacity={hover && hover.i !== i ? op * 0.5 : op} />
+              {campaign?.[i] ? <rect x={x} y={0} width={w} height={2.5} rx={1} fill="var(--critical-solid)" /> : null}
+            </g>
+          );
+        })}
+      </svg>
+      {hover ? (
+        <Tip fx={hover.fx} date={dates[hover.i]} rows={[
+          { k: 'Terjual', v: `${nf(values[hover.i])} pcs` },
+          ...(gaps?.[hover.i] ? [{ k: 'Catatan', v: 'data tidak ada' }] : out[hover.i] ? [{ k: 'Catatan', v: 'tidak ada penjualan' }] : []),
+          ...(campaign?.[hover.i] ? [{ k: 'Hari', v: 'campaign' }] : []),
+        ]} />
+      ) : null}
+    </div>
+  );
+}
+
 function Tip({ fx, date, rows }: { fx: number; date: string; rows: { k: string; v: string }[] }) {
   return (
     <div className="chart-tip" style={{ left: `${Math.min(92, Math.max(8, fx * 100))}%` }}>

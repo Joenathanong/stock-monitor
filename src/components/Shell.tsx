@@ -13,6 +13,7 @@ type Item = { href: string; label: string; module: string; icon: keyof typeof IC
 const LINKS: Item[] = [
   { href: '/', label: 'Dashboard', module: 'Ringkasan', icon: 'home', group: 'Monitoring' },
   { href: '/monitoring', label: 'Tabel DOI', module: 'Perhitungan', icon: 'table', group: 'Monitoring' },
+  { href: '/stockout', label: 'Analisis Stok Kosong', module: 'Perhitungan', icon: 'empty', group: 'Monitoring' },
   { href: '/transit', label: 'Stok Dalam Perjalanan', module: 'Master Data', icon: 'truck', group: 'Master data' },
   { href: '/sku-master', label: 'Lead Time & SKU', module: 'Master Data', icon: 'clock', group: 'Master data' },
   { href: '/phase-out', label: 'Phase Out', module: 'Master Data', icon: 'sunset', group: 'Master data' },
@@ -34,6 +35,7 @@ const ICONS = {
   users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8',
   user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
   sunset: 'M17 18a5 5 0 0 0-10 0M12 2v4M4.9 8.9 7 11M2 18h2M20 18h2M17 11l2.1-2.1M2 22h20M16 5l-4 4-4-4',
+  empty: 'M3 7h18v13H3zM3 12h18M12 3v2M8.5 16h7',
 };
 const Icon = ({ d }: { d: string }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>

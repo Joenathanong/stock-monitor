@@ -164,6 +164,9 @@ export function Bars({ items, color = 'var(--c1)' }: { items: { label: string; v
   );
 }
 
+/** Keterangan jendela — dipakai juga oleh route server, jadi tinggal di lib. */
+export { windowLabel, weekLabel, opsi2Label } from '@/lib/labels';
+
 /** Opsi DOI mana yang ditampilkan — setelan `doi_display` di Pengaturan. */
 export type DoiDisplay = 'OPSI1' | 'OPSI2' | 'BOTH';
 export const show1 = (d: DoiDisplay | undefined) => d !== 'OPSI2';

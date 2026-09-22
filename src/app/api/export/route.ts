@@ -1,6 +1,7 @@
 import { latestSnapshot } from '@/lib/query';
 import { writeSheet } from '@/lib/xlsx';
 import { STATUS_LABEL } from '@/lib/doi';
+import { windowLabel } from '@/lib/labels';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -13,6 +14,8 @@ export async function GET(req: Request) {
   let rows = snap.rows;
   if (status !== 'ALL') rows = rows.filter((r) => r.status === status);
   if (abc !== 'ALL') rows = rows.filter((r) => r.abcClass === abc);
+  // Judul kolom ikut jendela di Pengaturan, bukan "3 Bln" yang ditulis mati.
+  const win1 = windowLabel(snap.settings?.opsi1WindowDays);
 
   const buffer = await writeSheet(
     'DOI',
@@ -29,8 +32,8 @@ export async function GET(req: Request) {
       { header: 'Tgl Jual Pertama', key: 'first', width: 16 },
       { header: 'Umur Jual (hari)', key: 'age', width: 15 },
       { header: 'Keterangan NPL', key: 'npl', width: 30 },
-      { header: 'Penjualan 3 Bln', key: 'sales90', width: 15 },
-      { header: 'Penjualan 3 Bln (ex campaign)', key: 'salesEx', width: 26 },
+      { header: `Penjualan ${win1}`, key: 'sales90', width: 15 },
+      { header: `Penjualan ${win1} (ex campaign)`, key: 'salesEx', width: 26 },
       { header: 'Hari Dihitung (Opsi 1)', key: 'daysEx', width: 20 },
       { header: 'ADS Opsi 1', key: 'ads1', width: 11 },
       { header: 'ADS 8 Mg', key: 'ads8w', width: 10 },

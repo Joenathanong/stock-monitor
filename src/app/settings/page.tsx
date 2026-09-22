@@ -1,12 +1,19 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Alert, Empty, RefreshButton, postJson, useApi } from '@/components/ui';
+import { Alert, Empty, RefreshButton, opsi2Label, postJson, useApi, windowLabel } from '@/components/ui';
 
 type Resp = { ok: boolean; settings: Record<string, string>; defaults: Record<string, string | number> };
 type Exclusions = { ok: boolean; today: string; rows: { date: string; reason: string; manual: boolean }[] };
 
 type Field = { key: string; label: string; hint?: string; type?: 'number' | 'bool' | 'select' | 'text'; options?: { v: string; l: string }[] };
-const GROUPS: { title: string; fields: Field[] }[] = [
+/**
+ * Judul & pilihan ikut angka yang sedang diisi di form — kalau jendela diubah
+ * jadi 30 hari, keterangannya berubah jadi "1 bln", bukan tetap "3 bulan".
+ */
+const groupsFor = (v: Record<string, string>): { title: string; fields: Field[] }[] => {
+  const win1 = windowLabel(Number(v.opsi1_window_days));
+  const win2 = opsi2Label(Number(v.opsi2_w8_days), Number(v.opsi2_w4_days), Number(v.opsi2_w2_days));
+  return [
   {
     title: 'Cakupan data',
     fields: [
@@ -16,7 +23,7 @@ const GROUPS: { title: string; fields: Field[] }[] = [
     ],
   },
   {
-    title: 'ADS Opsi 1 — rata-rata 3 bulan, exclude campaign',
+    title: `ADS Opsi 1 — rata-rata ${win1}, exclude campaign`,
     fields: [
       { key: 'opsi1_window_days', label: 'Jendela (hari)', type: 'number' },
       { key: 'payday_day', label: 'Tanggal gajian yang dikecualikan', type: 'number', hint: '0 = tidak ada' },
@@ -62,8 +69,8 @@ const GROUPS: { title: string; fields: Field[] }[] = [
     fields: [
       { key: 'doi_display', label: 'Opsi DOI yang ditampilkan', type: 'select', options: [
         { v: 'BOTH', l: 'Keduanya — Opsi 1 & Opsi 2' },
-        { v: 'OPSI1', l: 'Opsi 1 saja — 3 bulan ex campaign' },
-        { v: 'OPSI2', l: 'Opsi 2 saja — max(8w, 4w, 2w)' },
+        { v: 'OPSI1', l: `Opsi 1 saja — ${win1} ex campaign` },
+        { v: 'OPSI2', l: `Opsi 2 saja — ${win2}` },
       ] },
     ],
   },
@@ -90,7 +97,8 @@ const GROUPS: { title: string; fields: Field[] }[] = [
             { key: 'tv_refresh_minutes', label: 'Muat ulang data tiap (menit)', type: 'number' },
     ],
   },
-];
+  ];
+};
 
 export default function SettingsPage() {
   const { data, error, reload } = useApi<Resp>('/api/settings');
@@ -146,7 +154,7 @@ export default function SettingsPage() {
       {msg ? <Alert tone={msg.tone}>{msg.text}</Alert> : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {GROUPS.map((g) => (
+        {groupsFor(form).map((g) => (
           <div key={g.title} className="card card-pad">
             <div className="card-title mb-3">{g.title}</div>
             <div className="space-y-3">

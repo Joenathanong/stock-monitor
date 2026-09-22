@@ -2,7 +2,7 @@
 import { Suspense, useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { AbcChip, Alert, Empty, RefreshButton, STATUS_ORDER, STATUS_TEXT, StatusChip, doiLabel, fmt, fmtDateTime, fmtDoi, show1, show2, useApi } from '@/components/ui';
+import { AbcChip, Alert, Empty, RefreshButton, STATUS_ORDER, STATUS_TEXT, StatusChip, doiLabel, fmt, fmtDateTime, fmtDoi, opsi2Label, show1, show2, useApi, windowLabel } from '@/components/ui';
 import { DataGrid, type Column } from '@/components/DataGrid';
 import type { SnapshotRow, SnapshotView } from '@/lib/query';
 
@@ -27,6 +27,8 @@ function Monitoring() {
   const earliest = data?.earliestDataDate ?? null;
   const disp = data?.settings?.doiDisplay ?? 'BOTH';
   const s1 = show1(disp), s2 = show2(disp);
+  const win1 = windowLabel(data?.settings?.opsi1WindowDays);
+  const win2 = opsi2Label(data?.settings?.opsi2W8Days, data?.settings?.opsi2W4Days, data?.settings?.opsi2W2Days);
 
   const preFilter = useCallback((r: SnapshotRow) => {
     // Phase out disembunyikan secara bawaan, kecuali memang sedang difilter ke status itu.
@@ -44,8 +46,8 @@ function Monitoring() {
     { key: 'status', label: 'Status', get: (r) => STATUS_TEXT[r.status] ?? r.status, width: 130, render: (r) => <StatusChip status={r.status} /> },
     { key: 'stock', label: 'Stok', get: (r) => r.availableQty, type: 'number', mono: true, width: 80, title: 'Available Qty OCS (On Hand − On Order)' },
     { key: 'transit', label: 'Transit', get: (r) => r.transitQty, type: 'number', mono: true, width: 76, prio: 'p2', render: (r) => r.transitQty ? fmt(r.transitQty) : <span className="empty">—</span> },
-    ...(s1 ? [{ key: 'ads1', label: doiLabel('ADS', 1, disp), get: (r: SnapshotRow) => r.ads1, type: 'number' as const, mono: true, width: 76, prio: 'p2' as const, title: 'Rata-rata harian 3 bulan, exclude double date & payday', render: (r: SnapshotRow) => fmt(r.ads1, 1) }] : []),
-    ...(s2 ? [{ key: 'ads2', label: doiLabel('ADS', 2, disp), get: (r: SnapshotRow) => r.ads2, type: 'number' as const, mono: true, width: 90, prio: 'p2' as const, title: 'Max dari rata-rata 8w / 4w / 2w', render: (r: SnapshotRow) => <>{fmt(r.ads2, 1)}<span className="ml-1 text-[10px] text-muted">{r.ads2Source}</span></> }] : []),
+    ...(s1 ? [{ key: 'ads1', label: doiLabel('ADS', 1, disp), get: (r: SnapshotRow) => r.ads1, type: 'number' as const, mono: true, width: 76, prio: 'p2' as const, title: `Rata-rata harian ${win1}, exclude double date & payday`, render: (r: SnapshotRow) => fmt(r.ads1, 1) }] : []),
+    ...(s2 ? [{ key: 'ads2', label: doiLabel('ADS', 2, disp), get: (r: SnapshotRow) => r.ads2, type: 'number' as const, mono: true, width: 90, prio: 'p2' as const, title: `Max dari rata-rata ${win2}`, render: (r: SnapshotRow) => <>{fmt(r.ads2, 1)}<span className="ml-1 text-[10px] text-muted">{r.ads2Source}</span></> }] : []),
     ...(s1 ? [{ key: 'doi1', label: doiLabel('DOI', 1, disp), get: (r: SnapshotRow) => r.doi1, type: 'number' as const, mono: true, width: 72, render: (r: SnapshotRow) => <b>{fmtDoi(r.doi1)}</b> }] : []),
     ...(s2 ? [{ key: 'doi2', label: doiLabel('DOI', 2, disp), get: (r: SnapshotRow) => r.doi2, type: 'number' as const, mono: true, width: 72, render: (r: SnapshotRow) => <b>{fmtDoi(r.doi2)}</b> }] : []),
     { key: 'lt', label: 'LT', get: (r) => r.leadTimeDays, type: 'number', mono: true, width: 52, title: 'Lead time (hari)' },
@@ -77,7 +79,7 @@ function Monitoring() {
       render: (r) => r.phaseOutExcessQty === null ? <span className="empty">—</span>
         : <span className={(r.phaseOutLateDays ?? 0) > 0 ? 'text-negative font-semibold' : ''}>{fmt(r.phaseOutExcessQty)}</span> },
     { key: 'sap', label: 'SAP', get: (r) => r.sapCode, mono: true, width: 100, prio: 'p3' },
-  ], [earliest, disp, s1, s2]);
+  ], [earliest, disp, s1, s2, win1, win2]);
 
   const exportUrl = `/api/export?status=${encodeURIComponent(status === 'PO' ? 'ALL' : status)}&abc=${abc}`;
 
@@ -106,7 +108,7 @@ function Monitoring() {
         preFilter={preFilter}
         expanded={open}
         onRowClick={(r) => setOpen(open === r.sku ? null : r.sku)}
-        renderExpanded={(r) => <Detail r={r} earliest={earliest} disp={disp} />}
+        renderExpanded={(r) => <Detail r={r} earliest={earliest} disp={disp} win1={win1} win2={win2} />}
         footerNote="klik baris = rincian perhitungan"
         toolbarExtra={
           <>
@@ -129,7 +131,7 @@ function Monitoring() {
   );
 }
 
-function Detail({ r, earliest, disp }: { r: SnapshotRow; earliest: string | null; disp: 'OPSI1' | 'OPSI2' | 'BOTH' }) {
+function Detail({ r, earliest, disp, win1, win2 }: { r: SnapshotRow; earliest: string | null; disp: 'OPSI1' | 'OPSI2' | 'BOTH'; win1: string; win2: string }) {
   const truncated = !!r.firstSalesDate && !!earliest && r.firstSalesDate <= earliest;
   return (
     <div className="grid gap-4 py-2 text-[12.5px] md:grid-cols-2 xl:grid-cols-4">
@@ -141,15 +143,15 @@ function Detail({ r, earliest, disp }: { r: SnapshotRow; earliest: string | null
       </div>
       {show1(disp) ? (
       <div>
-        <div className="font-semibold text-primary">Opsi 1 — 3 bulan ex campaign</div>
+        <div className="font-semibold text-primary">Opsi 1 — {win1} ex campaign</div>
         <div>Penjualan dihitung: <b>{fmt(r.salesEx)}</b> pcs / <b>{r.daysEx}</b> hari</div>
-        <div>Penjualan 3 bln (semua hari): {fmt(r.sales90)} pcs</div>
+        <div>Penjualan {win1} (semua hari): {fmt(r.sales90)} pcs</div>
         <div>ADS 1 = {fmt(r.ads1, 2)} → DOI {fmtDoi(r.doi1)} hari</div>
       </div>
       ) : null}
       {show2(disp) ? (
       <div>
-        <div className="font-semibold text-primary">Opsi 2 — max(8w, 4w, 2w)</div>
+        <div className="font-semibold text-primary">Opsi 2 — {win2}</div>
         <div>8 minggu: {fmt(r.ads8w, 2)} · 4 minggu: {fmt(r.ads4w, 2)} · 2 minggu: {fmt(r.ads2w, 2)}</div>
         <div>Dipakai: <b>{r.ads2Source}</b> = {fmt(r.ads2, 2)} → DOI {fmtDoi(r.doi2)} hari</div>
       </div>

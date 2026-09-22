@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import type { HealthSummary, ProductStatus } from '@/lib/doi';
 import type { DoiSettings } from '@/lib/settings';
 import { getTheme, setTheme, type Theme } from '@/lib/theme';
-import { doiLabel, doiTotalLabel, show1, show2 } from '@/components/ui';
+import { doiLabel, doiTotalLabel, opsi2Label, show1, show2, windowLabel } from '@/components/ui';
 
 /**
  * Dashboard TV — layar penuh, tanpa login, berganti slide otomatis.
@@ -142,6 +142,9 @@ function Tv() {
     if (!data?.summary) return [];
     const s = data.summary;
     const set = data.settings;
+    // Keterangan jendela ikut Pengaturan, tidak ditulis mati.
+    const win1 = windowLabel(set?.opsi1WindowDays);
+    const win2 = opsi2Label(set?.opsi2W8Days, set?.opsi2W4Days, set?.opsi2W2Days);
     const rows = data.rows;
     const out: Slide[] = [];
 
@@ -150,8 +153,8 @@ function Tv() {
       render: () => (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="tv-kpis">
-            {d1 ? <Kpi label={doiTotalLabel(1, disp)} value={`${doi(s.total.doi1)}`} unit="hari" hint="3 bln ex campaign" /> : null}
-            {d2 ? <Kpi label={doiTotalLabel(2, disp)} value={`${doi(s.total.doi2)}`} unit="hari" hint="max 8w / 4w / 2w" /> : null}
+            {d1 ? <Kpi label={doiTotalLabel(1, disp)} value={`${doi(s.total.doi1)}`} unit="hari" hint={`${win1} ex campaign`} /> : null}
+            {d2 ? <Kpi label={doiTotalLabel(2, disp)} value={`${doi(s.total.doi2)}`} unit="hari" hint={win2} /> : null}
             <Kpi label="Total stok" value={nf(s.total.stock)} unit="pcs" hint={`+ ${nf(s.total.transit)} transit`} />
             <Kpi label="Perlu open PO" value={nf(s.byStatus.CRITICAL + s.byStatus.LOW)} unit="SKU" hint={`${nf(s.byStatus.CRITICAL)} kritis · ${nf(s.byStatus.LOW)} low`} tone="var(--negative)" />
             <Kpi label="Overstock" value={nf(s.byStatus.OVERSTOCK)} unit="SKU" hint={`> ${set?.targetDoiDays ?? 14} hari`} tone="var(--accent-violet)" />
@@ -165,7 +168,7 @@ function Tv() {
               <Bars items={s.buckets.map((b) => ({ label: b.label, value: b.count, color: 'var(--c1)' }))} />
               <div className="mt-4 text-[15px] text-label">Target DOI {set?.targetDoiDays} hari · safety {set?.safetyDays} hari · lead time default {set?.defaultLeadTimeDays} hari</div>
             </Panel>
-            <Panel title="Analisis ABC (qty 3 bulan)">
+            <Panel title={`Analisis ABC (qty ${win1})`}>
               <div className="tv-tablewrap tv-tablewrap-mini"><table className="tv-table tv-table-mini">
                 <thead><tr><th>Kelas</th><th className="num">SKU</th><th className="num">Pangsa</th><th className="num">Stok</th>{d1 ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}</tr></thead>
                 <tbody>
@@ -175,7 +178,7 @@ function Tv() {
                   })}
                 </tbody>
               </table></div>
-              <div className="tv-list-title">Penjualan tertinggi 3 bulan</div>
+              <div className="tv-list-title">Penjualan tertinggi {win1}</div>
               <div className="tv-list">
                 {[...rows].sort((a, b) => b.sales90 - a.sales90).slice(0, topSales).map((r, i) => (
                   <div key={r.sku} className="tv-list-row">
@@ -221,7 +224,7 @@ function Tv() {
       key: 'overstock', title: 'Overstock Terbesar', subtitle: `${nf(s.byStatus.OVERSTOCK)} SKU di atas ${set?.targetDoiDays ?? 14} hari`,
       render: () => over.length ? (
         <div className="tv-tablewrap"><table className="tv-table">
-          <thead><tr><th className="c-sku">SKU</th><th className="c-abc">ABC</th><th className="num">Stok</th>{d1 ? <th className="num">{doiLabel('ADS', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('ADS', 2, disp)}</th> : null}{d1 ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}<th className="num">Penjualan 3 bln</th></tr></thead>
+          <thead><tr><th className="c-sku">SKU</th><th className="c-abc">ABC</th><th className="num">Stok</th>{d1 ? <th className="num">{doiLabel('ADS', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('ADS', 2, disp)}</th> : null}{d1 ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}<th className="num">Penjualan {win1}</th></tr></thead>
           <tbody>{over.map((r) => (
             <tr key={r.sku}>
               <td className="sku" title={r.name}>{r.sku}</td>

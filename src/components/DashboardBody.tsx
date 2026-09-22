@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { AbcChip, Alert, Bars, Empty, Kpi, RefreshButton, STATUS_COLOR, STATUS_ORDER, STATUS_TEXT, StatusChip, doiLabel, doiTotalLabel, fmt, fmtDateTime, fmtDoi, opsi2Label, show1, show2, useApi, windowLabel } from '@/components/ui';
+import { AbcChip, Alert, Bars, Empty, Kpi, RefreshButton, STATUS_COLOR, STATUS_ORDER, STATUS_TEXT, StatusChip, doiLabel, doiTotalLabel, fmt, fmtDateTime, fmtDoi, fmtRp, fmtRpShort, opsi2Label, show1, show2, useApi, windowLabel } from '@/components/ui';
 import { DataGrid, type Column } from '@/components/DataGrid';
 import type { DashboardView, SnapshotRow } from '@/lib/query';
 
@@ -54,10 +54,12 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
   const set = data?.settings;
   // Kedua versi total sudah dihitung saat compute, jadi toggle ini tidak menghitung ulang apa pun.
   const tot = s ? ((withPhaseOut ? s.totalWithPhaseOut : s.total) ?? s.total) : null;
-  const poSum = s?.phaseOut ?? { count: 0, stock: 0, excessQty: 0, lateCount: 0 };
+  const poSum = s?.phaseOut ?? { count: 0, stock: 0, value: 0, excessQty: 0, lateCount: 0 };
   const disp = set?.doiDisplay ?? 'BOTH';
   const OVER_COLS = useMemo(() => overCols(disp), [disp]);
   // Keterangan jendela mengikuti Pengaturan, bukan ditulis mati.
+  // Nilai rupiah hanya muncul kalau fiturnya menyala DAN angkanya memang ada.
+  const nilaiAktif = (tot?.value ?? 0) > 0;
   const win1 = windowLabel(set?.opsi1WindowDays);
   const win2 = opsi2Label(set?.opsi2W8Days, set?.opsi2W4Days, set?.opsi2W2Days);
 
@@ -103,6 +105,12 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
         <>
           <div className="kpi-grid">
             <Kpi label="SKU dihitung" value={fmt(tot!.skuCount)} hint={`${fmt(s.byStatus.EXCLUDED)} dikecualikan · ${fmt(s.byStatus.PHASE_OUT ?? 0)} phase out`} />
+            {nilaiAktif ? (
+              <Kpi label="Nilai stok" value={fmtRpShort(tot!.value)} unit=""
+                hint={tot!.noPrice
+                  ? <span className="text-critical">{fmt(tot!.noPrice)} SKU belum ada harganya</span>
+                  : `${fmt(tot!.stock)} pcs × harga OCS`} />
+            ) : null}
             <Kpi label="Total stok (Available)" value={fmt(tot!.stock)} hint={`+ ${fmt(tot!.transit)} dalam perjalanan`} />
             {show1(disp) ? <Kpi label={doiTotalLabel(1, disp)} value={fmtDoi(tot!.doi1)} unit="hari" hint={`ADS total ${fmt(tot!.ads1, 1)}/hari · ${win1} ex campaign`} /> : null}
             {show2(disp) ? <Kpi label={doiTotalLabel(2, disp)} value={fmtDoi(tot!.doi2)} unit="hari" hint={`ADS total ${fmt(tot!.ads2, 1)}/hari · ${win2}`} /> : null}
@@ -123,7 +131,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
             <div className="card overflow-hidden">
               <div className="card-title px-4 pt-4">Analisis ABC (qty {win1})</div>
               <div className="table-scroll"><table className="dgrid dgrid-auto mt-2">
-                <thead><tr><th>Kelas</th><th className="num">SKU</th><th className="num" title={`Pangsa penjualan ${win1}`}>%</th><th className="num">Stok</th>{show1(disp) ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{show2(disp) ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}</tr></thead>
+                <thead><tr><th>Kelas</th><th className="num">SKU</th><th className="num" title={`Pangsa penjualan ${win1}`}>%</th><th className="num">Stok</th>{nilaiAktif ? <th className="num" title="Stok × harga satuan OCS">Nilai</th> : null}{show1(disp) ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{show2(disp) ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}</tr></thead>
                 <tbody>
                   {(['A', 'B', 'C'] as const).map((c) => {
                     const k = s.byAbc[c];
@@ -134,6 +142,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
                         <td className="num">{fmt(k.count)}</td>
                         <td className="num">{totalSales ? fmt((k.sales / totalSales) * 100, 1) : '0'}%</td>
                         <td className="num">{fmt(k.stock)}</td>
+                        {nilaiAktif ? <td className="num" title={fmtRp(k.total.value)}>{fmtRpShort(k.total.value)}</td> : null}
                         {show1(disp) ? <td className="num">{fmtDoi(k.total.doi1)}</td> : null}
                         {show2(disp) ? <td className="num">{fmtDoi(k.total.doi2)}</td> : null}
                       </tr>
@@ -154,6 +163,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
               <div className="px-4 pt-3"><Resume items={[
                 { k: 'SKU', v: fmt(grp?.po.count) },
                 { k: 'Stok', v: fmt(grp?.po.stock), u: 'pcs' },
+                { k: 'Nilai', v: fmtRpShort(grp?.po.value) },
                 { k: 'Transit', v: fmt(grp?.po.transit), u: 'pcs' },
                 { k: 'Saran qty PO', v: fmt(grp?.po.suggested), u: 'pcs', tone: 'text-primary' },
               ]} /></div>
@@ -171,6 +181,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
                 <div className="px-4 pt-3"><Resume items={[
                   { k: 'SKU', v: fmt(grp?.overstock.count) },
                   { k: 'Stok', v: fmt(grp?.overstock.stock), u: 'pcs' },
+                  { k: 'Nilai', v: fmtRpShort(grp?.overstock.value) },
                   { k: `Jual ${win1}`, v: fmt(grp?.overstock.sales90), u: 'pcs' },
                 ]} /></div>
                 <div className="p-3"><DataGrid<SnapshotRow> id="dash-over" compact rows={overstock} columns={OVER_COLS} rowKey={(r) => r.sku} emptyText="Tidak ada overstock." /></div>
@@ -183,6 +194,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
                 <div className="px-4 pt-3"><Resume items={[
                   { k: 'SKU', v: fmt(grp?.npl.count) },
                   { k: 'Stok', v: fmt(grp?.npl.stock), u: 'pcs' },
+                  { k: 'Nilai', v: fmtRpShort(grp?.npl.value) },
                   { k: `Jual ${win1}`, v: fmt(grp?.npl.sales90), u: 'pcs' },
                 ]} /></div>
                 <div className="p-3"><DataGrid<SnapshotRow> id="dash-npl" compact rows={npl} columns={NPL_COLS} rowKey={(r) => r.sku} emptyText="Tidak ada produk baru." /></div>
@@ -203,6 +215,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
                 <div className="px-4 pt-3"><Resume items={[
                   { k: 'SKU', v: fmt(poSum.count) },
                   { k: 'Stok', v: fmt(poSum.stock), u: 'pcs' },
+                  { k: 'Nilai', v: fmtRpShort(poSum.value) },
                   { k: 'Sisa saat target', v: fmt(poSum.excessQty), u: 'pcs' },
                   { k: 'Melewati target', v: fmt(poSum.lateCount), u: 'SKU', tone: poSum.lateCount ? 'text-negative' : undefined },
                 ]} /></div>

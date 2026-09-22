@@ -75,6 +75,18 @@ const groupsFor = (v: Record<string, string>): { title: string; fields: Field[] 
     ],
   },
   {
+    title: 'Nilai stok (harga dari OCS)',
+    fields: [
+      { key: 'price_enabled', label: 'Tampilkan nilai rupiah', type: 'bool', hint: 'Harga ditarik dari /Products/GetProductSkus. OCS tidak punya HET; yang tersedia harga jual marketplace.' },
+      { key: 'price_source', label: 'Harga yang dipakai', type: 'select', options: [
+        { v: 'MIN', l: 'Terendah antar marketplace (paling konservatif)' },
+        { v: 'AVG', l: 'Rata-rata antar marketplace' },
+        { v: 'MAX', l: 'Tertinggi antar marketplace' },
+      ] },
+      { key: 'price_refresh_hours', label: 'Tarik ulang harga tiap (jam)', type: 'number', hint: '0 = tiap kali hitung ulang. Harga jarang berubah; makin besar, Refresh makin cepat.' },
+    ],
+  },
+  {
     title: 'Phase out',
     fields: [
       { key: 'exclude_phase_out', label: 'Keluarkan SKU phase out dari DOI total & kelas ABC', type: 'bool' },

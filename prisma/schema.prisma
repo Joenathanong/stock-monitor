@@ -166,6 +166,9 @@ model DoiSnapshot {
   phaseOutTargetDate DateTime? @db.Date
   phaseOutExcessQty  Int?
   phaseOutLateDays   Int?
+  /// Harga satuan saat snapshot dibuat — disimpan supaya nilai historis tidak
+  /// ikut berubah ketika harga di OCS berubah besok.
+  unitPrice      Int      @default(0)
   computedAt     DateTime @default(now())
 
   @@id([snapshotDate, sku])
@@ -256,4 +259,21 @@ model SyncLock {
   acquiredAt DateTime @default(now())
 
   @@map("sync_lock")
+}
+
+/// Harga jual per SKU dari OCS (/Products/GetProductSkus).
+/// OCS memberi SalePrice sebagai ARRAY — satu harga per marketplace — jadi
+/// ketiganya disimpan: `price` (yang dipakai), plus min & max sebagai jejak.
+model ProductPrice {
+  sku       String   @id @db.VarChar(120)
+  name      String?  @db.VarChar(500)
+  /// Harga yang dipakai menghitung nilai stok (bawaan: terendah antar marketplace).
+  price     Int      @default(0)
+  priceMin  Int      @default(0)
+  priceMax  Int      @default(0)
+  /// Berapa marketplace yang menyumbang harga — 0 berarti OCS tidak punya harganya.
+  sources   Int      @default(0)
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@map("product_price")
 }

@@ -147,6 +147,71 @@ export async function fetchStock(budgetMs = 30_000): Promise<OcsStockRow[]> {
   return rows;
 }
 
+// ---------- Harga produk ----------
+
+/**
+ * Satu baris SKU dari /Products/GetProductSkus.
+ *
+ * Catatan penting dari bundel OCS (dibongkar 22 Sep 2026):
+ *  - `SalePrice` adalah ARRAY — satu harga per marketplace. Halaman Products
+ *    menampilkannya sebagai rentang min–max, bukan satu angka.
+ *  - `SellerSku` bisa berisi BEBERAPA sku dipisah ", " untuk satu produk.
+ *    Halaman OCS sendiri melakukan `SellerSku.split(", ")`.
+ *  - OCS tidak punya kolom HET; yang tersedia hanya harga jual marketplace.
+ */
+export type OcsProductSkuRow = {
+  SellerSku?: string;
+  Title?: string;
+  SalePrice?: number[] | number | null;
+};
+
+export type HargaSku = { sku: string; name: string | null; price: number; min: number; max: number; sources: number };
+
+/** Ambil harga per SKU. `pick` memilih angka mana dari array SalePrice. */
+export async function fetchProductPrices(
+  budgetMs = 25_000,
+  pick: 'MIN' | 'MAX' | 'AVG' = 'MIN',
+): Promise<HargaSku[]> {
+  const attempts = budgetMs >= 20_000 ? 2 : 1;
+  const perAttempt = Math.max(8_000, Math.floor((budgetMs - (attempts - 1) * 2_000) / attempts));
+  const data = await authedGet<OcsProductSkuRow[] | { value: OcsProductSkuRow[] }>(
+    '/Products/GetProductSkus', perAttempt, attempts,
+  );
+  const rows = Array.isArray(data) ? data : data?.value;
+  if (!Array.isArray(rows)) throw new Error('Format respons GetProductSkus tidak dikenali');
+  return mapProductPrices(rows, pick);
+}
+
+/** Bagian murni — dipisah supaya bisa diuji tanpa menyentuh jaringan. */
+export function mapProductPrices(rows: OcsProductSkuRow[], pick: 'MIN' | 'MAX' | 'AVG' = 'MIN'): HargaSku[] {
+  const out = new Map<string, HargaSku>();
+  for (const r of rows) {
+    const harga = (Array.isArray(r.SalePrice) ? r.SalePrice : r.SalePrice == null ? [] : [r.SalePrice])
+      .map((n) => Number(n))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (!harga.length) continue;
+
+    const min = Math.min(...harga);
+    const max = Math.max(...harga);
+    const price = Math.round(
+      pick === 'MAX' ? max : pick === 'AVG' ? harga.reduce((a, b) => a + b, 0) / harga.length : min,
+    );
+
+    // Satu produk bisa membawa beberapa SKU sekaligus ("SKU-A, SKU-B").
+    for (const raw of String(r.SellerSku ?? '').split(',')) {
+      const sku = raw.trim();
+      if (!sku) continue;
+      const lama = out.get(sku);
+      // Kalau satu SKU muncul dua kali, ambil yang harganya lebih rendah —
+      // sejalan dengan pilihan "terendah" dan tidak pernah menggelembungkan nilai.
+      if (!lama || (pick === 'MIN' ? price < lama.price : price > lama.price)) {
+        out.set(sku, { sku, name: r.Title?.slice(0, 500) ?? null, price, min: Math.round(min), max: Math.round(max), sources: harga.length });
+      }
+    }
+  }
+  return [...out.values()];
+}
+
 // ---------- Penjualan ----------
 
 export type OcsSalesRow = {

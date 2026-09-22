@@ -5,7 +5,7 @@
  * supaya halaman tetap cepat walaupun OCS sedang lambat atau mati.
  */
 import { prisma } from './prisma';
-import { fetchStock, fetchSalesForDate, demandStatusCodes, type OcsSalesRow } from './ocs';
+import { fetchProductPrices, fetchStock, fetchSalesForDate, demandStatusCodes, type OcsSalesRow } from './ocs';
 import { addDays, keyToUtcDate, todayKey, type DateKey } from './dates';
 import type { DoiSettings } from './settings';
 
@@ -56,6 +56,49 @@ export async function finishLog(id: bigint, status: string, rows: number, messag
     where: { id },
     data: { status, rows, message: message?.slice(0, 500) ?? null, finishedAt: new Date() },
   });
+}
+
+// ---------------------------------------------------------------- harga
+
+/**
+ * Tarik harga per SKU dari OCS ke `product_price`.
+ *
+ * Harga adalah data master yang jarang berubah, jadi penarikannya dilewati bila
+ * data yang ada masih segar (`price_refresh_hours`). Itu menjaga tombol Refresh
+ * tetap cepat — anggaran 52 detik tidak boleh habis untuk data yang sama.
+ *
+ * Kegagalan di sini TIDAK BOLEH menggagalkan perhitungan DOI: nilai rupiah cuma
+ * pelengkap, sedangkan DOI adalah inti aplikasinya. Pemanggil menangkap errornya.
+ */
+export async function syncPrices(
+  s: Pick<DoiSettings, 'priceSource' | 'priceRefreshHours'>,
+  budgetMs = 25_000,
+  force = false,
+): Promise<SyncResult & { skus?: number }> {
+  const t0 = Date.now();
+  if (!force && s.priceRefreshHours > 0) {
+    const terbaru = await prisma.productPrice.findFirst({ orderBy: { updatedAt: 'desc' }, select: { updatedAt: true } });
+    if (terbaru && Date.now() - terbaru.updatedAt.getTime() < s.priceRefreshHours * 3_600_000) {
+      return { ok: true, skipped: true, rows: 0, message: 'Harga masih segar', durationMs: Date.now() - t0 };
+    }
+  }
+
+  const rows = await fetchProductPrices(budgetMs, s.priceSource);
+  if (!rows.length) return { ok: true, rows: 0, message: 'OCS tidak mengembalikan harga', durationMs: Date.now() - t0 };
+
+  const now = new Date();
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const chunk = rows.slice(i, i + BATCH);
+    const placeholders = chunk.map(() => '(?,?,?,?,?,?,?)').join(',');
+    const params = chunk.flatMap((r) => [r.sku.slice(0, 120), r.name, r.price, r.min, r.max, r.sources, now]);
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO product_price (sku, name, price, priceMin, priceMax, sources, updatedAt) VALUES ${placeholders}
+       ON DUPLICATE KEY UPDATE name=VALUES(name), price=VALUES(price), priceMin=VALUES(priceMin),
+         priceMax=VALUES(priceMax), sources=VALUES(sources), updatedAt=VALUES(updatedAt)`,
+      ...params,
+    );
+  }
+  return { ok: true, rows: rows.length, skus: rows.length, durationMs: Date.now() - t0 };
 }
 
 // ---------------------------------------------------------------- stok

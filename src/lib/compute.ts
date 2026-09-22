@@ -9,7 +9,7 @@ import { assignAbc, computeSku, summarize, type DoiResult, type HealthSummary } 
 import { sapKey } from './phase-out';
 import { buildExclusionMap } from './exclusion';
 import { addDays, keyToUtcDate, todayKey, toDateKeyUtc, type DateKey } from './dates';
-import { acquireLock, finishLog, lockOwner, releaseLock, startLog, syncStock, STALE_LOCK_MINUTES } from './sync';
+import { acquireLock, finishLog, lockOwner, releaseLock, startLog, syncPrices, syncStock, STALE_LOCK_MINUTES } from './sync';
 import { budget, defaultBudgetMs, Timeline } from './budget';
 
 export async function getSettingsMap(): Promise<SettingsMap> {
@@ -118,7 +118,7 @@ export async function computeAll(now = new Date()): Promise<ComputeOutput> {
   const settings = await getSettings();
   const windowDays = longestWindow(settings);
 
-  const [stock, sales, stockouts, transitRows, masterRows, manualEx, phaseOutRows] = await Promise.all([
+  const [stock, sales, stockouts, transitRows, masterRows, manualEx, phaseOutRows, priceRows] = await Promise.all([
     loadStock(settings),
     loadSales(settings, today, windowDays),
     loadStockouts(settings, today, windowDays),
@@ -126,6 +126,7 @@ export async function computeAll(now = new Date()): Promise<ComputeOutput> {
     prisma.skuMaster.findMany(),
     prisma.exclusionDate.findMany(),
     prisma.phaseOut.findMany(),
+    settings.priceEnabled ? prisma.productPrice.findMany({ select: { sku: true, price: true } }) : Promise.resolve([]),
   ]);
 
   const exclusionMap = buildExclusionMap(
@@ -136,6 +137,7 @@ export async function computeAll(now = new Date()): Promise<ComputeOutput> {
   const ctx = { today, exclusionDates: new Set(exclusionMap.keys()), earliestDataDate: sales.earliestDataDate };
 
   const transit = new Map(transitRows.map((r) => [r.sku, r.qty]));
+  const harga = new Map(priceRows.map((r) => [r.sku, r.price]));
   const master = new Map(masterRows.map((r) => [r.sku, r]));
   // Dua jalur pencocokan: lewat SKU langsung, atau lewat 6 digit terakhir kode SAP.
   const toEntry = (r: (typeof phaseOutRows)[number]) => ({
@@ -164,6 +166,7 @@ export async function computeAll(now = new Date()): Promise<ComputeOutput> {
         salesByDate: sales.salesBySku.get(st.sku) ?? {},
         firstSalesDate: sales.firstBySku.get(st.sku) ?? null,
         stockoutDates: stockouts.get(st.sku),
+        unitPrice: harga.get(st.sku) ?? 0,
       },
       settings,
       ctx,
@@ -190,13 +193,13 @@ export async function persistSnapshot(out: ComputeOutput, trigger: string) {
   const cols =
     '(snapshotDate, sku, name, sapCode, availableQty, qtyOnHand, qtyOnOrder, transitQty, leadTimeDays, firstSalesDate, ageDays, isNpl, nplNote, ' +
     'sales90, salesEx, daysEx, ads1, ads8w, ads4w, ads2w, ads2, ads2Source, doi1, doi2, doi1Transit, doi2Transit, refDoi, refDoiTransit, status, action, ' +
-    'suggested1, suggested2, abcClass, abcShare, abcCumShare, runOutDate, isPhaseOut, phaseOutTargetDate, phaseOutExcessQty, phaseOutLateDays, computedAt)';
-  const n = 41;
+    'suggested1, suggested2, abcClass, abcShare, abcCumShare, runOutDate, isPhaseOut, phaseOutTargetDate, phaseOutExcessQty, phaseOutLateDays, unitPrice, computedAt)';
+  const n = 42;
   const update = [
     'name', 'sapCode', 'availableQty', 'qtyOnHand', 'qtyOnOrder', 'transitQty', 'leadTimeDays', 'firstSalesDate', 'ageDays', 'isNpl', 'nplNote',
     'sales90', 'salesEx', 'daysEx', 'ads1', 'ads8w', 'ads4w', 'ads2w', 'ads2', 'ads2Source', 'doi1', 'doi2', 'doi1Transit', 'doi2Transit', 'refDoi', 'refDoiTransit',
     'status', 'action', 'suggested1', 'suggested2', 'abcClass', 'abcShare', 'abcCumShare', 'runOutDate',
-    'isPhaseOut', 'phaseOutTargetDate', 'phaseOutExcessQty', 'phaseOutLateDays', 'computedAt',
+    'isPhaseOut', 'phaseOutTargetDate', 'phaseOutExcessQty', 'phaseOutLateDays', 'unitPrice', 'computedAt',
   ].map((c) => `${c}=VALUES(${c})`).join(', ');
 
   for (let i = 0; i < out.rows.length; i += BATCH) {
@@ -209,7 +212,7 @@ export async function persistSnapshot(out: ComputeOutput, trigger: string) {
       r.doi1, r.doi2, r.doi1Transit, r.doi2Transit, r.refDoi, r.refDoiTransit, r.status, r.action.slice(0, 60),
       r.suggested1, r.suggested2, r.abcClass, r.abcShare, r.abcCumShare,
       r.runOutDate ? keyToUtcDate(r.runOutDate) : null,
-      r.isPhaseOut ? 1 : 0, r.phaseOutTargetDate ? keyToUtcDate(r.phaseOutTargetDate) : null, r.phaseOutExcessQty, r.phaseOutLateDays, now,
+      r.isPhaseOut ? 1 : 0, r.phaseOutTargetDate ? keyToUtcDate(r.phaseOutTargetDate) : null, r.phaseOutExcessQty, r.phaseOutLateDays, r.unitPrice, now,
     ]);
     await prisma.$executeRawUnsafe(
       `INSERT INTO doi_snapshot ${cols} VALUES ${placeholders} ON DUPLICATE KEY UPDATE ${update}`,
@@ -281,9 +284,20 @@ export async function runCompute(
       waktu.step('pengaturan');
       // Sisakan ±20 dtk untuk hitung + simpan; sisanya untuk OCS.
       anggaran.need(12_000, 'tarik stok OCS');
-      const st = await syncStock(trigger, settings.areaScope, anggaran.slice(20_000, 8_000));
+      const st = await syncStock(trigger, settings.areaScope, anggaran.slice(24_000, 8_000));
       stockRows = st.rows;
       waktu.step(`stok ${st.skipped ? 'dilewati' : `${st.rows} baris`}`);
+
+      // Harga = pelengkap. Gagal di sini TIDAK BOLEH menggagalkan DOI, jadi
+      // errornya ditelan dan dicatat; perhitungan lanjut dengan harga terakhir.
+      if (settings.priceEnabled && anggaran.left() > 16_000) {
+        try {
+          const hp = await syncPrices(settings, anggaran.slice(14_000, 6_000));
+          waktu.step(`harga ${hp.skipped ? 'masih segar' : `${hp.rows} SKU`}`);
+        } catch (err) {
+          waktu.step(`harga GAGAL (${err instanceof Error ? err.message.slice(0, 60) : err})`);
+        }
+      }
     }
     anggaran.need(6_000, 'hitung DOI');
     const out = await computeAll();

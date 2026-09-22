@@ -67,6 +67,8 @@ export type SkuInput = {
   firstSalesDate: DateKey | null;
   /** Tanggal ketika stok tercatat 0 (dari stock_daily) — dipakai bila `excludeStockoutDays` aktif. */
   stockoutDates?: Set<DateKey>;
+  /** Harga satuan (rupiah) dari OCS. 0 = harganya tidak diketahui. */
+  unitPrice?: number;
 };
 
 export type DoiContext = {
@@ -128,6 +130,10 @@ export type DoiResult = {
   suggested2: number;
   runOutDate: DateKey | null;
   abcClass: 'A' | 'B' | 'C';
+  /** Harga satuan saat dihitung; 0 bila OCS tidak punya harganya. */
+  unitPrice: number;
+  /** Nilai stok = stok × harga satuan. */
+  stockValue: number;
   /** Phase out: penanda + metrik sell-down. */
   isPhaseOut: boolean;
   phaseOutTargetDate: DateKey | null;
@@ -184,6 +190,8 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
 
   const po = input.phaseOut ?? null;
   const isPhaseOut = !!po && !input.isExcluded;
+  // Harga negatif/NaN diperlakukan sebagai "tidak diketahui", bukan dipaksa dipakai.
+  const unitPrice = Number.isFinite(input.unitPrice) && (input.unitPrice as number) > 0 ? Math.round(input.unitPrice as number) : 0;
 
   const exOpts = { exclusionDates: ctx.exclusionDates, excludeStockout: s.excludeStockoutDays };
   const w1 = windowStat(input, today, s.opsi1WindowDays, exOpts);
@@ -291,6 +299,8 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
     abcClass: 'C',
     abcShare: 0,
     abcCumShare: 0,
+    unitPrice,
+    stockValue: unitPrice * stock,
     isPhaseOut,
     phaseOutTargetDate: po?.targetOutDate ?? null,
     phaseOutReplacement: po?.replacementSku ?? null,
@@ -323,18 +333,29 @@ export function assignAbc(rows: DoiResult[], aPct: number, bPct: number): DoiRes
   return rows;
 }
 
-export type TotalDoi = { stock: number; transit: number; ads1: number; ads2: number; doi1: number | null; doi2: number | null; skuCount: number };
+export type TotalDoi = {
+  stock: number; transit: number; ads1: number; ads2: number;
+  doi1: number | null; doi2: number | null; skuCount: number;
+  /** Nilai stok (rupiah) memakai harga satuan saat snapshot. */
+  value: number;
+  /** Berapa SKU yang harganya TIDAK diketahui — nilai di atas belum lengkap sebanyak ini. */
+  noPrice: number;
+};
 
 /** DOI keseluruhan = total stok ÷ total ADS. Dihitung untuk semua SKU dan per kelas ABC. */
 export function totalDoi(rows: DoiResult[], excludePhaseOut = false): TotalDoi {
   const skip = (r: DoiResult) => r.status === 'EXCLUDED' || (excludePhaseOut && r.status === 'PHASE_OUT');
-  let stock = 0, transit = 0, ads1 = 0, ads2 = 0;
+  let stock = 0, transit = 0, ads1 = 0, ads2 = 0, value = 0, noPrice = 0;
   for (const r of rows) {
     if (skip(r)) continue;
     stock += r.availableQty;
     transit += r.transitQty;
     ads1 += r.ads1;
     ads2 += r.ads2;
+    value += r.stockValue;
+    // SKU berstok yang harganya tidak diketahui membuat total nilai lebih kecil
+    // dari kenyataan — dihitung supaya bisa diberi tahu, bukan disembunyikan.
+    if (!r.unitPrice && r.availableQty > 0) noPrice++;
   }
   return {
     stock, transit,
@@ -343,6 +364,7 @@ export function totalDoi(rows: DoiResult[], excludePhaseOut = false): TotalDoi {
     doi1: ads1 > 0 ? round2(stock / ads1) : null,
     doi2: ads2 > 0 ? round2(stock / ads2) : null,
     skuCount: rows.filter((r) => !skip(r)).length,
+    value, noPrice,
   };
 }
 
@@ -353,7 +375,7 @@ export type HealthSummary = {
   total: TotalDoi;
   /** Total bila SKU phase out ikut dihitung — untuk toggle di layar, tanpa hitung ulang. */
   totalWithPhaseOut: TotalDoi;
-  phaseOut: { count: number; stock: number; excessQty: number; lateCount: number };
+  phaseOut: { count: number; stock: number; value: number; excessQty: number; lateCount: number };
   npl: number;
   suggestedQty1: number;
   suggestedQty2: number;
@@ -386,6 +408,7 @@ export function summarize(rows: DoiResult[], excludePhaseOut = false): HealthSum
     phaseOut: {
       count: pos.length,
       stock: pos.reduce((a, r) => a + r.availableQty, 0),
+      value: pos.reduce((a, r) => a + r.stockValue, 0),
       excessQty: pos.reduce((a, r) => a + (r.phaseOutExcessQty ?? 0), 0),
       lateCount: pos.filter((r) => (r.phaseOutLateDays ?? 0) > 0).length,
     },

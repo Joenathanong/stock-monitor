@@ -2,7 +2,7 @@
 import { Suspense, useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { AbcChip, Alert, Empty, RefreshButton, STATUS_ORDER, STATUS_TEXT, StatusChip, doiLabel, fmt, fmtDateTime, fmtDoi, opsi2Label, show1, show2, useApi, windowLabel } from '@/components/ui';
+import { AbcChip, Alert, Empty, RefreshButton, STATUS_ORDER, STATUS_TEXT, StatusChip, doiLabel, fmt, fmtDateTime, fmtDoi, fmtRp, fmtRpShort, opsi2Label, show1, show2, useApi, windowLabel } from '@/components/ui';
 import { DataGrid, type Column } from '@/components/DataGrid';
 import type { SnapshotRow, SnapshotView } from '@/lib/query';
 
@@ -51,6 +51,12 @@ function Monitoring() {
     ...(s1 ? [{ key: 'doi1', label: doiLabel('DOI', 1, disp), get: (r: SnapshotRow) => r.doi1, type: 'number' as const, mono: true, width: 72, render: (r: SnapshotRow) => <b>{fmtDoi(r.doi1)}</b> }] : []),
     ...(s2 ? [{ key: 'doi2', label: doiLabel('DOI', 2, disp), get: (r: SnapshotRow) => r.doi2, type: 'number' as const, mono: true, width: 72, render: (r: SnapshotRow) => <b>{fmtDoi(r.doi2)}</b> }] : []),
     { key: 'lt', label: 'LT', get: (r) => r.leadTimeDays, type: 'number', mono: true, width: 52, title: 'Lead time (hari)' },
+    { key: 'harga', label: 'Harga', get: (r) => r.unitPrice || null, type: 'number', mono: true, width: 110, prio: 'p2',
+      title: 'Harga satuan dari OCS (SalePrice terendah antar marketplace) saat snapshot dibuat',
+      render: (r) => r.unitPrice ? fmtRp(r.unitPrice) : <span className="empty">—</span> },
+    { key: 'nilai', label: 'Nilai stok', get: (r) => r.stockValue || null, type: 'number', mono: true, width: 130,
+      title: 'Stok × harga satuan',
+      render: (r) => r.stockValue ? <span title={fmtRp(r.stockValue)}>{fmtRpShort(r.stockValue)}</span> : <span className="empty">—</span> },
     ...(s1 ? [{ key: 'sug1', label: doiLabel('Saran', 1, disp), get: (r: SnapshotRow) => r.suggested1, type: 'number' as const, mono: true, width: 80, title: 'Qty PO untuk mencapai target DOI (Opsi 1)', render: (r: SnapshotRow) => r.suggested1 ? fmt(r.suggested1) : <span className="empty">—</span> }] : []),
     ...(s2 ? [{ key: 'sug2', label: doiLabel('Saran', 2, disp), get: (r: SnapshotRow) => r.suggested2, type: 'number' as const, mono: true, width: 80, prio: 'p2' as const, title: 'Qty PO untuk mencapai target DOI (Opsi 2)', render: (r: SnapshotRow) => r.suggested2 ? fmt(r.suggested2) : <span className="empty">—</span> }] : []),
     { key: 'action', label: 'Saran tindakan', get: (r) => r.action + (r.nplNote ? ` · ${r.nplNote}` : ''), width: 240, prio: 'p2',

@@ -48,6 +48,11 @@ export const DEFAULT_SETTINGS = {
   tv_slide_seconds: 15,         // detik per slide
   tv_rows_per_slide: 12,        // baris tabel per slide
   tv_refresh_minutes: 5,        // muat ulang data tiap N menit
+
+  // --- Nilai stok (harga dari OCS /Products/GetProductSkus)
+  price_enabled: 1,             // tampilkan nilai rupiah di dashboard & tabel
+  price_source: 'MIN',          // MIN | MAX | AVG dari SalePrice antar marketplace
+  price_refresh_hours: 12,      // harga master jarang berubah; jangan tarik tiap Refresh
 } as const;
 
 export type SettingKey = keyof typeof DEFAULT_SETTINGS;
@@ -77,6 +82,11 @@ export type DoiSettings = {
   excludePhaseOut: boolean;
   /** Opsi DOI yang ditampilkan (tidak mengubah perhitungan, hanya tampilan). */
   doiDisplay: 'OPSI1' | 'OPSI2' | 'BOTH';
+  /** Nilai rupiah stok ditampilkan atau tidak. */
+  priceEnabled: boolean;
+  /** Angka mana yang diambil dari array SalePrice OCS. */
+  priceSource: 'MIN' | 'MAX' | 'AVG';
+  priceRefreshHours: number;
   salesSyncLookbackDays: number;
   salesIncludeReady: boolean;
   salesIncludeReturn: boolean;
@@ -118,6 +128,12 @@ export function toDoiSettings(raw: SettingsMap = {}): DoiSettings {
     abcBPct: num(raw, 'abc_b_pct'),
     excludePhaseOut: bool(raw, 'exclude_phase_out'),
     doiDisplay: disp === 'OPSI1' || disp === 'OPSI2' ? disp : 'BOTH',
+    priceEnabled: bool(raw, 'price_enabled'),
+    priceSource: (() => {
+      const v = str(raw, 'price_source').toUpperCase();
+      return v === 'MAX' || v === 'AVG' ? v : 'MIN';
+    })(),
+    priceRefreshHours: Math.max(0, num(raw, 'price_refresh_hours')),
     salesSyncLookbackDays: Math.max(1, num(raw, 'sales_sync_lookback_days')),
     salesIncludeReady: bool(raw, 'sales_include_ready'),
     salesIncludeReturn: bool(raw, 'sales_include_return'),

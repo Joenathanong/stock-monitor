@@ -171,3 +171,37 @@ test('angka nyata 22 Sep 2026: 12,26 hari dengan phase out, 11,51 tanpa', () => 
   assert.equal(r.byClass.B.doi, 16.69);
   assert.equal(r.byClass.C.doi, 34.48);
 });
+
+// ---- nilai rupiah
+
+test('nilai yang dipotong = qty dipotong × harga satuan', () => {
+  const rows = [
+    sku({ sku: 'A1', abcClass: 'A', availableQty: 700, ads: 100, unitPrice: 10_000 }),
+    sku({ sku: 'C1', abcClass: 'C', availableQty: 3000, ads: 20, unitPrice: 50_000 }),
+  ];
+  const r = simulate(rows, opt({ targetDoi: 7 }));
+  assert.ok(r.cutTotal > 0);
+  assert.equal(r.cutValue, r.picks.reduce((a, p) => a + p.cut * p.unitPrice, 0));
+  assert.equal(r.picks[0].cutValue, r.picks[0].cut * 50_000);
+});
+
+test('SKU tanpa harga dihitung nol tapi dilaporkan, bukan disembunyikan', () => {
+  const rows = [
+    sku({ sku: 'A1', abcClass: 'A', availableQty: 0, ads: 100 }),
+    sku({ sku: 'C1', abcClass: 'C', availableQty: 1000, ads: 0, unitPrice: 0 }),
+    sku({ sku: 'C2', abcClass: 'C', availableQty: 1000, ads: 0, unitPrice: 2_000 }),
+  ];
+  const r = simulate(rows, opt({ targetDoi: 0, order: 'PROPORSIONAL' }));
+  assert.equal(r.cutNoPrice, 1, 'satu SKU dipotong tanpa harga');
+  assert.equal(r.cutValue, r.picks.find((p) => p.sku === 'C2')!.cut * 2_000);
+});
+
+test('nilai per kelas ikut terhitung', () => {
+  const rows = [
+    sku({ sku: 'A1', abcClass: 'A', availableQty: 100, ads: 10, unitPrice: 1_000 }),
+    sku({ sku: 'C1', abcClass: 'C', availableQty: 200, ads: 1, unitPrice: 5_000 }),
+  ];
+  const r = simulate(rows, opt({ targetDoi: 5 }));
+  assert.equal(r.byClass.A.value, 100_000);
+  assert.equal(r.byClass.C.value, 1_000_000);
+});

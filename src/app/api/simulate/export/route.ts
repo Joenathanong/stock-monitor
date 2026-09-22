@@ -26,6 +26,8 @@ export async function GET(req: Request) {
       { header: 'Sisakan (hari)', key: 'floorDays', width: 15 },
       { header: 'Sisakan (pcs)', key: 'keep', width: 15 },
       { header: 'POTONG (pcs)', key: 'cut', width: 15 },
+      { header: 'Harga Satuan (Rp)', key: 'unitPrice', width: 18 },
+      { header: 'Nilai Dipotong (Rp)', key: 'cutValue', width: 20 },
       { header: 'Stok Sesudah', key: 'stockAfter', width: 15 },
       { header: 'DOI Sesudah', key: 'doiAfter', width: 14 },
     ],
@@ -34,6 +36,7 @@ export async function GET(req: Request) {
       status: STATUS_LABEL[p.status as keyof typeof STATUS_LABEL] ?? p.status,
       stock: p.stock, ads: p.ads, doi: p.doi ?? '',
       floorDays: p.floorDays, keep: p.keep, cut: p.cut,
+      unitPrice: p.unitPrice || '', cutValue: p.cutValue || '',
       stockAfter: p.stockAfter, doiAfter: p.doiAfter ?? '',
     })),
   );

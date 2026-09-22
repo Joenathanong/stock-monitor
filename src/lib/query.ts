@@ -43,6 +43,10 @@ export type SnapshotRow = {
   abcClass: 'A' | 'B' | 'C';
   abcShare: number;
   abcCumShare: number;
+  /** Harga satuan saat snapshot (rupiah); 0 = tidak diketahui. */
+  unitPrice: number;
+  /** Nilai stok = stok × harga satuan. */
+  stockValue: number;
   runOutDate: DateKey | null;
   isPhaseOut: boolean;
   /** Keterangan dari tabel phase_out — kode SAP yang dipakai mencocokkan, alasan, catatan. */
@@ -126,6 +130,8 @@ export async function latestSnapshot(): Promise<SnapshotView> {
       abcClass: (r.abcClass as 'A' | 'B' | 'C') || 'C',
       abcShare: r.abcShare,
       abcCumShare: r.abcCumShare,
+      unitPrice: r.unitPrice ?? 0,
+      stockValue: (r.unitPrice ?? 0) * r.availableQty,
       runOutDate: r.runOutDate ? toDateKeyUtc(r.runOutDate) : null,
       isPhaseOut: r.isPhaseOut,
       phaseOutSapCode: poFor(r.sku, r.sapCode)?.sapCode ?? null,
@@ -153,6 +159,8 @@ export type DashboardView = {
 export type GroupTotals = {
   count: number; stock: number; transit: number; sales90: number;
   suggested: number; excessQty: number; lateCount: number;
+  /** Nilai stok kelompok ini (rupiah) memakai harga saat snapshot. */
+  value: number;
 };
 
 const groupTotals = (rows: SnapshotRow[]): GroupTotals => ({
@@ -163,9 +171,10 @@ const groupTotals = (rows: SnapshotRow[]): GroupTotals => ({
   suggested: rows.reduce((a, r) => a + Math.max(r.suggested1, r.suggested2), 0),
   excessQty: rows.reduce((a, r) => a + (r.phaseOutExcessQty ?? 0), 0),
   lateCount: rows.filter((r) => (r.phaseOutLateDays ?? 0) > 0).length,
+  value: rows.reduce((a, r) => a + r.stockValue, 0),
 });
 
-const NOL: GroupTotals = { count: 0, stock: 0, transit: 0, sales90: 0, suggested: 0, excessQty: 0, lateCount: 0 };
+const NOL: GroupTotals = { count: 0, stock: 0, transit: 0, sales90: 0, suggested: 0, excessQty: 0, lateCount: 0, value: 0 };
 /** Panel qty-terbesar mengirim 20 baris; prioritas open PO 25 karena urutannya soal urgensi. */
 export const TOP_QTY = 20;
 export const TOP_PO = 25;
@@ -195,11 +204,26 @@ function normalizeSummary(sum: HealthSummary | null): HealthSummary | null {
   if (!sum) return null;
   const byStatus = { ...sum.byStatus } as HealthSummary['byStatus'];
   if (byStatus.PHASE_OUT === undefined) byStatus.PHASE_OUT = 0;
+  // Snapshot lama tidak punya angka nilai — diisi 0 supaya UI tidak error,
+  // dan 0 memang jujur: harga saat itu tidak tercatat.
+  type Tot = HealthSummary['total'];
+  const withValue = (t: Partial<Tot> | undefined | null, fallback: Tot): Tot =>
+    ({ ...fallback, ...(t ?? {}), value: t?.value ?? 0, noPrice: t?.noPrice ?? 0 });
+  const total = withValue(sum.total, sum.total);
+  const kelas = (k: HealthSummary['byAbc']['A']) => ({ ...k, total: withValue(k?.total, total) });
   return {
     ...sum,
     byStatus,
-    totalWithPhaseOut: sum.totalWithPhaseOut ?? sum.total,
-    phaseOut: sum.phaseOut ?? { count: 0, stock: 0, excessQty: 0, lateCount: 0 },
+    total,
+    totalWithPhaseOut: withValue(sum.totalWithPhaseOut ?? total, total),
+    byAbc: { A: kelas(sum.byAbc.A), B: kelas(sum.byAbc.B), C: kelas(sum.byAbc.C) },
+    phaseOut: {
+      count: sum.phaseOut?.count ?? 0,
+      stock: sum.phaseOut?.stock ?? 0,
+      value: sum.phaseOut?.value ?? 0,
+      excessQty: sum.phaseOut?.excessQty ?? 0,
+      lateCount: sum.phaseOut?.lateCount ?? 0,
+    },
   };
 }
 

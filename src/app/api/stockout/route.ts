@@ -158,6 +158,7 @@ export async function GET(req: Request) {
   type Row = SkuStockout & {
     name: string | null; sapCode: string | null; abcClass: string; status2: string;
     volatile: boolean;
+    unitPrice: number; lostValueLow: number; lostValueHigh: number;
     /** Kosong di SEMUA shop — selalu ya untuk baris di tabel stok kosong. */
     outAllShops: boolean;
     /** SKU ini JUGA punya hari di mana hanya sebagian shop yang nol. */
@@ -193,6 +194,11 @@ export async function GET(req: Request) {
 
     rows.push({
       ...hasil.sku,
+      // Nilai kehilangan memakai harga satuan yang sama dengan nilai stok,
+      // supaya semua angka rupiah di aplikasi berasal dari satu sumber.
+      unitPrice: r.unitPrice,
+      lostValueLow: hasil.sku.lostLow * r.unitPrice,
+      lostValueHigh: hasil.sku.lostHigh * r.unitPrice,
       name: r.name, sapCode: r.sapCode, abcClass: r.abcClass, status2: r.status,
       outAllShops: true, outSomeShops: sebagian,
       // Seluruh episodenya jatuh di jendela yang masih ditarik ulang tiap malam.
@@ -238,6 +244,9 @@ export async function GET(req: Request) {
       outsideTable: diLuarTabel.length,
       outsideReasons: alasan,
       baselineFromSales: rows.filter((r) => r.adsSource === 'PENJUALAN').length,
+      lostValueLow: rows.reduce((a, r) => a + r.lostValueLow, 0),
+      lostValueHigh: rows.reduce((a, r) => a + r.lostValueHigh, 0),
+      noPrice: rows.filter((r) => !r.unitPrice).length,
     },
     rows, gaps, series,
     platforms: PLATFORMS,

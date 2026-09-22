@@ -1,6 +1,6 @@
 'use client';
 import { useMemo, useState } from 'react';
-import { AbcChip, Alert, Empty, StatusChip, fmt, fmtDoi, useApi } from '@/components/ui';
+import { AbcChip, Alert, Empty, StatusChip, fmt, fmtDoi, fmtRp, fmtRpShort, useApi } from '@/components/ui';
 import { DataGrid, type Column } from '@/components/DataGrid';
 import { ABC, type AbcClass, type SimPick, type SimResult } from '@/lib/simulate';
 
@@ -56,6 +56,11 @@ export default function SimulasiPage() {
     { key: 'cut', label: 'POTONG (pcs)', get: (r) => r.cut, type: 'number', mono: true, width: 140,
       title: 'Qty yang harus keluar dari gudang — jual, diskon, bundling, retur, atau write-off',
       render: (r) => <b className="text-negative">{fmt(r.cut)}</b> },
+    { key: 'cutvalue', label: 'Nilai dipotong', get: (r) => r.cutValue || null, type: 'number', mono: true, width: 145,
+      title: 'Qty dipotong × harga satuan OCS',
+      render: (r) => r.cutValue ? <span title={fmtRp(r.cutValue)}>{fmtRpShort(r.cutValue)}</span> : <span className="empty">—</span> },
+    { key: 'harga', label: 'Harga satuan', get: (r) => r.unitPrice || null, type: 'number', mono: true, width: 130, prio: 'p2',
+      render: (r) => r.unitPrice ? fmtRp(r.unitPrice) : <span className="empty">—</span> },
     { key: 'keep', label: 'Sisakan (pcs)', get: (r) => r.keep, type: 'number', mono: true, width: 130,
       title: 'Batas bawah menurut lantai kelasnya' },
     { key: 'after', label: 'Stok sesudah', get: (r) => r.stockAfter, type: 'number', mono: true, width: 125, prio: 'p2' },
@@ -149,6 +154,11 @@ export default function SimulasiPage() {
             <Tile k="Harus dikeluarkan" v={fmt(h.need)} h="pcs, supaya target tercapai" />
             <Tile k="Dipotong simulasi ini" v={fmt(h.cutTotal)} h={`${fmt(h.picks.length)} SKU disentuh`} tone="text-negative" />
             <Tile k="Bisa dipotong maksimal" v={fmt(h.cuttable)} h="pcs, tanpa menembus batas bawah" />
+            {h.cutValue > 0 ? (
+              <Tile k="Nilai yang dipotong" v={fmtRpShort(h.cutValue)}
+                h={h.cutNoPrice ? `${fmt(h.cutNoPrice)} SKU belum ada harganya` : 'stok × harga satuan OCS'}
+                tone="text-negative" />
+            ) : null}
             <Tile k="Phase Out" v={fmt(h.phaseOut.stock)} h={`${fmt(h.phaseOut.count)} SKU · ${data?.params.excludePhaseOut ? 'tidak dihitung' : 'ikut dihitung'}`} />
           </div>
 
@@ -168,7 +178,7 @@ export default function SimulasiPage() {
               <table className="dgrid dgrid-auto">
                 <thead><tr>
                   <th>Kelas</th><th className="num">SKU</th><th className="num">Stok</th><th className="num">ADS</th>
-                  <th className="num">DOI</th><th className="num">Dipotong</th><th className="num">SKU disentuh</th><th className="num">Sisa stok</th>
+                  <th className="num">DOI</th><th className="num">Dipotong</th><th className="num">Nilai dipotong</th><th className="num">SKU disentuh</th><th className="num">Sisa stok</th>
                 </tr></thead>
                 <tbody>
                   {ABC.map((c) => {
@@ -187,6 +197,7 @@ export default function SimulasiPage() {
                         <td className="num">{fmt(k.ads, 1)}</td>
                         <td className="num">{fmtDoi(k.doi)}</td>
                         <td className="num">{k.cut ? <b className="text-negative">{fmt(k.cut)}</b> : <span className="empty">—</span>}</td>
+                        <td className="num" title={fmtRp(k.cutValue)}>{k.cutValue ? fmtRpShort(k.cutValue) : <span className="empty">—</span>}</td>
                         <td className="num">{k.touched ? fmt(k.touched) : <span className="empty">—</span>}</td>
                         <td className="num">{fmt(k.stock - k.cut)}</td>
                       </tr>

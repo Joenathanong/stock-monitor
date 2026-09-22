@@ -30,6 +30,8 @@ export type SimRow = {
   doi: number | null;
   isPhaseOut: boolean;
   runOutDate?: DateKey | null;
+  /** Harga satuan (rupiah); 0 bila tidak diketahui. */
+  unitPrice?: number;
 };
 
 export type SimOptions = {
@@ -51,6 +53,9 @@ export type SimPick = {
   sku: string; name: string | null; sapCode: string | null;
   abcClass: string; status: string;
   stock: number; ads: number; doi: number | null;
+  unitPrice: number;
+  /** Nilai rupiah dari qty yang dipotong. */
+  cutValue: number;
   floorDays: number;
   /** Batas bawah stok menurut lantai kelasnya. */
   keep: number;
@@ -75,11 +80,15 @@ export type SimResult = {
   /** Total yang bisa dipotong dari kelas terpilih tanpa menembus lantai. */
   cuttable: number;
   cutTotal: number;
+  /** Nilai rupiah seluruh stok yang dipotong. */
+  cutValue: number;
+  /** SKU yang dipotong tapi harganya tidak diketahui — nilai di atas belum lengkap. */
+  cutNoPrice: number;
   stockAfter: number;
   doiAfter: number | null;
   /** Kekurangan bila seluruh kelebihan sudah dipotong tapi target belum tercapai. */
   shortfall: number;
-  byClass: Record<AbcClass, { skuCount: number; stock: number; ads: number; doi: number | null; cut: number; touched: number }>;
+  byClass: Record<AbcClass, { skuCount: number; stock: number; ads: number; doi: number | null; cut: number; cutValue: number; value: number; touched: number }>;
   phaseOut: { count: number; stock: number; ads: number };
   picks: SimPick[];
 };
@@ -106,6 +115,7 @@ export function simulate(rows: SimRow[], opt: SimOptions): SimResult {
       return {
         sku: r.sku, name: r.name, sapCode: r.sapCode, abcClass: r.abcClass, status: r.status,
         stock: r.availableQty, ads: r.ads, doi: r.doi,
+        unitPrice: r.unitPrice ?? 0, cutValue: 0,
         floorDays, keep, cuttable, cut: 0,
         stockAfter: r.availableQty, doiAfter: r.doi,
       };
@@ -153,9 +163,12 @@ export function simulate(rows: SimRow[], opt: SimOptions): SimResult {
   for (const p of picks) {
     p.stockAfter = p.stock - p.cut;
     p.doiAfter = doiOf(p.stockAfter, p.ads);
+    p.cutValue = p.cut * p.unitPrice;
   }
 
   const cutTotal = picks.reduce((a, p) => a + p.cut, 0);
+  const cutValue = picks.reduce((a, p) => a + p.cutValue, 0);
+  const cutNoPrice = picks.filter((p) => p.cut > 0 && !p.unitPrice).length;
   const stockAfter = stockBefore - cutTotal;
 
   const byClass = Object.fromEntries(ABC.map((c) => {
@@ -166,6 +179,8 @@ export function simulate(rows: SimRow[], opt: SimOptions): SimResult {
     return [c, {
       skuCount: kelas.length, stock, ads, doi: doiOf(stock, ads),
       cut: p.reduce((a, x) => a + x.cut, 0),
+      cutValue: p.reduce((a, x) => a + x.cutValue, 0),
+      value: kelas.reduce((a, r) => a + (r.availableQty * (r.unitPrice ?? 0)), 0),
       touched: p.filter((x) => x.cut > 0).length,
     }];
   })) as SimResult['byClass'];
@@ -180,6 +195,8 @@ export function simulate(rows: SimRow[], opt: SimOptions): SimResult {
     need: r0(need),
     cuttable,
     cutTotal,
+    cutValue,
+    cutNoPrice,
     stockAfter,
     doiAfter: doiOf(stockAfter, adsTotal),
     shortfall: Math.max(0, r0(need - cuttable)),

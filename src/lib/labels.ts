@@ -30,3 +30,30 @@ export function weekLabel(days: number | null | undefined): string {
 export function opsi2Label(w8?: number | null, w4?: number | null, w2?: number | null): string {
   return `max(${weekLabel(w8)}, ${weekLabel(w4)}, ${weekLabel(w2)})`;
 }
+
+/** Rupiah utuh: 47091 → "Rp 47.091". Nol/tidak diketahui → "—". */
+export function fmtRp(n: number | null | undefined): string {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v === 0) return '—';
+  return `Rp ${Math.round(v).toLocaleString('id-ID')}`;
+}
+
+/**
+ * Rupiah ringkas untuk angka besar: 16.400.000.000 → "Rp 16,4 M".
+ * Dipakai di KPI dan resume, karena angka penuh 12 digit tidak terbaca sekilas.
+ * Satuan mengikuti kebiasaan Indonesia: rb / jt / M (miliar) / T (triliun).
+ */
+export function fmtRpShort(n: number | null | undefined): string {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v === 0) return '—';
+  const abs = Math.abs(v);
+  const tanda = v < 0 ? '-' : '';
+  const satuan: [number, string][] = [[1e12, 'T'], [1e9, 'M'], [1e6, 'jt'], [1e3, 'rb']];
+  for (const [batas, label] of satuan) {
+    if (abs >= batas) {
+      const angka = abs / batas;
+      return `${tanda}Rp ${angka.toLocaleString('id-ID', { maximumFractionDigits: angka < 10 ? 2 : 1 })} ${label}`;
+    }
+  }
+  return `${tanda}Rp ${Math.round(abs).toLocaleString('id-ID')}`;
+}

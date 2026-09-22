@@ -3,11 +3,12 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { DayStrip } from '@/components/Charts';
 import { DataGrid, type Column } from '@/components/DataGrid';
-import { AbcChip, Alert, Empty, StatusChip, fmt, useApi } from '@/components/ui';
+import { AbcChip, Alert, Empty, StatusChip, fmt, fmtRp, fmtRpShort, useApi } from '@/components/ui';
 import type { PlatformGap, SkuStockout } from '@/lib/stockout';
 import { PLATFORM_LABEL } from '@/lib/stockout';
 
 type Row = SkuStockout & {
+  unitPrice: number; lostValueLow: number; lostValueHigh: number;
   name: string | null; sapCode: string | null; abcClass: string; status2: string;
   volatile: boolean; outAllShops: boolean; outSomeShops: boolean;
 };
@@ -22,6 +23,7 @@ type Resp = {
     lostLow: number; lostHigh: number; ongoing: number; confirmed: number; suspected: number;
     stockAvailable: number; campaignDays: number; platformGaps: number; platformSkus: number;
     bothProblems: number; outsideTable: number; outsideReasons: Record<string, number>; baselineFromSales: number;
+    lostValueLow: number; lostValueHigh: number; noPrice: number;
   };
   rows: Row[]; gaps: Gap[]; series: Record<string, number[]>;
 };
@@ -100,6 +102,13 @@ export default function StockoutPage() {
       title: 'Hari kosong × ADS acuan', render: (r) => <b>{fmt(r.lostLow)}</b> },
     { key: 'high', label: 'Hilang (optimis)', get: (r) => r.lostHigh, type: 'number', mono: true, width: 145,
       title: 'Hari kosong × ADS hari-laku' },
+    { key: 'nilai', label: 'Nilai hilang', get: (r) => r.lostValueLow || null, type: 'number', mono: true, width: 150,
+      title: 'Perkiraan konservatif × harga satuan OCS',
+      render: (r) => r.lostValueLow
+        ? <span title={`${fmtRp(r.lostValueLow)} – ${fmtRp(r.lostValueHigh)}`}>{fmtRpShort(r.lostValueLow)}</span>
+        : <span className="empty">—</span> },
+    { key: 'harga', label: 'Harga satuan', get: (r) => r.unitPrice || null, type: 'number', mono: true, width: 130, prio: 'p3',
+      render: (r) => r.unitPrice ? fmtRp(r.unitPrice) : <span className="empty">—</span> },
     { key: 'camp', label: 'Kosong saat campaign', get: (r) => r.campaignDays, type: 'number', mono: true, width: 175, prio: 'p2',
       title: 'Hari double date / gajian yang ikut kosong — kehilangan paling mahal',
       render: (r) => r.campaignDays ? <span className="text-negative font-semibold">{r.campaignDays} hr</span> : <span className="empty">—</span> },
@@ -203,6 +212,11 @@ export default function StockoutPage() {
             <Tile k="SKU terdampak" v={fmt(s.skuAffected)} h={`dari ${fmt(s.skuAnalyzed)} SKU dianalisis`} />
             <Tile k="Total hari kosong" v={fmt(s.outDays)} h={`${fmt(s.episodes)} episode`} />
             <Tile k="Perkiraan hilang" v={fmt(s.lostLow)} h={`sampai ${fmt(s.lostHigh)} pcs (optimis)`} />
+            {s.lostValueLow > 0 ? (
+              <Tile k="Nilai kehilangan" v={fmtRpShort(s.lostValueLow)}
+                h={`sampai ${fmtRpShort(s.lostValueHigh)}${s.noPrice ? ` · ${fmt(s.noPrice)} SKU belum ada harganya` : ''}`}
+                tone="text-negative" />
+            ) : null}
             <Tile k="Masih berlangsung" v={fmt(s.ongoing)} h="kosong sampai hari terakhir rentang" tone={s.ongoing ? 'text-negative' : undefined} />
             <Tile k="Terkonfirmasi / dugaan" v={`${fmt(s.confirmed)} / ${fmt(s.suspected)}`} h={`${fmt(s.stockAvailable)} ternyata stoknya ada`} />
             <Tile k="Kosong saat campaign" v={fmt(s.campaignDays)} h="hari double date / gajian" tone={s.campaignDays ? 'text-negative' : undefined} />

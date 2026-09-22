@@ -48,6 +48,7 @@ export async function runSimulation(url: URL) {
     doi: params.opsi === 2 ? r.doi2 : r.doi1,
     isPhaseOut: r.isPhaseOut,
     runOutDate: r.runOutDate,
+    unitPrice: r.unitPrice,
   }));
 
   const hasil = simulate(rows, params);

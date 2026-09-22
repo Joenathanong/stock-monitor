@@ -3,7 +3,9 @@ import { getSettings } from '@/lib/compute';
 import { checkCronAuth, fail, json } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
+// Vercel Hobby membatasi satu fungsi 60 dtk. Menulis 300 tidak menaikkannya —
+// prosesnya tetap dibunuh di detik ke-60, dan kuncinya ikut tertinggal.
+export const maxDuration = 60;
 
 /** Jadwal 01.00 WIB (18:00 UTC): tarik ulang 7 hari terakhir dari OCS. */
 async function run(req: Request) {

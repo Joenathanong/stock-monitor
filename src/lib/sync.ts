@@ -22,7 +22,14 @@ const int = (v: unknown) => {
  * bersamaan; tanpa ini keduanya menulis snapshot yang sama dan saling menghapus.
  * Kunci yang lebih tua dari `staleMinutes` dianggap yatim dan boleh direbut.
  */
-export async function acquireLock(name: string, owner: string, staleMinutes = 15): Promise<boolean> {
+/**
+ * Batas keras satu fungsi 60 dtk, jadi kunci yang lebih tua dari 2 menit PASTI
+ * milik proses yang sudah mati. Sebelumnya 15 menit: satu kali fungsi dibunuh
+ * platform berarti Refresh ditolak seperempat jam berikutnya tanpa penjelasan.
+ */
+export const STALE_LOCK_MINUTES = 2;
+
+export async function acquireLock(name: string, owner: string, staleMinutes = STALE_LOCK_MINUTES): Promise<boolean> {
   const cutoff = new Date(Date.now() - staleMinutes * 60_000);
   const taken = await prisma.$executeRaw`
     INSERT INTO sync_lock (name, owner, acquiredAt) VALUES (${name}, ${owner}, NOW())
@@ -60,7 +67,7 @@ export type SyncResult = { ok: boolean; rows: number; skipped?: boolean; message
  * stock_daily (hanya area yang dihitung, kategori Sku). Potret hari yang sama
  * ditimpa — Refresh siang hari memperbarui angka hari ini, bukan menambah baris.
  */
-export async function syncStock(trigger = 'cron', areaScope = 'Pusat'): Promise<SyncResult> {
+export async function syncStock(trigger = 'cron', areaScope = 'Pusat', ocsBudgetMs = 30_000): Promise<SyncResult> {
   const t0 = Date.now();
   const owner = lockOwner();
   if (!(await acquireLock('stock', owner))) {
@@ -68,7 +75,7 @@ export async function syncStock(trigger = 'cron', areaScope = 'Pusat'): Promise<
   }
   const log = await startLog('STOCK', trigger);
   try {
-    const rows = await fetchStock();
+    const rows = await fetchStock(ocsBudgetMs);
     const now = new Date();
     const values: unknown[][] = [];
 

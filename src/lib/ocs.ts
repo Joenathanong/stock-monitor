@@ -109,7 +109,7 @@ async function authedGet<T>(path: string, timeoutMs = 60_000, attempts = 3): Pro
       if (!transient) throw err;
     }
     if (attempt === attempts) break;
-    await sleep(Math.round(2000 * 2 ** (attempt - 1) * (0.75 + Math.random() * 0.5)));
+    await sleep(Math.min(3000, Math.round(2000 * 2 ** (attempt - 1) * (0.75 + Math.random() * 0.5))));
   }
   throw new Error(`GET ${path} gagal setelah ${attempts} percobaan (${last})`);
 }
@@ -132,8 +132,16 @@ export type OcsStockRow = {
 };
 
 /** Snapshot penuh stok. ~12.000 baris untuk seluruh area; paging tidak diperlukan. */
-export async function fetchStock(): Promise<OcsStockRow[]> {
-  const data = await authedGet<OcsStockRow[] | { value: OcsStockRow[] }>('/odata/DTO_WmsItemStockLiteV2', 90_000, 3);
+/**
+ * Stok OCS. `budgetMs` adalah TOTAL waktu yang boleh dipakai termasuk percobaan
+ * ulang — bukan timeout per percobaan. Sebelumnya 90 dtk × 3 percobaan (±276
+ * dtk) padahal batas satu fungsi cuma 60 dtk, jadi prosesnya selalu dibunuh
+ * platform sebelum sempat menyerah, dan kuncinya ikut tertinggal.
+ */
+export async function fetchStock(budgetMs = 30_000): Promise<OcsStockRow[]> {
+  const attempts = budgetMs >= 24_000 ? 2 : 1;
+  const perAttempt = Math.max(8_000, Math.floor((budgetMs - (attempts - 1) * 2_000) / attempts));
+  const data = await authedGet<OcsStockRow[] | { value: OcsStockRow[] }>('/odata/DTO_WmsItemStockLiteV2', perAttempt, attempts);
   const rows = Array.isArray(data) ? data : data?.value;
   if (!Array.isArray(rows)) throw new Error('Format respons OData tidak dikenali');
   return rows;

@@ -9,7 +9,8 @@ import { assignAbc, computeSku, summarize, type DoiResult, type HealthSummary } 
 import { sapKey } from './phase-out';
 import { buildExclusionMap } from './exclusion';
 import { addDays, keyToUtcDate, todayKey, toDateKeyUtc, type DateKey } from './dates';
-import { acquireLock, finishLog, lockOwner, releaseLock, startLog, syncStock } from './sync';
+import { acquireLock, finishLog, lockOwner, releaseLock, startLog, syncStock, STALE_LOCK_MINUTES } from './sync';
+import { budget, defaultBudgetMs, Timeline } from './budget';
 
 export async function getSettingsMap(): Promise<SettingsMap> {
   const rows = await prisma.appSetting.findMany();
@@ -240,6 +241,8 @@ export type RunResult = {
   skuCount?: number;
   stockRows?: number;
   durationMs: number;
+  /** Rincian waktu per langkah — supaya "lambat" bisa ditunjuk penyebabnya. */
+  steps?: string;
 };
 
 /**
@@ -247,29 +250,61 @@ export type RunResult = {
  * tombol Refresh. `withStockSync=false` menghitung ulang dari stok yang sudah ada
  * (mis. setelah unggah transit atau ubah pengaturan) tanpa memanggil OCS.
  */
-export async function runCompute(trigger: string, withStockSync = true): Promise<RunResult> {
+/**
+ * Satu putaran perhitungan, dengan anggaran waktu.
+ *
+ * Urutannya sengaja: tarik stok OCS hanya diberi SISA waktu dikurangi cadangan
+ * untuk menghitung & menyimpan. Kalau OCS lambat, yang gagal cuma langkah stok
+ * dengan pesan jelas — bukan seluruh fungsi dibunuh platform sambil
+ * meninggalkan kunci yatim.
+ */
+export async function runCompute(
+  trigger: string,
+  withStockSync = true,
+  budgetMs = defaultBudgetMs(),
+): Promise<RunResult> {
   const t0 = Date.now();
+  const anggaran = budget(budgetMs);
+  const waktu = new Timeline();
   const owner = lockOwner();
-  if (!(await acquireLock('compute', owner, 10))) {
-    return { ok: true, skipped: true, message: 'Perhitungan lain sedang berjalan', durationMs: 0 };
+  if (!(await acquireLock('compute', owner))) {
+    return {
+      ok: true, skipped: true, durationMs: Date.now() - t0,
+      message: `Perhitungan lain sedang berjalan. Kunci yang lebih tua dari ${STALE_LOCK_MINUTES} menit otomatis diambil alih — coba lagi sebentar.`,
+    };
   }
   const log = await startLog('COMPUTE', trigger);
   try {
     let stockRows: number | undefined;
     if (withStockSync) {
       const settings = await getSettings();
-      const st = await syncStock(trigger, settings.areaScope);
+      waktu.step('pengaturan');
+      // Sisakan ±20 dtk untuk hitung + simpan; sisanya untuk OCS.
+      anggaran.need(12_000, 'tarik stok OCS');
+      const st = await syncStock(trigger, settings.areaScope, anggaran.slice(20_000, 8_000));
       stockRows = st.rows;
+      waktu.step(`stok ${st.skipped ? 'dilewati' : `${st.rows} baris`}`);
     }
+    anggaran.need(6_000, 'hitung DOI');
     const out = await computeAll();
+    waktu.step(`hitung ${out.rows.length} SKU`);
+
+    anggaran.need(3_000, 'simpan snapshot');
     await persistSnapshot(out, trigger);
-    await finishLog(log.id, 'ok', out.rows.length, withStockSync ? `stok ${stockRows} baris` : 'tanpa tarik stok');
-    return { ok: true, today: out.today, skuCount: out.rows.length, stockRows, durationMs: Date.now() - t0 };
+    waktu.step('simpan');
+
+    const catatan = `${withStockSync ? `stok ${stockRows} baris` : 'tanpa tarik stok'} · ${waktu}`;
+    await finishLog(log.id, 'ok', out.rows.length, catatan);
+    return {
+      ok: true, today: out.today, skuCount: out.rows.length, stockRows,
+      durationMs: Date.now() - t0, steps: String(waktu),
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await finishLog(log.id, 'error', 0, message);
+    await finishLog(log.id, 'error', 0, `${message} · ${waktu}`);
     throw err;
   } finally {
+    // WAJIB jalan: kunci yang tidak dilepas membuat Refresh berikutnya ditolak.
     await releaseLock('compute', owner);
   }
 }

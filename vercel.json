@@ -14,19 +14,19 @@
   ],
   "functions": {
     "src/app/api/cron/sales/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 60
     },
     "src/app/api/cron/compute/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 60
     },
     "src/app/api/compute/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 60
     },
     "src/app/api/sync/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 60
     },
     "src/app/api/import/sales/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 60
     }
   }
 }

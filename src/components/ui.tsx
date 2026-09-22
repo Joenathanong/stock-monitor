@@ -106,8 +106,12 @@ export function useApi<T>(url: string | null) {
   return { data, error, loading, reload: () => setTick((t) => t + 1) };
 }
 
-export async function postJson(url: string, body?: unknown, method = 'POST') {
-  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+export async function postJson(url: string, body?: unknown, method = 'POST', signal?: AbortSignal) {
+  const r = await fetch(url, {
+    method, signal,
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
   return j;
@@ -121,27 +125,61 @@ export async function postForm(url: string, form: FormData) {
 }
 
 /** Tombol Refresh: tarik stok OCS + hitung ulang. Dipakai di beberapa halaman. */
+/**
+ * Batas satu permintaan di server 60 dtk; klien menunggu sedikit lebih lama lalu
+ * menyerah sendiri. Tanpa ini tombolnya menggantung tanpa batas dan terlihat
+ * seperti aplikasi yang macet.
+ */
+const REFRESH_TIMEOUT_MS = 70_000;
+
 export function RefreshButton({ onDone, withStock = true, label }: { onDone?: () => void; withStock?: boolean; label?: string }) {
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [detik, setDetik] = useState(0);
+  const [msg, setMsg] = useState<{ tone: 'ok' | 'warn' | 'bad'; text: string } | null>(null);
+
+  // Penghitung detik: tanpa ini 40 dtk menunggu terasa seperti aplikasi mati.
+  useEffect(() => {
+    if (!busy) return;
+    const t = setInterval(() => setDetik((d) => d + 1), 1000);
+    return () => clearInterval(t);
+  }, [busy]);
+
   async function run() {
-    setBusy(true); setMsg(null);
+    setBusy(true); setDetik(0); setMsg(null);
+    const ac = new AbortController();
+    const batas = setTimeout(() => ac.abort(), REFRESH_TIMEOUT_MS);
     try {
-      const r = await postJson('/api/compute', { withStock });
-      setMsg(r.skipped ? r.message : `Selesai: ${r.skuCount} SKU dalam ${Math.round(r.durationMs / 1000)} dtk`);
+      const r = await postJson('/api/compute', { withStock }, 'POST', ac.signal);
+      if (r.skipped) {
+        // Ini BUKAN keberhasilan: snapshot tidak berubah. Dulu tampil sebagai
+        // teks abu kecil sehingga terbaca seperti sukses.
+        setMsg({ tone: 'warn', text: r.message || 'Dilewati — perhitungan lain sedang berjalan' });
+      } else {
+        setMsg({ tone: 'ok', text: `Selesai: ${r.skuCount} SKU, ${Math.round(r.durationMs / 1000)} dtk${r.steps ? ` (${r.steps})` : ''}` });
+      }
       onDone?.();
     } catch (e) {
-      setMsg(`Gagal: ${e instanceof Error ? e.message : e}`);
+      const gagal = e instanceof Error && e.name === 'AbortError'
+        ? `Tidak selesai dalam ${REFRESH_TIMEOUT_MS / 1000} dtk. Perhitungan mungkin masih jalan di server — tunggu sebentar lalu muat ulang halaman.`
+        : `Gagal: ${e instanceof Error ? e.message : e}`;
+      setMsg({ tone: 'bad', text: gagal });
     } finally {
+      clearTimeout(batas);
       setBusy(false);
     }
   }
+
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex flex-wrap items-center gap-2">
       <button className={withStock ? 'btn btn-primary' : 'btn'} onClick={run} disabled={busy}>
-        {busy ? 'Menghitung…' : label ?? (withStock ? 'Refresh (tarik stok OCS + hitung)' : 'Hitung ulang')}
+        {busy ? `Menghitung… ${detik} dtk` : label ?? (withStock ? 'Refresh (tarik stok OCS + hitung)' : 'Hitung ulang')}
       </button>
-      {msg ? <span className="text-[12px] text-label">{msg}</span> : null}
+      {msg ? (
+        <span className={`chip chip-noicon ${msg.tone === 'bad' ? 'chip-bad' : msg.tone === 'warn' ? 'chip-warn' : 'chip-ok'}`}
+          style={{ height: 'auto', whiteSpace: 'normal', maxWidth: '46ch', padding: '4px 10px', fontWeight: 500 }}>
+          {msg.text}
+        </span>
+      ) : null}
     </span>
   );
 }

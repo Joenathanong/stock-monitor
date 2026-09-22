@@ -4,7 +4,9 @@ import { diffDays, isValidDateKey } from '@/lib/dates';
 import { fail, json } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
+// Vercel Hobby membatasi satu fungsi 60 dtk. Menulis 300 tidak menaikkannya —
+// prosesnya tetap dibunuh di detik ke-60, dan kuncinya ikut tertinggal.
+export const maxDuration = 60;
 
 /**
  * Tarik penjualan manual dari UI. Bisa `days` (N hari terakhir) atau rentang

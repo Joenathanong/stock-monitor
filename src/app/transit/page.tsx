@@ -21,6 +21,27 @@ type Resp = {
   batches: { id: string; filename: string; rowCount: number; uploadedAt: string }[];
 };
 
+/**
+ * Tingkat peringatan kotak rekonsiliasi, sebanding dengan masalahnya.
+ *
+ * Dulu: `tidakAdaStok.sku ? 'error' : …` — satu baris saja sudah membuat seluruh
+ * kotak MERAH, padahal isinya kabar baik (98,6% sudah terhitung) dan sisanya
+ * bukan sesuatu yang bisa diperbaiki orang: itu barang baru yang cabangnya belum
+ * pernah menyimpannya, dan ikut terhitung sendiri begitu diterima.
+ *
+ * Sekarang:
+ *   warn  — ada baris yang tinggal DIHITUNG ULANG (ada tindakan nyata), atau
+ *           porsi yang belum terhitung sudah lebih dari 5% (layak dicurigai)
+ *   ok    — sisanya, termasuk beberapa SKU baru yang belum ada stoknya
+ * Merah disimpan untuk kegagalan sungguhan (pemuatan data), bukan untuk ini.
+ */
+const BATAS_CURIGA = 0.05;
+function nadaRekon(rk: Ringkas): 'ok' | 'warn' {
+  if (rk.belumHitung.sku) return 'warn';
+  const belum = rk.total - rk.ikut;
+  return rk.total > 0 && belum / rk.total > BATAS_CURIGA ? 'warn' : 'ok';
+}
+
 const HITUNG_TEKS: Record<Hitung, string> = {
   IKUT: 'Ikut dihitung',
   BELUM_HITUNG: 'Belum — hitung ulang',
@@ -154,7 +175,7 @@ export default function TransitPage() {
       {error ? <Alert tone="error">{error}</Alert> : null}
 
       {rk && rk.total > 0 ? (
-        <Alert tone={rk.tidakAdaStok.sku ? 'error' : rk.belumHitung.sku ? 'warn' : 'ok'}>
+        <Alert tone={nadaRekon(rk)}>
           <b>{fmt(rk.ikut)} pcs</b> dari {fmt(rk.total)} pcs sudah ikut terhitung di dashboard
           {data?.snapshotDate ? ` (snapshot ${data.snapshotDate})` : ''}.
           {' '}{fmt(rk.dariOcs)} pcs dari OCS · {fmt(rk.manual)} pcs manual.

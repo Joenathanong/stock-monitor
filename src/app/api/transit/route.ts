@@ -198,7 +198,20 @@ export async function PATCH(req: Request) {
  */
 export async function DELETE(req: Request) {
   const semua = new URL(req.url).searchParams.get('semua') === '1';
-  const res = await prisma.transitStock.deleteMany(semua ? {} : { where: { source: 'manual' } });
+  // Dua panggilan terpisah, BUKAN satu panggilan dengan argumen ternary.
+  //
+  // `deleteMany(semua ? {} : { where: … })` menggagalkan build Vercel: metode
+  // Prisma bergeneric (`deleteMany<T extends …Args>(args?: SelectSubset<T, …>)`),
+  // dan T disimpulkan dari argumennya. Kalau argumennya union `{} | { where: … }`,
+  // penyimpulan itu memilih satu bentuk lalu menolak bentuk yang lain:
+  //
+  //   Argument of type '{} | { where: { source: string; } }' is not assignable …
+  //   Property 'where' is missing in type '{}'
+  //
+  // Dengan dua panggilan, tiap argumen literal bentuknya tunggal dan pasti.
+  const res = semua
+    ? await prisma.transitStock.deleteMany({})
+    : await prisma.transitStock.deleteMany({ where: { source: 'manual' } });
   await prisma.auditLog.create({
     data: { action: 'TRANSIT_CLEAR', entity: 'transit_stock', detail: `${res.count} baris${semua ? ' (termasuk OCS)' : ' (manual saja)'}` },
   });

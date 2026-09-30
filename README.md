@@ -431,6 +431,42 @@ jendela kesegaran.
 Tabel baru ini butuh `npm run db:push` sekali. Tidak ada primary key tabel lama yang
 berubah, jadi jebakan clustered index di atas tidak berlaku untuk perubahan ini.
 
+### `tsc` lokal TIDAK bisa dipercaya untuk tipe Prisma
+
+Engine Prisma tidak bisa diunduh di lingkungan pengembangan yang dipakai Claude,
+jadi `node_modules/.prisma/client` di sana isinya stub tulis tangan dengan
+`deleteMany(args?: any)` — jauh lebih longgar daripada tipe asli. Akibatnya ada
+kelas galat yang LOLOS `npm run typecheck` lokal tapi menggagalkan build Vercel.
+
+Kena 30 Sep 2026:
+
+```ts
+prisma.transitStock.deleteMany(semua ? {} : { where: { source: 'manual' } })
+```
+
+```
+Argument of type '{} | { where: { source: string; } }' is not assignable…
+  Property 'where' is missing in type '{}'
+```
+
+Metode Prisma bergeneric — `deleteMany<T extends …Args>(args?: SelectSubset<T, …>)`
+— dan `T` disimpulkan dari argumennya. Argumen union membuat penyimpulan memilih
+satu bentuk lalu menolak bentuk lainnya.
+
+**Aturannya: pilih di antara dua PANGGILAN, jangan di antara dua ARGUMEN.**
+
+```ts
+// JANGAN
+prisma.x.findMany(cond ? { where: a } : {})
+// BOLEH
+cond ? prisma.x.findMany({ where: a }) : prisma.x.findMany({ where: b })
+cond ? prisma.x.findMany() : Promise.resolve([])
+```
+
+Penjaganya `src/lib/prisma-args.test.ts` — memindai teks sumber (komentar dibuang,
+berkas tes dilewati) dan gagal kalau ada argumen ternary di metode Prisma mana pun.
+Tes teks dipakai justru karena compiler-nya di sini tidak bisa diandalkan.
+
 ### Kata cadangan SQL: `rows`, `trigger`, `key`
 
 Sudah kena dua kali, dua-duanya error 1064 yang TIDAK terdeteksi `tsc` maupun

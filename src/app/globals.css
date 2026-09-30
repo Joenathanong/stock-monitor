@@ -306,14 +306,11 @@ body {
 /* Membungkus dan memecah kata panjang — isinya kalimat, bukan label. */
 .toast-title { font-size: 13px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
 .toast-more {
-  margin-top: 4px; border: 0; background: transparent; padding: 0; cursor: pointer;
+  display: inline-flex; align-items: center; margin-top: 6px;
   font-size: 12px; font-weight: 600; color: var(--primary); text-decoration: underline;
-  min-height: 24px;
+  min-height: max(24px, var(--tap));
 }
-.toast-detail {
-  margin-top: 6px; font-size: 12px; line-height: 1.5; color: var(--ink-label);
-  overflow-wrap: anywhere; max-height: 40dvh; overflow-y: auto; overscroll-behavior: contain;
-}
+.toast-detail { margin-top: 4px; font-size: 12px; line-height: 1.45; color: var(--ink-label); overflow-wrap: anywhere; }
 .toast-close {
   flex: none; border: 0; background: transparent; cursor: pointer; color: var(--ink-label);
   font-size: 13px; line-height: 1; display: grid; place-items: center;

@@ -454,6 +454,17 @@ hijau — `transit GAGAL (…)` pernah lewat sebagai "Selesai" berwarna hijau.
 
 `.grid-toast` milik DataGrid dihapus; semuanya lewat antrean yang sama.
 
+### Riwayat Proses — tempat rinciannya tinggal
+
+Notifikasi hidup 10 detik dan memuat SATU baris. Daftar langkah — yang panjangnya
+bisa 300 karakter — tidak ikut ke sana; semuanya sudah tertulis di `sync_log` sejak
+awal, yang belum ada cuma layarnya. Halaman `/riwayat` membacanya: 200 proses terakhir,
+bisa disaring per jenis dan "hanya yang bermasalah", dan tiap baris bisa dibuka untuk
+melihat langkahnya satu per satu (yang `GAGAL`/`SEBAGIAN` ditebalkan).
+
+Baris berstatus `ok` yang di dalam pesannya ada `GAGAL` atau `SEBAGIAN` diberi label
+**Ada catatan**, bukan hijau polos — itulah yang dulu lolos tanpa kelihatan.
+
 ### `.tag` — label yang boleh membungkus
 
 Chip tidak boleh dipakai untuk kalimat. `.tag` (radius 8, tinggi mengikuti isi,

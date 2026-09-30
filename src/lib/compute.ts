@@ -355,11 +355,19 @@ export async function runCompute(
       if (settings.transitEnabled && anggaran.left() > 20_000) {
         try {
           const paksa = trigger === 'manual';
-          const tr = await syncTransit(anggaran.slice(20_000, 8_000), settings.transitRefreshHours, paksa);
+          // Sisa waktu diberikan ke transit, dikurangi cadangan untuk menghitung
+          // dan menyimpan 6 area (±1,3 dtk per area + simpan ≈ 16 dtk).
+          //
+          // Jatah tetap 20 dtk dulu cuma cukup untuk 2 dari 20 dokumen (±5,5 dtk
+          // per dokumen), jadi butuh 10 kali klik Refresh sebelum lengkap. Dengan
+          // sisa anggaran, satu klik memakan 5–6 dokumen, dan karena isinya
+          // di-cache di receive_doc, klik berikutnya hanya menarik sisanya.
+          const jatah = Math.max(16_000, anggaran.left() - 18_000);
+          const tr = await syncTransit(anggaran.slice(jatah, 8_000), settings.transitRefreshHours, paksa);
           waktu.step(
             tr.skipped ? 'transit masih segar'
-            : tr.partial ? `transit ${tr.rows} baris SEBAGIAN (${tr.docsKurang} dokumen belum terbaca)`
-            : `transit ${tr.rows} baris`,
+            : tr.partial ? `transit ${tr.rows} baris SEBAGIAN (${tr.docsKurang} dari ${tr.docs} dokumen belum terbaca, ${tr.docsCache} dari cache)`
+            : `transit ${tr.rows} baris dari ${tr.docs} dokumen (${tr.docsCache} dari cache)`,
           );
         } catch (err) {
           waktu.step(`transit GAGAL (${err instanceof Error ? err.message.slice(0, 60) : err})`);

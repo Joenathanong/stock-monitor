@@ -159,12 +159,15 @@ export function RefreshButton({ onDone, withStock = true, label, className }: { 
         // Ada langkah yang GAGAL di tengah? Hasilnya tetap tersimpan, tapi
         // jangan disebut hijau — mis. "transit GAGAL (…)" pernah lewat begitu saja.
         const bermasalah = typeof r.steps === 'string' && /GAGAL|SEBAGIAN/.test(r.steps);
+        // Daftar langkah TIDAK ikut ke sini — panjangnya bisa 300 karakter dan
+        // notifikasi cuma hidup 10 detik. Semuanya sudah tersimpan di sync_log
+        // dan terbaca di halaman Riwayat Proses.
         toast({
           tone: bermasalah ? 'warn' : 'ok',
           title: bermasalah
             ? `Selesai dengan catatan: ${r.skuCount} SKU, ${Math.round(r.durationMs / 1000)} dtk`
             : `Selesai: ${r.skuCount} SKU, ${Math.round(r.durationMs / 1000)} dtk`,
-          detail: r.steps || undefined,
+          detail: bermasalah ? 'Ada langkah yang gagal atau baru sebagian.' : undefined,
         });
       }
       onDone?.();
@@ -175,7 +178,7 @@ export function RefreshButton({ onDone, withStock = true, label, className }: { 
           ? `Tidak selesai dalam ${REFRESH_TIMEOUT_MS / 1000} dtk`
           : `Gagal: ${e instanceof Error ? e.message : e}`,
         detail: e instanceof Error && e.name === 'AbortError'
-          ? 'Perhitungan mungkin masih berjalan di server. Tunggu sebentar lalu muat ulang halaman.'
+          ? 'Mungkin masih berjalan di server — tunggu sebentar lalu muat ulang.'
           : undefined,
       });
     } finally {

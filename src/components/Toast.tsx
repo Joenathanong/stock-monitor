@@ -11,9 +11,11 @@ import { useEffect, useRef, useState } from 'react';
  * lewat style inline — hasilnya balon hijau besar yang mendorong tata letak
  * topbar dan menutupi judul halaman.
  *
- * Sekarang: satu baris ringkas di popup pojok, rincian langkah disembunyikan di
- * balik tombol "Rincian". Sukses hilang sendiri; peringatan dan galat menetap
- * sampai ditutup, karena itu yang perlu dibaca orang.
+ * Sekarang: satu baris ringkas di popup pojok yang hilang sendiri setelah 10
+ * detik — SEMUA nada, termasuk galat. Yang dibutuhkan saat itu cuma "berhasil
+ * atau tidak"; rincian langkahnya tinggal di halaman Riwayat Proses, yang tetap
+ * ada setelah halaman ditutup atau dibuka dari perangkat lain. Notifikasi yang
+ * menetap justru terabaikan, dan rincian di dalamnya hilang begitu ditutup.
  */
 export type ToastTone = 'ok' | 'warn' | 'bad' | 'info';
 
@@ -21,9 +23,12 @@ export type ToastInput = {
   tone: ToastTone;
   /** Satu baris, ringkas. Ini yang selalu terbaca. */
   title: string;
-  /** Rincian panjang — disembunyikan sampai diminta. */
+  /**
+   * Baris kedua yang pendek — mis. "Rincian ada di Riwayat Proses". BUKAN tempat
+   * menaruh daftar langkah: itu di halaman Riwayat.
+   */
   detail?: string;
-  /** Milidetik sebelum hilang sendiri; 0 = menetap. Bawaan: ok/info 6 dtk, sisanya menetap. */
+  /** Milidetik sebelum hilang sendiri. Bawaan 10 dtk. 0 = menetap (jarang dipakai). */
   ttl?: number;
 };
 
@@ -51,33 +56,26 @@ export function tutupToast(id: number) {
 }
 
 const IKON: Record<ToastTone, string> = { ok: '✓', warn: '!', bad: '✕', info: 'i' };
-const ttlBawaan = (tone: ToastTone) => (tone === 'ok' || tone === 'info' ? 6_000 : 0);
+/** 10 detik untuk semua nada — cukup dibaca, tidak menumpuk di layar. */
+const TTL = 10_000;
 
 function Baris({ t }: { t: Toast }) {
-  const [buka, setBuka] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Hitung mundur berhenti selagi rinciannya dibuka — orang sedang membacanya.
   useEffect(() => {
-    const ms = t.ttl ?? ttlBawaan(t.tone);
-    if (!ms || buka) return;
+    const ms = t.ttl ?? TTL;
+    if (!ms) return;
     timer.current = setTimeout(() => tutupToast(t.id), ms);
     return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [t.id, t.ttl, t.tone, buka]);
+  }, [t.id, t.ttl]);
 
   return (
     <div className={`toast toast-${t.tone}`} role={t.tone === 'bad' ? 'alert' : 'status'}>
       <span className="toast-icon" aria-hidden="true">{IKON[t.tone]}</span>
       <div className="toast-body">
         <div className="toast-title">{t.title}</div>
-        {t.detail ? (
-          <>
-            <button type="button" className="toast-more" onClick={() => setBuka((b) => !b)} aria-expanded={buka}>
-              {buka ? 'Sembunyikan rincian' : 'Rincian'}
-            </button>
-            {buka ? <div className="toast-detail">{t.detail}</div> : null}
-          </>
-        ) : null}
+        {t.detail ? <div className="toast-detail">{t.detail}</div> : null}
+        <a className="toast-more" href="/riwayat">Lihat rincian di Riwayat Proses →</a>
       </div>
       <button type="button" className="toast-close" onClick={() => tutupToast(t.id)} aria-label="Tutup notifikasi">✕</button>
     </div>

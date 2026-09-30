@@ -9,7 +9,10 @@ import { verifySession, SESSION_COOKIE, canWrite } from '@/lib/auth';
  * Metode tulis ditolak untuk VIEWER di seluruh API.
  */
 const PUBLIC_PREFIX = ['/api/cron/', '/api/auth/', '/api/public/'];
-const PUBLIC_EXACT = ['/login', '/tv', '/dashboard'];
+// /wa tidak dijaga sesi, tapi TIDAK terbuka: datanya hanya keluar dari
+// /api/public/wa yang meminta WA_PAGE_TOKEN. Tanpa token halamannya memuat, lalu
+// menampilkan pesan kunci salah — tidak ada angka yang bocor.
+const PUBLIC_EXACT = ['/login', '/tv', '/dashboard', '/wa'];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

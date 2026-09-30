@@ -60,6 +60,16 @@ export const DEFAULT_SETTINGS = {
   price_enabled: 1,             // tampilkan nilai rupiah di dashboard & tabel
   price_source: 'MIN',          // MIN | MAX | AVG dari SalePrice antar marketplace
   price_refresh_hours: 12,      // harga master jarang berubah; jangan tarik tiap Refresh
+
+  // --- Poster WhatsApp (/wa) — satu gambar 1600×900 berisi 5 area ---
+  // Blok mana yang ikut digambar. Dimatikan = kartunya lebih lega, bukan kosong:
+  // tata letak poster menyesuaikan sendiri.
+  wa_blok_angka: 1,             // DOI opsi 1 & 2, nilai stok, SIT, jumlah SKU
+  wa_blok_status: 1,            // batang sebaran status per area
+  wa_blok_tren: 1,              // garis tren DOI 30 hari per area
+  wa_blok_po: 1,                // saran open PO + SKU kritis teratas
+  wa_kritis_maks: 3,            // berapa SKU kritis yang disebut namanya per area
+  wa_judul: 'Ringkasan DOI Harian — IEG',
 } as const;
 
 export type SettingKey = keyof typeof DEFAULT_SETTINGS;

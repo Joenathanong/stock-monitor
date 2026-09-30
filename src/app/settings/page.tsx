@@ -104,6 +104,21 @@ const groupsFor = (v: Record<string, string>, areas: AreaRow[] = []): { title: s
     ],
   },
   {
+    title: 'Poster WhatsApp (/wa)',
+    fields: [
+      { key: 'wa_judul', label: 'Judul di poster', type: 'text',
+        hint: 'Muncul besar di kiri atas gambar. Halaman dibuka dengan /wa?k=<token>; tokennya dari environment variable WA_PAGE_TOKEN, bukan dari sini — supaya tidak ikut terbaca siapa pun yang bisa membuka Pengaturan.' },
+      { key: 'wa_blok_angka', label: 'Tampilkan angka inti (DOI, nilai, SIT, stok)', type: 'bool' },
+      { key: 'wa_blok_status', label: 'Tampilkan sebaran status', type: 'bool',
+        hint: 'Batang Kritis / Low / Aman / Overstock per area; sisanya dilipat jadi "Lain".' },
+      { key: 'wa_blok_tren', label: 'Tampilkan tren DOI 30 hari', type: 'bool',
+        hint: 'Garis kecil per area. Hari yang belum pernah dihitung memutus garis, tidak disambung lurus.' },
+      { key: 'wa_blok_po', label: 'Tampilkan open PO & SKU paling mendesak', type: 'bool' },
+      { key: 'wa_kritis_maks', label: 'Berapa SKU mendesak disebut per area', type: 'number',
+        hint: 'Maksimal 6. Lebih dari 3 mulai sempit di lebar kartu 294px.' },
+    ],
+  },
+  {
     title: 'Phase out',
     fields: [
       { key: 'exclude_phase_out', label: 'Keluarkan SKU phase out dari DOI total & kelas ABC', type: 'bool' },

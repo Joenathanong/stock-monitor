@@ -50,7 +50,7 @@ const SIDE_KEY = 'ieg-side'; // 'expanded' | 'rail' — hanya berlaku ≥1280px
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
-  const bare = path === '/login' || path === '/tv' || path === '/dashboard';
+  const bare = path === '/login' || path === '/tv' || path === '/dashboard' || path === '/wa';
 
   const [drawer, setDrawer] = useState(false);
   const [collapsed, setCollapsed] = useState(false);

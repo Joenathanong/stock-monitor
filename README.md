@@ -454,6 +454,43 @@ hijau — `transit GAGAL (…)` pernah lewat sebagai "Selesai" berwarna hijau.
 
 `.grid-toast` milik DataGrid dihapus; semuanya lewat antrean yang sama.
 
+### Poster WhatsApp `/wa` — satu gambar 1600×900
+
+Bot WhatsApp berjalan di server lain, jadi ia tidak punya sesi. Dua jalur, keduanya
+minta token `WA_PAGE_TOKEN`:
+
+```
+# 1. tanpa browser — paling ringan untuk bot
+curl -s "https://doi-monitor.vercel.app/api/public/wa/svg?k=RAHASIA" -o doi.svg
+convert doi.svg doi.jpg            # ImageMagick, atau sharp
+
+# 2. lewat browser — buka /wa?k=RAHASIA lalu tekan "Unduh JPG"
+```
+
+**Kalau `WA_PAGE_TOKEN` tidak diset, endpoint-nya menolak (503), bukan terbuka.**
+Angka stok dan nilai rupiah seluruh area tidak boleh jadi publik hanya karena
+seseorang lupa mengisi environment variable.
+
+**Posternya satu elemen `<svg>`, bukan HTML.** Alasannya unduhan: SVG bisa
+diserialkan lalu digambar ke `<canvas>` tanpa pustaka apa pun, dan hasilnya persis
+sama dengan yang di layar. html2canvas harus menafsirkan ulang CSS, dan design
+system ini memakai `color-mix()` yang tidak dipahaminya.
+
+Konsekuensinya **seluruh warna di `src/lib/wa-poster.ts` ditulis hex apa adanya**,
+bukan `var(--token)`: SVG yang berdiri sendiri tidak mewarisi custom property dari
+dokumen induknya — semua `var(--x)` akan jadi hitam. Ini satu-satunya tempat di repo
+yang boleh begitu.
+
+`src/app/wa/poster.tsx` sengaja TANPA `'use client'` supaya komponen yang sama
+dipakai dua kali: oleh halaman di browser, dan oleh route handler yang merendernya
+jadi teks SVG di server. Tidak ada dua versi gambar yang bisa berbeda diam-diam.
+(Next menolak `import … from 'react-dom/server'` di app router, jadi impornya
+dinamis di dalam handler.)
+
+Blok yang tampil diatur di Pengaturan → *Poster WhatsApp*: angka inti, sebaran
+status, tren 30 hari, open PO & SKU mendesak. Blok yang dimatikan tidak
+meninggalkan lubang — kursor vertikal di `KartuArea` membuat blok berikutnya naik.
+
 ### Riwayat Proses — tempat rinciannya tinggal
 
 Notifikasi hidup 10 detik dan memuat SATU baris. Daftar langkah — yang panjangnya

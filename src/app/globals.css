@@ -411,6 +411,47 @@ body {
   .grid-toolbar .grid-count { margin-left: 0; width: 100%; }
 }
 
+/* ---------- Poster WhatsApp (/wa) ---------- */
+/* Halaman ini isinya SATU gambar. Tidak ada sidebar, tidak ada topbar: apa pun
+   yang bukan poster akan ikut terpotret kalau bot menangkap layar. */
+.wa-root {
+  min-height: 100vh; min-height: 100dvh;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 16px; background: var(--bg-canvas);
+}
+/* Lebar poster dikunci 1600px lalu diperkecil mengikuti layar — perbandingannya
+   tidak boleh berubah, karena itu yang menentukan hasil unduhan. */
+.wa-canvas { width: 100%; max-width: 1600px; }
+.wa-bar {
+  width: 100%; max-width: 1600px;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+}
+.wa-pesan { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: var(--bg-canvas); }
+
+.wa-backdrop {
+  position: fixed; inset: 0; z-index: var(--z-backdrop);
+  background: var(--overlay); display: grid; place-items: center; padding: 24px;
+}
+.wa-sheet {
+  z-index: var(--z-modal); width: min(560px, 100%); max-height: 80dvh;
+  display: flex; flex-direction: column;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-2); overflow: hidden;
+}
+.wa-sheet-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 16px; border-bottom: 1px solid var(--border-subtle); flex: none;
+}
+.wa-sheet-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; }
+/* Di HP jadi bottom sheet (§11.9) — dialog di tengah terlalu sempit di 360px. */
+@media (max-width: 767.98px) {
+  .wa-backdrop { place-items: end center; padding: 0; }
+  .wa-sheet {
+    width: 100%; max-height: 90dvh; border-radius: var(--r-lg) var(--r-lg) 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
 /* ---------- Dashboard publik (/dashboard) — tanpa sidebar ---------- */
 .pub-root {
   /* tinggi PASTI, bukan min-height — kalau tumbuh mengikuti isi, .pub-main ikut

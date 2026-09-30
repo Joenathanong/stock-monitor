@@ -35,7 +35,7 @@ function Login() {
   }
 
   return (
-    <div className="flex h-[100dvh] items-center justify-center overflow-y-auto p-4" style={{ background: 'var(--grad-hero)' }}>
+    <div className="flex h-screen h-[100dvh] items-center justify-center overflow-y-auto p-4" style={{ background: 'var(--grad-hero)' }}>
       <form onSubmit={submit} className="card w-full max-w-sm p-6">
         <div className="mb-1 text-[22px] font-bold text-ink">IEG DOI Monitor</div>
         <div className="mb-5 text-[13px] text-label">
@@ -51,7 +51,7 @@ function Login() {
         <input className="input mb-3" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus autoComplete="username" />
         <label className="label">Password</label>
         <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === 'setup' ? 'new-password' : 'current-password'} />
-        {error ? <div className="mt-2 text-[12.5px] text-negative">{error}</div> : null}
+        {error ? <div className="mt-2 text-[12px] text-negative">{error}</div> : null}
         <button className="btn btn-primary mt-4 h-11 w-full justify-center text-[15px]" disabled={busy || mode === 'loading'}>
           {busy ? 'Memeriksa…' : mode === 'setup' ? 'Buat admin & masuk' : 'Masuk'}
         </button>

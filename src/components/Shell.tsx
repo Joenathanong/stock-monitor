@@ -181,7 +181,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <button className="btn btn-sm" onClick={toggleTheme} aria-label={theme === 'evening' ? 'Ganti ke tema Morning' : 'Ganti ke tema Evening'} title={theme === 'evening' ? 'Morning (terang)' : 'Evening (gelap)'}>
             {theme === 'evening' ? '☀' : '☾'}<span className="hidden md:inline">{theme === 'evening' ? 'Morning' : 'Evening'}</span>
           </button>
-          {me ? <span className="hidden text-[12.5px] text-label lg:inline">{me.name} · {me.role === 'ADMIN' ? 'Admin' : me.role === 'USER' ? 'User' : 'Lihat saja'}</span> : null}
+          {me ? <span className="hidden text-[12px] text-label lg:inline">{me.name} · {me.role === 'ADMIN' ? 'Admin' : me.role === 'USER' ? 'User' : 'Lihat saja'}</span> : null}
           <button className="btn btn-sm" onClick={logout}>Keluar</button>
         </div>
       </header>

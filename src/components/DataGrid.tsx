@@ -10,6 +10,7 @@
  * Di bawah 768px baris menjadi kartu; resize dimatikan, sort/filter lewat toolbar.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { toast } from './Toast';
 
 export type ColType = 'text' | 'number' | 'date';
 export type Column<T> = {
@@ -131,7 +132,6 @@ export function DataGrid<T>(props: DataGridProps<T>) {
   const [page, setPage] = useState(0);
   const [pop, setPop] = useState<{ key: string; x: number; y: number; draft: Filter } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   // Bawaan: tabel selalu selebar kontainer. Lebar kolom hanya berubah kalau
   // pemakai menariknya sendiri (atau klik ganda gagang = pas isi satu kolom).
@@ -328,7 +328,7 @@ export function DataGrid<T>(props: DataGridProps<T>) {
   function copyCell(e: React.MouseEvent<HTMLTableCellElement>) {
     const text = (e.currentTarget.textContent ?? '').trim();
     if (!text) return;
-    navigator.clipboard?.writeText(text).then(() => { setToast('Disalin'); setTimeout(() => setToast(null), 1200); }).catch(() => {});
+    navigator.clipboard?.writeText(text).then(() => toast({ tone: 'ok', title: 'Disalin', ttl: 1_500 })).catch(() => {});
   }
 
   const activeFilters = Object.entries(filters);
@@ -469,7 +469,6 @@ export function DataGrid<T>(props: DataGridProps<T>) {
         </div>
       ) : null}
 
-      {toast ? <div className="grid-toast" role="status">{toast}</div> : null}
     </div>
   );
 }

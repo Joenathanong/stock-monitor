@@ -73,7 +73,7 @@ export default function SalesPage() {
     <div className="space-y-4">
       <div>
         <h1 className="page-title">Data Penjualan</h1>
-        <div className="mt-1 text-[12.5px] text-label">Sumber: OCS Report ORDER › SKU. <b>Seluruh status</b>, dan <b>tiap kota ditarik dengan namanya sendiri</b> (tidak pernah <code>area=All</code>, karena cakupannya ikut akun OCS) lalu disimpan terpisah per area; qty order batal/belum bayar (NA, UNPAID, IN_CANCEL, CANCELLED) masuk kolom sendiri dan tidak ikut ADS kecuali dinyalakan di Pengaturan. Tiap 01.00 WIB, 7 hari terakhir ditarik ulang dan ditimpa.</div>
+        <div className="mt-1 text-[12px] text-label">Sumber: OCS Report ORDER › SKU. <b>Seluruh status</b>, dan <b>tiap kota ditarik dengan namanya sendiri</b> (tidak pernah <code>area=All</code>, karena cakupannya ikut akun OCS) lalu disimpan terpisah per area; qty order batal/belum bayar (NA, UNPAID, IN_CANCEL, CANCELLED) masuk kolom sendiri dan tidak ikut ADS kecuali dinyalakan di Pengaturan. Tiap 01.00 WIB, 7 hari terakhir ditarik ulang dan ditimpa.</div>
       </div>
       {msg ? <Alert tone={msg.tone}>{msg.text}</Alert> : null}
       {cov.error ? <Alert tone="error">{cov.error}</Alert> : null}
@@ -89,7 +89,7 @@ export default function SalesPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="card card-pad">
           <div className="card-title mb-2">Unggah histori awal (XLSX)</div>
-          <div className="text-[12.5px] text-label">Bentuk panjang <code>Date | SKU | Qty</code> (opsional Area) atau melebar (SKU lalu satu kolom per tanggal). Baris dengan kunci sama ditimpa. Unggah sejak Januari supaya tanggal listing akurat.</div>
+          <div className="text-[12px] text-label">Bentuk panjang <code>Date | SKU | Qty</code> (opsional Area) atau melebar (SKU lalu satu kolom per tanggal). Baris dengan kunci sama ditimpa. Unggah sejak Januari supaya tanggal listing akurat.</div>
           <div className="mt-3 flex flex-wrap items-end gap-2">
             <div className="flex-1"><input type="file" accept=".xlsx" className="input h-auto py-1" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></div>
             <button className="btn btn-primary" onClick={upload} disabled={!file || !!busy}>{busy === 'upload' ? 'Mengunggah…' : 'Unggah'}</button>

@@ -49,7 +49,7 @@ function Monitoring() {
     { key: 'stock', label: 'Stok', get: (r) => r.availableQty, type: 'number', mono: true, width: 80, title: 'Available Qty OCS (On Hand − On Order)' },
     { key: 'transit', label: 'Transit', get: (r) => r.transitQty, type: 'number', mono: true, width: 76, prio: 'p2', render: (r) => r.transitQty ? fmt(r.transitQty) : <span className="empty">—</span> },
     ...(s1 ? [{ key: 'ads1', label: doiLabel('ADS', 1, disp), get: (r: SnapshotRow) => r.ads1, type: 'number' as const, mono: true, width: 76, prio: 'p2' as const, title: `Rata-rata harian ${win1}, exclude double date & payday`, render: (r: SnapshotRow) => fmt(r.ads1, 1) }] : []),
-    ...(s2 ? [{ key: 'ads2', label: doiLabel('ADS', 2, disp), get: (r: SnapshotRow) => r.ads2, type: 'number' as const, mono: true, width: 90, prio: 'p2' as const, title: `Max dari rata-rata ${win2}`, render: (r: SnapshotRow) => <>{fmt(r.ads2, 1)}<span className="ml-1 text-[10px] text-muted">{r.ads2Source}</span></> }] : []),
+    ...(s2 ? [{ key: 'ads2', label: doiLabel('ADS', 2, disp), get: (r: SnapshotRow) => r.ads2, type: 'number' as const, mono: true, width: 90, prio: 'p2' as const, title: `Max dari rata-rata ${win2}`, render: (r: SnapshotRow) => <>{fmt(r.ads2, 1)}<span className="ml-1 text-[11px] text-muted">{r.ads2Source}</span></> }] : []),
     ...(s1 ? [{ key: 'doi1', label: doiLabel('DOI', 1, disp), get: (r: SnapshotRow) => r.doi1, type: 'number' as const, mono: true, width: 72, render: (r: SnapshotRow) => <b>{fmtDoi(r.doi1)}</b> }] : []),
     ...(s2 ? [{ key: 'doi2', label: doiLabel('DOI', 2, disp), get: (r: SnapshotRow) => r.doi2, type: 'number' as const, mono: true, width: 72, render: (r: SnapshotRow) => <b>{fmtDoi(r.doi2)}</b> }] : []),
     { key: 'lt', label: 'LT', get: (r) => r.leadTimeDays, type: 'number', mono: true, width: 52, title: 'Lead time (hari)' },
@@ -80,7 +80,7 @@ function Monitoring() {
     ...(s1 ? [{ key: 'doi1t', label: `${doiLabel('DOI', 1, disp)}+T`, get: (r: SnapshotRow) => r.doi1Transit, type: 'number' as const, mono: true, width: 76, prio: 'p3' as const, title: 'DOI Opsi 1 termasuk stok dalam perjalanan', render: (r: SnapshotRow) => fmtDoi(r.doi1Transit) }] : []),
     ...(s2 ? [{ key: 'doi2t', label: `${doiLabel('DOI', 2, disp)}+T`, get: (r: SnapshotRow) => r.doi2Transit, type: 'number' as const, mono: true, width: 76, prio: 'p3' as const, title: 'DOI Opsi 2 termasuk stok dalam perjalanan', render: (r: SnapshotRow) => fmtDoi(r.doi2Transit) }] : []),
     { key: 'first', label: 'Jual pertama', get: (r) => r.firstSalesDate, type: 'date', mono: true, width: 120, prio: 'p3',
-      render: (r) => r.firstSalesDate ? <>{r.firstSalesDate}{earliest && r.firstSalesDate <= earliest ? <span className="ml-1 text-[10px] text-muted" title="Sama dengan awal data — tanggal listing bisa lebih tua">≥ awal</span> : null}</> : <span className="empty">—</span> },
+      render: (r) => r.firstSalesDate ? <>{r.firstSalesDate}{earliest && r.firstSalesDate <= earliest ? <span className="ml-1 text-[11px] text-muted" title="Sama dengan awal data — tanggal listing bisa lebih tua">≥ awal</span> : null}</> : <span className="empty">—</span> },
     { key: 'potarget', label: 'Target habis', get: (r) => r.phaseOutTargetDate, type: 'date', mono: true, width: 120, prio: 'p3', title: 'Tanggal target stok phase out harus habis' },
     { key: 'poexcess', label: 'Sisa saat target', get: (r) => r.phaseOutExcessQty, type: 'number', mono: true, width: 130, prio: 'p3',
       title: 'Perkiraan stok tersisa pada tanggal target',
@@ -98,7 +98,7 @@ function Monitoring() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="page-title">Tabel DOI</h1>
-          <div className="mt-1 text-[12.5px] text-label">
+          <div className="mt-1 text-[12px] text-label">
             {data?.computedAt ? <>Snapshot {data.snapshotDate}, dihitung {fmtDateTime(data.computedAt)} · {fmt(data.rows.length)} SKU · area <b>{labelArea(data.areaId ?? '—')}</b></> : 'Belum ada snapshot'}
           </div>
         </div>
@@ -131,8 +131,8 @@ function Monitoring() {
             <select className="input" style={{ width: 'auto' }} value={abc} onChange={(e) => setAbc(e.target.value)} aria-label="Kelas ABC">
               <option value="ALL">ABC: semua</option><option value="A">A</option><option value="B">B</option><option value="C">C</option>
             </select>
-            <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={nplOnly} onChange={(e) => setNplOnly(e.target.checked)} /> NPL</label>
-            <label className="flex items-center gap-2 text-[13px]" title="Phase out tidak dapat saran PO dan tidak dihitung di DOI total">
+            <label className="check"><input type="checkbox" checked={nplOnly} onChange={(e) => setNplOnly(e.target.checked)} /> NPL</label>
+            <label className="check" title="Phase out tidak dapat saran PO dan tidak dihitung di DOI total">
               <input type="checkbox" checked={hidePhaseOut} onChange={(e) => setHidePhaseOut(e.target.checked)} /> Sembunyikan Phase Out
             </label>
           </>
@@ -145,7 +145,7 @@ function Monitoring() {
 function Detail({ r, earliest, disp, win1, win2 }: { r: SnapshotRow; earliest: string | null; disp: 'OPSI1' | 'OPSI2' | 'BOTH'; win1: string; win2: string }) {
   const truncated = !!r.firstSalesDate && !!earliest && r.firstSalesDate <= earliest;
   return (
-    <div className="grid gap-4 py-2 text-[12.5px] md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-4 py-2 text-[12px] md:grid-cols-2 xl:grid-cols-4">
       <div className="md:col-span-2 xl:col-span-4">
         <Link className="btn btn-sm btn-primary" href={`/sku/${encodeURIComponent(r.sku)}`}>
           Analisis lengkap SKU ini →

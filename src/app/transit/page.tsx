@@ -1,6 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { Alert, Empty, RefreshButton, fmt, fmtDateTime, postForm, postJson, useApi } from '@/components/ui';
+import { toast } from '@/components/Toast';
 import { DataGrid, type Column } from '@/components/DataGrid';
 
 type Hitung = 'IKUT' | 'BELUM_HITUNG' | 'TIDAK_ADA_STOK';
@@ -34,40 +35,48 @@ const HITUNG_KELAS: Record<Hitung, string> = {
 export default function TransitPage() {
   const { data, error, reload } = useApi<Resp>('/api/transit');
   const [file, setFile] = useState<File | null>(null);
-  const [msg, setMsg] = useState<{ tone: 'ok' | 'error' | 'warn'; text: string } | null>(null);
+  // Hasil aksi sesaat pergi ke toast; <Alert> disisakan untuk keadaan halaman
+  // yang menetap (galat pemuatan, hasil rekonsiliasi) — itu bukan notifikasi.
   const [busy, setBusy] = useState<string | null>(null);
   const [edit, setEdit] = useState<{ sku: string; areaId: string; qty: string; eta: string } | null>(null);
   const [areaFilter, setAreaFilter] = useState<string>('SEMUA');
 
   async function tarikOcs() {
-    setBusy('ocs'); setMsg(null);
+    setBusy('ocs');
     try {
       const r = await postJson('/api/transit/sync?force=1');
-      setMsg({
-        // `partial` yang menandai belum tuntas, bukan `ok`. Penarikan sebagian
-        // tetap menulis baris, jadi ok:true — dulu ok:false dilempar postJson
-        // sebagai error tanpa pesan dan layar hanya menampilkan "HTTP 200".
+      // `partial` yang menandai belum tuntas, bukan `ok`. Penarikan sebagian
+      // tetap menulis baris, jadi ok:true — dulu ok:false dilempar postJson
+      // sebagai error tanpa pesan dan layar hanya menampilkan "HTTP 200".
+      toast({
         tone: r.partial ? 'warn' : 'ok',
-        text: r.skipped ? r.message
-          : `${r.rows} baris dari ${r.docs} dokumen (${Math.round((r.durationMs ?? 0) / 1000)} dtk).`
-            + `${r.takCocok ? ` ${r.takCocok} kode SAP tidak ketemu SKU-nya.` : ''}`
-            + `${r.message ? ` ${r.message}` : ''} Klik "Hitung ulang" agar DOI memakai angka baru.`,
+        title: r.skipped ? r.message
+          : `${r.rows} baris dari ${r.docs} dokumen (${Math.round((r.durationMs ?? 0) / 1000)} dtk)`,
+        detail: r.skipped ? undefined
+          : `${r.takCocok ? `${r.takCocok} kode SAP tidak ketemu SKU-nya. ` : ''}`
+            + `${r.message ? `${r.message} ` : ''}`
+            + 'Klik "Hitung ulang" agar DOI memakai angka baru.',
       });
       reload();
-    } catch (e) { setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) }); }
+    } catch (e) { toast({ tone: 'bad', title: e instanceof Error ? e.message : String(e) }); }
     finally { setBusy(null); }
   }
 
   async function upload() {
     if (!file) return;
-    setBusy('upload'); setMsg(null);
+    setBusy('upload');
     try {
       const form = new FormData();
       form.append('file', file);
       const r = await postForm('/api/transit', form);
-      setMsg({ tone: r.skipped ? 'warn' : 'ok', text: `Baris manual diganti: ${r.inserted} baris.${r.skipped ? ` ${r.skipped} baris dilewati: ${r.problems.join('; ')}` : ''} Baris dari OCS tidak disentuh. Klik "Hitung ulang" agar DOI memakai angka baru.` });
+      toast({
+        tone: r.skipped ? 'warn' : 'ok',
+        title: `Baris manual diganti: ${r.inserted} baris`,
+        detail: `${r.skipped ? `${r.skipped} baris dilewati: ${r.problems.join('; ')}. ` : ''}`
+          + 'Baris dari OCS tidak disentuh. Klik "Hitung ulang" agar DOI memakai angka baru.',
+      });
       setFile(null); reload();
-    } catch (e) { setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) }); }
+    } catch (e) { toast({ tone: 'bad', title: e instanceof Error ? e.message : String(e) }); }
     finally { setBusy(null); }
   }
 
@@ -76,7 +85,7 @@ export default function TransitPage() {
     try {
       await postJson('/api/transit', { sku: edit.sku, areaId: edit.areaId, qty: Number(edit.qty), eta: edit.eta || null }, 'PATCH');
       setEdit(null); reload();
-    } catch (e) { setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) }); }
+    } catch (e) { toast({ tone: 'bad', title: e instanceof Error ? e.message : String(e) }); }
   }
 
   async function clearManual() {
@@ -112,7 +121,7 @@ export default function TransitPage() {
       render: (r) => <span className={HITUNG_KELAS[r.hitung]}>{HITUNG_TEKS[r.hitung]}{r.hitung === 'BELUM_HITUNG' && r.qtyDipakai ? ` (kini ${fmt(r.qtyDipakai)})` : ''}</span> },
     { key: 'eta', label: 'ETA', get: (r) => r.eta, type: 'date', mono: true, width: 120, prio: 'p2',
       render: (r) => edit?.sku === r.sku && edit?.areaId === r.areaId
-        ? <input className="input w-36" type="date" value={edit.eta} onChange={(e) => setEdit({ ...edit, eta: e.target.value })} />
+        ? <input className="input w-full" type="date" value={edit.eta} onChange={(e) => setEdit({ ...edit, eta: e.target.value })} />
         : (r.eta ?? <span className="empty">—</span>) },
     { key: 'doc', label: 'No. DO', get: (r) => r.docNums, width: 180, prio: 'p3' },
     { key: 'batch', label: 'BatchQty', get: (r) => r.qtyBatch, type: 'number', mono: true, width: 110, prio: 'p3',
@@ -132,7 +141,7 @@ export default function TransitPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="page-title">Stok Dalam Perjalanan</h1>
-          <div className="mt-1 text-[12.5px] text-label">
+          <div className="mt-1 text-[12px] text-label">
             Ditarik otomatis dari OCS <b>Receive Stock</b>, dikelompokkan per gudang tujuan.
             Qty diambil dari <b>DoQty</b> — angka itu sudah total pcs, jadi tidak dikalikan lagi dengan isi karton.
           </div>
@@ -143,7 +152,6 @@ export default function TransitPage() {
         </div>
       </div>
       {error ? <Alert tone="error">{error}</Alert> : null}
-      {msg ? <Alert tone={msg.tone}>{msg.text}</Alert> : null}
 
       {rk && rk.total > 0 ? (
         <Alert tone={rk.tidakAdaStok.sku ? 'error' : rk.belumHitung.sku ? 'warn' : 'ok'}>
@@ -190,10 +198,10 @@ export default function TransitPage() {
         <div className="card card-pad">
           <div className="card-title mb-2">Riwayat unggahan</div>
           {data?.batches.length ? (
-            <ul className="space-y-1 text-[12.5px]">
+            <ul className="space-y-1 text-[12px]">
               {data.batches.map((b) => <li key={b.id} className="flex justify-between gap-2"><span className="truncate">{b.filename}</span><span className="text-label">{b.rowCount} baris · {fmtDateTime(b.uploadedAt)}</span></li>)}
             </ul>
-          ) : <div className="text-[12.5px] text-label">Belum ada unggahan.</div>}
+          ) : <div className="text-[12px] text-label">Belum ada unggahan.</div>}
         </div>
       </div>
 

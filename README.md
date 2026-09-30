@@ -431,6 +431,50 @@ jendela kesegaran.
 Tabel baru ini butuh `npm run db:push` sekali. Tidak ada primary key tabel lama yang
 berubah, jadi jebakan clustered index di atas tidak berlaku untuk perubahan ini.
 
+### Notifikasi: toast, bukan chip
+
+Hasil Refresh dulu ditempel sebagai chip di samping tombolnya. Chip (§11.8) dirancang
+untuk satu-dua kata status — tinggi 22px, `whitespace-nowrap` — jadi kalimat seperti
+
+> Selesai: 2000 SKU, 18 dtk (pengaturan 0.1s · stok 13400 baris 5.4s · harga masih
+> segar 0.0s · transit GAGAL (…) 5.7s · Makassar 327 SKU 1.4s · …)
+
+memaksa tinggi, pembungkusan dan lebar 46ch lewat `style` inline. Hasilnya balon hijau
+besar yang mendorong tata letak topbar dan menutupi judul halaman.
+
+Sekarang `src/components/Toast.tsx`: satu antrean untuk seluruh aplikasi, `<Toaster/>`
+dipasang di `layout.tsx` (di luar `Shell`, supaya halaman dengan topbar sendiri ikut
+kebagian). Satu baris ringkas; langkah-langkahnya disembunyikan di balik tombol
+"Rincian" dan hitung mundurnya berhenti selagi rincian dibuka. Sukses hilang sendiri
+setelah 6 dtk; peringatan dan galat MENETAP sampai ditutup. Paling banyak 3 sekaligus.
+Di bawah 768px melebar penuh di tepi bawah, seperti bottom sheet §11.9.
+
+Langkah yang GAGAL atau SEBAGIAN di tengah perhitungan membuat warnanya kuning, bukan
+hijau — `transit GAGAL (…)` pernah lewat sebagai "Selesai" berwarna hijau.
+
+`.grid-toast` milik DataGrid dihapus; semuanya lewat antrean yang sama.
+
+### `.tag` — label yang boleh membungkus
+
+Chip tidak boleh dipakai untuk kalimat. `.tag` (radius 8, tinggi mengikuti isi,
+`overflow-wrap:anywhere`) untuk isi seperti `2026-08-17 · Hari Kemerdekaan` yang dulu
+dipaksakan ke dalam chip dan terpotong diam-diam oleh `.app-main{overflow-x:hidden}`.
+
+### Header tabel yang tidak pernah menempel
+
+`overflow-x:auto` menjadikan kotaknya scrollport di KEDUA sumbu (satu sumbu non-visible
+memaksa sumbu lain jadi `auto`). Tanpa `max-height`, kotak itu tidak pernah menggulir
+vertikal, jadi `thead{position:sticky;top:0}` menempel pada sesuatu yang tidak bergerak
+dan judul kolom tetap hilang saat halaman digulir. `.grid-scroll` dan `.table-scroll`
+sekarang `max-height:70dvh` — salah satu dari 4 penggulir yang diizinkan §7.2 — dan
+dilepas lagi di mode kartu (<768px).
+
+### Kekhususan: `.dgrid.dgrid-auto`
+
+`.dgrid-auto{table-layout:auto}` kalah dari `.dgrid{table-layout:fixed}` karena
+kekhususannya sama dan `.dgrid` ditulis belakangan, jadi kolom tetap dimampatkan sampai
+`71,7%` terpotong jadi `71,…`. Ditulis `.dgrid.dgrid-auto` agar menang.
+
 ### `tsc` lokal TIDAK bisa dipercaya untuk tipe Prisma
 
 Engine Prisma tidak bisa diunduh di lingkungan pengembangan yang dipakai Claude,

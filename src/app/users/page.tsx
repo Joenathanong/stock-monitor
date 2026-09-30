@@ -50,7 +50,7 @@ export default function UsersPage() {
   const meId = me.data?.user.id;
   const columns = useMemo<Column<User>[]>(() => [
     { key: 'username', label: 'Username', get: (u) => u.username, mono: true, width: 160, isTitle: true, sticky: true,
-      render: (u) => <>{u.username}{meId === u.id ? <span className="ml-1 text-[10px] text-muted">(Anda)</span> : null}</> },
+      render: (u) => <>{u.username}{meId === u.id ? <span className="ml-1 text-[11px] text-muted">(Anda)</span> : null}</> },
     { key: 'name', label: 'Nama', get: (u) => u.name, width: 200,
       render: (u) => edit?.id === u.id ? <input className="input w-44" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /> : u.name },
     { key: 'role', label: 'Role', get: (u) => ROLE_LABEL[u.role as keyof typeof ROLE_LABEL] ?? u.role, width: 150,
@@ -83,7 +83,7 @@ export default function UsersPage() {
     <div className="space-y-4">
       <div>
         <h1 className="page-title">Pengguna</h1>
-        <div className="mt-1 text-[12.5px] text-label">
+        <div className="mt-1 text-[12px] text-label">
           <b>Admin</b> mengelola pengguna & pengaturan · <b>User</b> boleh mengubah data (transit, lead time, refresh) · <b>Lihat saja</b> hanya membaca.
         </div>
       </div>

@@ -89,7 +89,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="page-title">Dashboard DOI</h1>
-          <div className="mt-1 text-[12.5px] text-label">
+          <div className="mt-1 text-[12px] text-label">
             {data?.computedAt
               ? <>Terakhir dihitung {fmtDateTime(data.computedAt)} ({data.trigger === 'cron' ? 'otomatis 07.30' : data.trigger}) · snapshot {data.snapshotDate} · area <b>{labelArea(data.areaId ?? '—')}</b></>
               : 'Belum ada perhitungan'}
@@ -99,7 +99,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
           <AreaPicker areas={data?.areas ?? []} value={data?.areaId ?? area} onChange={setArea}
             hint="Tiap kota dihitung sendiri; Semua area = seluruh kota dijumlahkan jadi satu DOI" />
           {poSum.count > 0 ? (
-            <label className="flex items-center gap-2 text-[13px]" title="Secara default SKU phase out tidak dihitung di DOI total & ABC">
+            <label className="check" title="Secara default SKU phase out tidak dihitung di DOI total & ABC">
               <input type="checkbox" checked={withPhaseOut} onChange={(e) => setWithPhaseOut(e.target.checked)} />
               Hitung termasuk Phase Out
             </label>
@@ -177,7 +177,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
             <div className="card overflow-hidden">
               <div className="flex items-start justify-between gap-3 px-4 pt-4">
                 <div className="card-title">Prioritas open PO <TopTag shown={critical.length} total={grp?.po.count} note="paling mendesak" /></div>
-                {readOnly ? null : <Link href="/monitoring?status=PO" className="shrink-0 text-[12.5px] text-primary hover:underline">Lihat semua →</Link>}
+                {readOnly ? null : <Link href="/monitoring?status=PO" className="shrink-0 text-[12px] text-primary hover:underline">Lihat semua →</Link>}
               </div>
               <div className="px-4 pt-3"><Resume items={[
                 { k: 'SKU', v: fmt(grp?.po.count) },
@@ -195,7 +195,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
               <div className="card overflow-hidden">
                 <div className="flex items-start justify-between gap-3 px-4 pt-4">
                   <div className="card-title">Overstock terbesar <TopTag shown={overstock.length} total={grp?.overstock.count} /></div>
-                  {readOnly ? null : <Link href="/monitoring?status=OVERSTOCK" className="shrink-0 text-[12.5px] text-primary hover:underline">Lihat semua →</Link>}
+                  {readOnly ? null : <Link href="/monitoring?status=OVERSTOCK" className="shrink-0 text-[12px] text-primary hover:underline">Lihat semua →</Link>}
                 </div>
                 <div className="px-4 pt-3"><Resume items={[
                   { k: 'SKU', v: fmt(grp?.overstock.count) },
@@ -208,7 +208,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
               <div className="card overflow-hidden">
                 <div className="flex items-start justify-between gap-3 px-4 pt-4">
                   <div className="card-title">Produk baru (NPL) <TopTag shown={npl.length} total={grp?.npl.count} /></div>
-                  {readOnly ? null : <Link href="/monitoring?npl=1" className="shrink-0 text-[12.5px] text-primary hover:underline">Lihat semua →</Link>}
+                  {readOnly ? null : <Link href="/monitoring?npl=1" className="shrink-0 text-[12px] text-primary hover:underline">Lihat semua →</Link>}
                 </div>
                 <div className="px-4 pt-3"><Resume items={[
                   { k: 'SKU', v: fmt(grp?.npl.count) },
@@ -225,7 +225,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
                 <div className="flex items-center justify-between px-4 pt-4">
                   <div className="card-title">Phase Out — pantau sell-down <TopTag shown={phaseOut.length} total={grp?.phaseOut.count} /></div>
                   {readOnly ? null : (
-                    <span className="flex shrink-0 items-center gap-3 text-[12.5px]">
+                    <span className="flex shrink-0 items-center gap-3 text-[12px]">
                       <Link href="/monitoring?status=PHASE_OUT" className="text-primary hover:underline">Lihat semua →</Link>
                       <Link href="/phase-out" className="text-primary hover:underline">Kelola →</Link>
                     </span>
@@ -247,7 +247,7 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
             <div className="card-title mb-2">Tanggal yang dikecualikan dari Opsi 1 (dalam jendela {set?.opsi1WindowDays} hari)</div>
             <div className="flex flex-wrap gap-1.5">
               {data!.exclusions.filter((e) => e.date >= (data!.snapshotDate ? addDaysStr(data!.snapshotDate, -(set?.opsi1WindowDays ?? 90)) : '')).map((e) => (
-                <span key={e.date} className="chip chip-noicon chip-gray" title={e.reason}>{e.date} · {e.reason}</span>
+                <span key={e.date} className="tag"><span className="mono">{e.date}</span> · {e.reason}</span>
               ))}
             </div>
             <div className="mt-2 text-[12px] text-label">

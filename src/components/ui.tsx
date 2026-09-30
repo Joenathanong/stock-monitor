@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import type { ProductStatus } from '@/lib/doi';
+import { toast } from './Toast';
 
 export const STATUS_TEXT: Record<string, string> = {
   CRITICAL: 'Kritis',
@@ -134,10 +135,9 @@ export async function postForm(url: string, form: FormData) {
  */
 const REFRESH_TIMEOUT_MS = 70_000;
 
-export function RefreshButton({ onDone, withStock = true, label }: { onDone?: () => void; withStock?: boolean; label?: string }) {
+export function RefreshButton({ onDone, withStock = true, label, className }: { onDone?: () => void; withStock?: boolean; label?: string; className?: string }) {
   const [busy, setBusy] = useState(false);
   const [detik, setDetik] = useState(0);
-  const [msg, setMsg] = useState<{ tone: 'ok' | 'warn' | 'bad'; text: string } | null>(null);
 
   // Penghitung detik: tanpa ini 40 dtk menunggu terasa seperti aplikasi mati.
   useEffect(() => {
@@ -147,42 +147,50 @@ export function RefreshButton({ onDone, withStock = true, label }: { onDone?: ()
   }, [busy]);
 
   async function run() {
-    setBusy(true); setDetik(0); setMsg(null);
+    setBusy(true); setDetik(0);
     const ac = new AbortController();
     const batas = setTimeout(() => ac.abort(), REFRESH_TIMEOUT_MS);
     try {
       const r = await postJson('/api/compute', { withStock }, 'POST', ac.signal);
       if (r.skipped) {
-        // Ini BUKAN keberhasilan: snapshot tidak berubah. Dulu tampil sebagai
-        // teks abu kecil sehingga terbaca seperti sukses.
-        setMsg({ tone: 'warn', text: r.message || 'Dilewati — perhitungan lain sedang berjalan' });
+        // Ini BUKAN keberhasilan: snapshot tidak berubah.
+        toast({ tone: 'warn', title: r.message || 'Dilewati — perhitungan lain sedang berjalan' });
       } else {
-        setMsg({ tone: 'ok', text: `Selesai: ${r.skuCount} SKU, ${Math.round(r.durationMs / 1000)} dtk${r.steps ? ` (${r.steps})` : ''}` });
+        // Ada langkah yang GAGAL di tengah? Hasilnya tetap tersimpan, tapi
+        // jangan disebut hijau — mis. "transit GAGAL (…)" pernah lewat begitu saja.
+        const bermasalah = typeof r.steps === 'string' && /GAGAL|SEBAGIAN/.test(r.steps);
+        toast({
+          tone: bermasalah ? 'warn' : 'ok',
+          title: bermasalah
+            ? `Selesai dengan catatan: ${r.skuCount} SKU, ${Math.round(r.durationMs / 1000)} dtk`
+            : `Selesai: ${r.skuCount} SKU, ${Math.round(r.durationMs / 1000)} dtk`,
+          detail: r.steps || undefined,
+        });
       }
       onDone?.();
     } catch (e) {
-      const gagal = e instanceof Error && e.name === 'AbortError'
-        ? `Tidak selesai dalam ${REFRESH_TIMEOUT_MS / 1000} dtk. Perhitungan mungkin masih jalan di server — tunggu sebentar lalu muat ulang halaman.`
-        : `Gagal: ${e instanceof Error ? e.message : e}`;
-      setMsg({ tone: 'bad', text: gagal });
+      toast({
+        tone: 'bad',
+        title: e instanceof Error && e.name === 'AbortError'
+          ? `Tidak selesai dalam ${REFRESH_TIMEOUT_MS / 1000} dtk`
+          : `Gagal: ${e instanceof Error ? e.message : e}`,
+        detail: e instanceof Error && e.name === 'AbortError'
+          ? 'Perhitungan mungkin masih berjalan di server. Tunggu sebentar lalu muat ulang halaman.'
+          : undefined,
+      });
     } finally {
       clearTimeout(batas);
       setBusy(false);
     }
   }
 
+  // Tombolnya elemen PALING LUAR, bukan dibungkus <span>: `.btn-group > .btn`
+  // hanya mengenai anak langsung, jadi pembungkus membuat tombol ini tidak ikut
+  // melebar penuh di bawah 480px sementara tetangganya melebar.
   return (
-    <span className="inline-flex flex-wrap items-center gap-2">
-      <button className={withStock ? 'btn btn-primary' : 'btn'} onClick={run} disabled={busy}>
-        {busy ? `Menghitung… ${detik} dtk` : label ?? (withStock ? 'Refresh (tarik stok OCS + hitung)' : 'Hitung ulang')}
-      </button>
-      {msg ? (
-        <span className={`chip chip-noicon ${msg.tone === 'bad' ? 'chip-bad' : msg.tone === 'warn' ? 'chip-warn' : 'chip-ok'}`}
-          style={{ height: 'auto', whiteSpace: 'normal', maxWidth: '46ch', padding: '4px 10px', fontWeight: 500 }}>
-          {msg.text}
-        </span>
-      ) : null}
-    </span>
+    <button className={`btn ${withStock ? 'btn-primary' : ''} ${className ?? ''}`} onClick={run} disabled={busy}>
+      {busy ? `Menghitung… ${detik} dtk` : label ?? (withStock ? 'Refresh (tarik stok OCS + hitung)' : 'Hitung ulang')}
+    </button>
   );
 }
 
@@ -192,7 +200,7 @@ export function Bars({ items, color = 'var(--c1)' }: { items: { label: string; v
   return (
     <div className="space-y-2">
       {items.map((i) => (
-        <div key={i.label} className="grid grid-cols-[110px_1fr_56px] items-center gap-2 text-[12.5px]">
+        <div key={i.label} className="grid grid-cols-[110px_1fr_56px] items-center gap-2 text-[12px]">
           <div className="truncate text-label">{i.label}</div>
           <div className="h-3 rounded-sm" style={{ background: 'var(--chart-track)' }}>
             <div className="h-3 rounded-sm" style={{ width: `${(i.value / max) * 100}%`, background: i.color ?? color }} />

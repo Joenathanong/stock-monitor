@@ -32,9 +32,9 @@ export default function AccountPage() {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="card card-pad">
           <div className="card-title mb-2">Profil</div>
-          <div className="text-[13.5px]">Username: <b>{u?.username ?? '—'}</b></div>
-          <div className="text-[13.5px]">Nama: <b>{u?.name ?? '—'}</b></div>
-          <div className="text-[13.5px]">Role: <b>{u ? ROLE_LABEL[u.role as keyof typeof ROLE_LABEL] ?? u.role : '—'}</b></div>
+          <div className="text-[13px]">Username: <b>{u?.username ?? '—'}</b></div>
+          <div className="text-[13px]">Nama: <b>{u?.name ?? '—'}</b></div>
+          <div className="text-[13px]">Role: <b>{u ? ROLE_LABEL[u.role as keyof typeof ROLE_LABEL] ?? u.role : '—'}</b></div>
         </div>
         <form onSubmit={submit} className="card card-pad">
           <div className="card-title mb-2">Ganti password</div>

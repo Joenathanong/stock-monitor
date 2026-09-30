@@ -116,6 +116,8 @@ export type TransitSyncResult = SyncResult & {
   docsCache?: number;
   /// Dokumen yang belum terbaca sama sekali — hasilnya belum lengkap.
   docsKurang?: number;
+  /// false kalau tabel receive_doc belum ada (db:push belum dijalankan).
+  cacheSiap?: boolean;
   /**
    * Sebagian, bukan gagal.
    *
@@ -164,10 +166,19 @@ export async function syncTransit(
   // Cache per dokumen. Daftar dokumen SELALU ditarik ulang — itu satu-satunya
   // cara mengetahui ada dokumen baru — tapi isi dokumen yang sudah pernah
   // dibaca dan masih dalam jendela kesegaran diambil dari database.
+  //
+  // Kalau tabelnya belum dibuat (`npm run db:push` belum dijalankan), penarikan
+  // TIDAK boleh gagal — cache itu percepatan, bukan syarat. Tanpa penjagaan ini
+  // satu error Prisma menjatuhkan seluruh langkah transit, dan yang terbaca user
+  // hanya "transit GAGAL (Invalid `prisma.receiveDoc.findMany()` invocation…)".
   const nomor = docs.map((d) => d.DoDocNum);
-  const cache = nomor.length
-    ? await prisma.receiveDoc.findMany({ where: { docNum: { in: nomor } } })
-    : [];
+  let cache: { docNum: number; lines: string; pulledAt: Date }[] = [];
+  let cacheSiap = true;
+  try {
+    if (nomor.length) cache = await prisma.receiveDoc.findMany({ where: { docNum: { in: nomor } } });
+  } catch {
+    cacheSiap = false;
+  }
   const batasSegar = Date.now() - Math.max(1, refreshHours) * 3_600_000;
   const tersimpan = new Map<number, OcsReceiveLine[]>();
   for (const c of cache) {
@@ -191,11 +202,17 @@ export async function syncTransit(
       const isi = await fetchReceiveLines(d.DoDocNum, Math.min(20_000, anggaran.slice(8_000, 8_000)), 1);
       lines.push(...isi);
       dariOcs++;
-      await prisma.receiveDoc.upsert({
-        where: { docNum: d.DoDocNum },
-        create: { docNum: d.DoDocNum, lines: JSON.stringify(isi), lineCount: isi.length, pulledAt: new Date() },
-        update: { lines: JSON.stringify(isi), lineCount: isi.length, pulledAt: new Date() },
-      });
+      if (cacheSiap) {
+        try {
+          await prisma.receiveDoc.upsert({
+            where: { docNum: d.DoDocNum },
+            create: { docNum: d.DoDocNum, lines: JSON.stringify(isi), lineCount: isi.length, pulledAt: new Date() },
+            update: { lines: JSON.stringify(isi), lineCount: isi.length, pulledAt: new Date() },
+          });
+        } catch {
+          cacheSiap = false;   // sekali gagal, berhenti mencoba
+        }
+      }
     } catch {
       // Satu dokumen gagal tidak boleh menggagalkan semuanya; dilaporkan sebagai
       // kurang supaya pembersihan dilewati dan transit lama tidak terhapus.
@@ -274,10 +291,12 @@ export async function syncTransit(
     takCocok: hasil.takCocok.length,
     totalDoQty: hasil.totalDoQty,
     totalBatchQty: hasil.totalBatchQty,
-    message: kurang
-      ? `${dariOcs + dariCache} dari ${docs.length} dokumen terbaca (${dariCache} dari cache), ${kurang} belum — ` +
-        'pembersihan dilewati supaya transit lama tidak hilang. Klik lagi untuk melanjutkan; dokumen yang sudah terbaca tidak ditarik ulang.'
-      : `${hasil.transit.length} baris dari ${docs.length} dokumen (${dariCache} dari cache) · ${dihapus} baris lama dihapus`,
+    cacheSiap,
+    message: (cacheSiap ? '' : 'Cache dokumen belum aktif — jalankan "npm run db:push" supaya penarikan berikutnya cepat. ')
+      + (kurang
+        ? `${dariOcs + dariCache} dari ${docs.length} dokumen terbaca (${dariCache} dari cache), ${kurang} belum — `
+          + 'pembersihan dilewati supaya transit lama tidak hilang. Klik lagi untuk melanjutkan; dokumen yang sudah terbaca tidak ditarik ulang.'
+        : `${hasil.transit.length} baris dari ${docs.length} dokumen (${dariCache} dari cache) · ${dihapus} baris lama dihapus`),
     durationMs: Date.now() - t0,
   };
 }

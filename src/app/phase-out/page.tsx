@@ -108,7 +108,7 @@ export default function PhaseOutPage() {
     { key: 'target', label: 'Target habis', get: (r) => r.targetOutDate, type: 'date', mono: true, width: 130, prio: 'p2',
       title: 'Opsional — diisi hanya bila ingin memantau tenggat sell-down',
       render: (r) => edit?.key === r.key
-        ? <input className="input w-36" type="date" value={edit.targetOutDate} onChange={(e) => setEdit({ ...edit, targetOutDate: e.target.value })} onClick={(e) => e.stopPropagation()} />
+        ? <input className="input w-full" type="date" value={edit.targetOutDate} onChange={(e) => setEdit({ ...edit, targetOutDate: e.target.value })} onClick={(e) => e.stopPropagation()} />
         : (r.targetOutDate ?? <span className="empty">—</span>) },
     { key: 'verdict', label: 'Kesimpulan', get: (r) => verdict(r).text, width: 210, prio: 'p2',
       render: (r) => { const v = verdict(r); return <span className={`chip chip-noicon ${TONE[v.tone]}`}>{v.text}</span>; } },
@@ -122,7 +122,7 @@ export default function PhaseOutPage() {
         : (r.replacementSku ?? <span className="empty">—</span>) },
     { key: 'dispo', label: 'Disposisi', get: (r) => DISPO[r.disposition] ?? r.disposition, width: 140, prio: 'p3',
       render: (r) => edit?.key === r.key
-        ? <select className="input w-36" value={edit.disposition} onChange={(e) => setEdit({ ...edit, disposition: e.target.value })}>
+        ? <select className="input w-full" value={edit.disposition} onChange={(e) => setEdit({ ...edit, disposition: e.target.value })}>
             {Object.entries(DISPO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
         : (DISPO[r.disposition] ?? r.disposition) },
@@ -145,7 +145,7 @@ export default function PhaseOutPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="page-title">Phase Out</h1>
-          <div className="mt-1 text-[12.5px] text-label">
+          <div className="mt-1 text-[12px] text-label">
             Produk yang dihentikan tapi <b>masih dijual sampai habis</b>. Dicocokkan lewat <b>{keyLen} digit terakhir kode SAP</b>,
             jadi dua kode untuk barang yang sama (prefiks 1222 / 1201) otomatis mengenai SKU yang sama.
             SKU yang terkena tidak pernah dapat saran PO, tidak dihitung sebagai overstock, dan dikeluarkan dari DOI total serta kelas ABC.

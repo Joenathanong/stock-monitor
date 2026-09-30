@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { Shell } from '@/components/Shell';
+import { Toaster } from '@/components/Toast';
 import { THEME_BOOT_SCRIPT } from '@/lib/theme';
 
 export const metadata: Metadata = {
@@ -23,6 +24,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <Shell>{children}</Shell>
+        {/* Satu antrean notifikasi untuk seluruh aplikasi, di luar Shell
+            supaya halaman yang memakai topbar sendiri ikut kebagian. */}
+        <Toaster />
       </body>
     </html>
   );

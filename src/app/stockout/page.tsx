@@ -93,8 +93,8 @@ export default function StockoutPage() {
         <>
           {fmt(r.ads, 1)}
           {r.adsSource === 'PENJUALAN'
-            ? <span className="ml-1 text-[10px] text-muted" title="Tidak ada ADS di snapshot — dipakai median penjualan 28 hari sebelum episode">dr. jual</span>
-            : r.adsEstimated ? <span className="ml-1 text-[10px] text-muted" title="Snapshot pada tanggal itu belum ada — dipakai yang paling awal tersedia">≈</span> : null}
+            ? <span className="ml-1 text-[11px] text-muted" title="Tidak ada ADS di snapshot — dipakai median penjualan 28 hari sebelum episode">dr. jual</span>
+            : r.adsEstimated ? <span className="ml-1 text-[11px] text-muted" title="Snapshot pada tanggal itu belum ada — dipakai yang paling awal tersedia">≈</span> : null}
         </>
       ) },
     { key: 'adssell', label: 'ADS hari-laku', get: (r) => r.adsSelling, type: 'number', mono: true, width: 120, prio: 'p2',
@@ -149,7 +149,7 @@ export default function StockoutPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="page-title">Analisis Stok Kosong</h1>
-          <div className="mt-1 text-[12.5px] text-label">
+          <div className="mt-1 text-[12px] text-label">
             Hari ketika SKU yang biasanya laku tiba-tiba tidak punya penjualan sama sekali — beserta perkiraan penjualan yang hilang.
             {data?.areaId ? <> Area <b>{labelArea(data.areaId)}</b>.</> : null}
           </div>
@@ -166,11 +166,11 @@ export default function StockoutPage() {
         <div className="flex flex-wrap items-end gap-3">
           <div>
             <label className="label" htmlFor="f-from">Dari</label>
-            <input id="f-from" className="input" style={{ width: 160 }} type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+            <input id="f-from" className="input w-full sm:w-[160px]" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
           </div>
           <div>
             <label className="label" htmlFor="f-to">Sampai</label>
-            <input id="f-to" className="input" style={{ width: 160 }} type="date" value={to} min={from} max={addDays(today, -1)} onChange={(e) => setTo(e.target.value)} />
+            <input id="f-to" className="input w-full sm:w-[160px]" type="date" value={to} min={from} max={addDays(today, -1)} onChange={(e) => setTo(e.target.value)} />
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             {[30, 60, 90, 180].map((n) => (
@@ -186,21 +186,21 @@ export default function StockoutPage() {
           <div className="mt-4 flex flex-wrap items-end gap-4 border-t pt-4" style={{ borderColor: 'var(--border-subtle)' }}>
             <div>
               <label className="label" htmlFor="f-run">Minimal hari berturut</label>
-              <input id="f-run" className="input" style={{ width: 120 }} type="number" min={1} max={60} value={minRun}
+              <input id="f-run" className="input w-full sm:w-[120px]" type="number" min={1} max={60} value={minRun}
                 onChange={(e) => setMinRun(Math.max(1, Number(e.target.value) || 1))} />
             </div>
             <div>
               <label className="label" htmlFor="f-ads">Minimal ADS (pcs/hari)</label>
-              <input id="f-ads" className="input" style={{ width: 140 }} type="number" min={0} step={0.5} value={minAds}
+              <input id="f-ads" className="input w-full sm:w-[140px]" type="number" min={0} step={0.5} value={minAds}
                 onChange={(e) => setMinAds(Math.max(0, Number(e.target.value) || 0))} />
             </div>
             <div>
               <label className="label" htmlFor="f-sell">Minimal hari laku (%)</label>
-              <input id="f-sell" className="input" style={{ width: 150 }} type="number" min={0} max={100} step={5} value={minSell}
+              <input id="f-sell" className="input w-full sm:w-[150px]" type="number" min={0} max={100} step={5} value={minSell}
                 title="Pangsa hari yang ada penjualannya. Ini yang memisahkan produk yang biasanya laku tiap hari dari produk slow-moving yang polanya memang bolong."
                 onChange={(e) => setMinSell(Math.min(100, Math.max(0, Number(e.target.value) || 0)))} />
             </div>
-            <label className="flex items-center gap-2 text-[13px]">
+            <label className="check">
               <input type="checkbox" checked={phaseOut} onChange={(e) => setPhaseOut(e.target.checked)} /> Ikutkan SKU phase out
             </label>
             <span className="text-[12px] text-label">
@@ -315,14 +315,14 @@ function Detail({ r, days, series, gapSet }: { r: Row; days: string[]; series: n
   return (
     <div className="space-y-3 py-2">
       <div>
-        <div className="mb-1.5 text-[12.5px] text-label">{r.name ?? r.sku}</div>
+        <div className="mb-1.5 text-[12px] text-label">{r.name ?? r.sku}</div>
         <DayStrip
           dates={days}
           values={series}
           out={days.map((d) => outSet.has(d))}
           gaps={days.map((d) => gapSet.has(d))}
         />
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-label">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-label">
           <span className="inline-flex items-center gap-1.5"><span className="split-dot" style={{ background: 'var(--c1)' }} /> ada penjualan (makin tua = makin banyak)</span>
           <span className="inline-flex items-center gap-1.5"><span className="split-dot" style={{ background: 'var(--negative)' }} /> tidak ada penjualan</span>
           <span className="inline-flex items-center gap-1.5"><span className="split-dot" style={{ background: 'var(--chart-track)' }} /> data tidak ada</span>
@@ -360,7 +360,7 @@ function Detail({ r, days, series, gapSet }: { r: Row; days: string[]; series: n
         </table>
       </div>
 
-      <div className="text-[12.5px]">
+      <div className="text-[12px]">
         <Link className="btn btn-sm" href={`/sku/${encodeURIComponent(r.sku)}`}>Analisis lengkap SKU ini →</Link>
       </div>
     </div>

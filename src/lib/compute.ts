@@ -359,7 +359,7 @@ export async function runCompute(
           waktu.step(
             tr.skipped ? 'transit masih segar'
             : tr.partial ? `transit ${tr.rows} baris SEBAGIAN (${tr.docsKurang} dokumen belum terbaca)`
-            : `transit ${tr.rows} baris dari ${tr.docs} dokumen`,
+            : `transit ${tr.rows} baris`,
           );
         } catch (err) {
           waktu.step(`transit GAGAL (${err instanceof Error ? err.message.slice(0, 60) : err})`);

@@ -79,7 +79,7 @@ export default function SimulasiPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="page-title">Simulasi Target DOI</h1>
-          <div className="mt-1 text-[12.5px] text-label">
+          <div className="mt-1 text-[12px] text-label">
             Tentukan target DOI total, lalu lihat SKU mana yang stoknya harus dikurangi dan berapa banyak.
             Mengurangi stok tidak mengubah ADS, jadi target stok = target hari × ADS total.
             {data?.areaId ? <> Area <b>{labelArea(data.areaId)}</b>.</> : null}
@@ -92,14 +92,14 @@ export default function SimulasiPage() {
         <div className="flex flex-wrap items-end gap-4">
           <div>
             <label className="label" htmlFor="f-target">Target DOI total (hari)</label>
-            <input id="f-target" className="input" style={{ width: 150 }} type="number" min={0} step={0.5} value={target}
+            <input id="f-target" className="input w-full sm:w-[150px]" type="number" min={0} step={0.5} value={target}
               onChange={(e) => setTarget(Math.max(0, Number(e.target.value) || 0))} />
           </div>
           <div>
             <span className="label">Kelas yang boleh dikurangi</span>
             <div className="flex items-center gap-3 pt-1">
               {ABC.map((c) => (
-                <label key={c} className="flex items-center gap-1.5 text-[13px]">
+                <label key={c} className="check">
                   <input type="checkbox" checked={classes.includes(c)} onChange={() => toggleClass(c)} /> {c}
                 </label>
               ))}
@@ -108,7 +108,7 @@ export default function SimulasiPage() {
           {data?.settings.doiDisplay === 'BOTH' ? (
             <div>
               <label className="label" htmlFor="f-opsi">Basis ADS</label>
-              <select id="f-opsi" className="input" style={{ width: 130 }} value={opsi}
+              <select id="f-opsi" className="input w-full sm:w-[130px]" value={opsi}
                 onChange={(e) => setOpsi(Number(e.target.value) === 2 ? 2 : 1)}>
                 <option value={1}>Opsi 1</option>
                 <option value={2}>Opsi 2</option>
@@ -117,12 +117,12 @@ export default function SimulasiPage() {
           ) : null}
           <div>
             <label className="label" htmlFor="f-order">Urutan pemotongan</label>
-            <select id="f-order" className="input" style={{ width: 340 }} value={order}
+            <select id="f-order" className="input w-full sm:w-[340px]" value={order}
               onChange={(e) => setOrder(e.target.value as 'QTY' | 'DOI' | 'PROPORSIONAL')}>
               {Object.entries(ORDER_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </div>
-          <label className="flex items-center gap-2 text-[13px]" title="Kalau dicentang, stok & penjualan phase out ikut dihitung di DOI total">
+          <label className="check" title="Kalau dicentang, stok & penjualan phase out ikut dihitung di DOI total">
             <input type="checkbox" checked={withPhaseOut} onChange={(e) => setWithPhaseOut(e.target.checked)} />
             Ikutkan Phase Out
           </label>
@@ -133,7 +133,7 @@ export default function SimulasiPage() {
           {ABC.map((c) => (
             <div key={c}>
               <label className="label" htmlFor={`f-floor-${c}`}>Kelas {c}</label>
-              <input id={`f-floor-${c}`} className="input" style={{ width: 110 }} type="number" min={0} step={0.5}
+              <input id={`f-floor-${c}`} className="input w-full sm:w-[110px]" type="number" min={0} step={0.5}
                 disabled={!classes.includes(c)} value={floors[c]}
                 onChange={(e) => setFloors((p) => ({ ...p, [c]: Math.max(0, Number(e.target.value) || 0) }))} />
             </div>

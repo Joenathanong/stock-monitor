@@ -261,7 +261,7 @@ export function LineChart({ dates, lines, height = 160, refs = [], zeroBand, uni
 /** Batang bertumpuk mendatar untuk pecahan platform — bagian-dari-keseluruhan. */
 export function PlatformSplit({ parts }: { parts: { label: string; value: number; color: string }[] }) {
   const total = parts.reduce((a, p) => a + p.value, 0);
-  if (!total) return <div className="text-[12.5px] text-label">Belum ada penjualan pada periode ini.</div>;
+  if (!total) return <div className="text-[12px] text-label">Belum ada penjualan pada periode ini.</div>;
   return (
     <div>
       <div className="split-bar" role="img" aria-label="Pecahan penjualan per platform">
@@ -272,7 +272,7 @@ export function PlatformSplit({ parts }: { parts: { label: string; value: number
             title={`${p.label}: ${nf(p.value)} pcs (${nf((p.value / total) * 100, 1)}%)`} />
         ))}
       </div>
-      <div className="mt-2.5 grid gap-x-5 gap-y-1.5 text-[12.5px]" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(10rem,1fr))' }}>
+      <div className="mt-2.5 grid gap-x-5 gap-y-1.5 text-[12px]" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(10rem,1fr))' }}>
         {parts.map((p) => (
           <div key={p.label} className="flex items-center gap-2">
             <span className="split-dot" style={{ background: p.color }} aria-hidden="true" />

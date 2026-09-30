@@ -65,7 +65,11 @@ export default function SkuMasterPage() {
   const toggleSel = (sku: string, on: boolean) => setSel((prev) => { const n = new Set(prev); if (on) n.add(sku); else n.delete(sku); return n; });
   const columns = useMemo<Column<Row>[]>(() => [
     { key: 'sel', label: '', get: () => null, noSort: true, noFilter: true, width: 40, hideMobile: false,
-      render: (r) => <input type="checkbox" aria-label={`Pilih ${r.sku}`} checked={sel.has(r.sku)} onChange={(e) => toggleSel(r.sku, e.target.checked)} /> },
+      render: (r) => (
+        <label className="check justify-center" onClick={(e) => e.stopPropagation()}>
+          <input type="checkbox" aria-label={`Pilih ${r.sku}`} checked={sel.has(r.sku)} onChange={(e) => toggleSel(r.sku, e.target.checked)} />
+        </label>
+      ) },
     { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 240, sticky: true, isTitle: true },
     { key: 'name', label: 'Nama', get: (r) => r.name, width: 300, prio: 'p2', render: (r) => <span className="text-label" title={r.name}>{r.name}</span> },
     { key: 'lt', label: 'Lead time', get: (r) => r.leadTimeDays, type: 'number', mono: true, width: 110,
@@ -87,7 +91,7 @@ export default function SkuMasterPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="page-title">Lead Time & Master SKU</h1>
-          <div className="mt-1 text-[12.5px] text-label">Lead time kirim (hari) per SKU. Yang kosong memakai default <b>{defaultLt} hari</b> dari Pengaturan. SKU bisa dikecualikan (discontinued) agar tidak masuk saran PO.</div>
+          <div className="mt-1 text-[12px] text-label">Lead time kirim (hari) per SKU. Yang kosong memakai default <b>{defaultLt} hari</b> dari Pengaturan. SKU bisa dikecualikan (discontinued) agar tidak masuk saran PO.</div>
         </div>
         <RefreshButton withStock={false} onDone={reload} />
       </div>
@@ -124,7 +128,7 @@ export default function SkuMasterPage() {
         preFilter={onlyEmpty ? (r) => r.leadTimeDays === null : undefined}
         rowClass={(r) => (r.isExcluded ? 'opacity-60' : '')}
         emptyText="Tidak ada SKU. Jalankan Refresh di Dashboard dulu agar daftar SKU terisi dari OCS."
-        toolbarExtra={<><label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={onlyEmpty} onChange={(e) => setOnlyEmpty(e.target.checked)} /> Belum diisi</label><span className="text-[12px] text-label">terpilih {sel.size}</span></>}
+        toolbarExtra={<><label className="check"><input type="checkbox" checked={onlyEmpty} onChange={(e) => setOnlyEmpty(e.target.checked)} /> Belum diisi</label><span className="text-[12px] text-label">terpilih {sel.size}</span></>}
       />
     </div>
   );

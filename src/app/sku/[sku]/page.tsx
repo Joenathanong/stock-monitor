@@ -93,14 +93,14 @@ export default function SkuPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <Link href="/monitoring" className="text-[12.5px] text-primary hover:underline">← Tabel DOI</Link>
+          <Link href="/monitoring" className="text-[12px] text-primary hover:underline">← Tabel DOI</Link>
           <h1 className="page-title mt-1 items-start"><span className="num min-w-0 break-words">{sku}</span></h1>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-[12.5px] text-label">
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-label">
             {data?.name ? <span className="truncate max-w-[52ch]" title={data.name}>{data.name}</span> : null}
             {data?.sapCode ? <span className="num">· SAP {data.sapCode}</span> : null}
             {snap ? <>· <StatusChip status={snap.status} /> <AbcChip cls={snap.abcClass} /></> : null}
-            {snap?.isNpl ? <span className="chip chip-warn">NPL{snap.nplNote ? ` · ${snap.nplNote}` : ''}</span> : null}
-            {data?.phaseOut ? <span className="chip chip-warn">Phase Out{data.phaseOut.reason ? ` · ${data.phaseOut.reason}` : ''}</span> : null}
+            {snap?.isNpl ? <span className="tag tag-warn">NPL{snap.nplNote ? ` · ${snap.nplNote}` : ''}</span> : null}
+            {data?.phaseOut ? <span className="tag tag-warn">Phase Out{data.phaseOut.reason ? ` · ${data.phaseOut.reason}` : ''}</span> : null}
           </div>
         </div>
         <div className="flex items-center gap-1.5 overflow-x-auto" role="group" aria-label="Rentang waktu">
@@ -135,7 +135,7 @@ export default function SkuPage() {
             <div className="card-body">
               <SalesBars dates={dates} values={rows.map((r) => r.qty ?? 0)} excluded={rows.map((r) => r.excluded)}
                 ads={s1 ? snap?.ads1 ?? null : snap?.ads2 ?? null} />
-              <div className="mt-2 text-[12.5px] text-label">
+              <div className="mt-2 text-[12px] text-label">
                 Total {fmt(sold)} pcs{bestDay && bestDay.qty ? <> · tertinggi {fmt(bestDay.qty)} pcs pada {bestDay.date}</> : null}
                 {snap ? <> · jendela Opsi 1: {fmt(snap.salesEx)} pcs / {snap.daysEx} hari</> : null}
               </div>
@@ -149,7 +149,7 @@ export default function SkuPage() {
                 {hasStock ? (
                   <>
                     <LineChart dates={dates} lines={stockLines} zeroBand={0} unit="pcs" />
-                    <div className="mt-2 text-[12.5px] text-label">
+                    <div className="mt-2 text-[12px] text-label">
                       Terekam sejak {data.stockSince} ({data.stockDays} hari)
                       {zeroDays ? <> · <span className="text-negative">stok kosong {zeroDays} hari</span> (blok merah)</> : null}
                     </div>
@@ -173,7 +173,7 @@ export default function SkuPage() {
                         { value: data.settings.targetDoiDays, label: `Target ${data.settings.targetDoiDays} hari`, color: 'var(--c2)' },
                         { value: snap?.leadTimeDays ?? data.settings.defaultLeadTimeDays, label: `Lead time ${snap?.leadTimeDays ?? data.settings.defaultLeadTimeDays} hari`, color: 'var(--critical-solid)' },
                       ]} />
-                    <div className="mt-2 text-[12.5px] text-label">
+                    <div className="mt-2 text-[12px] text-label">
                       Garis di bawah lead time = stok habis sebelum barang datang; di atas target = overstock.
                     </div>
                   </>

@@ -179,7 +179,7 @@ export default function SettingsPage() {
   const field = (f: Field) => {
     const v = form[f.key] ?? '';
     if (f.type === 'bool') {
-      return <label className="flex h-8 items-center gap-2 text-[13px]"><input type="checkbox" checked={v === '1'} onChange={(e) => setForm({ ...form, [f.key]: e.target.checked ? '1' : '0' })} /> {v === '1' ? 'Ya' : 'Tidak'}</label>;
+      return <label className="check"><input type="checkbox" checked={v === '1'} onChange={(e) => setForm({ ...form, [f.key]: e.target.checked ? '1' : '0' })} /> {v === '1' ? 'Ya' : 'Tidak'}</label>;
     }
     if (f.type === 'select') {
       return <select className="input" value={v} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}>{f.options!.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}</select>;
@@ -205,7 +205,7 @@ export default function SettingsPage() {
             <div className="card-title mb-3">{g.title}</div>
             <div className="space-y-3">
               {g.fields.map((f) => (
-                <div key={f.key} className="grid grid-cols-[1fr_200px] items-center gap-3">
+                <div key={f.key} className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_200px] md:items-center items-center gap-3">
                   <div>
                     <div className="text-[13px]">{f.label}</div>
                     {f.hint ? <div className="text-[12px] text-label">{f.hint}</div> : null}
@@ -219,7 +219,7 @@ export default function SettingsPage() {
 
         <div className="card card-pad lg:col-span-2">
           <div className="card-title mb-1">Area yang terdeteksi</div>
-          <div className="mb-3 text-[12.5px] text-label">
+          <div className="mb-3 text-[12px] text-label">
             Diambil dari data yang sudah masuk, bukan daftar tetap. Penarikan mengambil SELURUH area dan menyimpannya terpisah per area,
             jadi tabel ini sekaligus bukti pemisahannya jalan. Baris bertanda adalah area yang sedang dihitung.
           </div>
@@ -234,7 +234,7 @@ export default function SettingsPage() {
           ) : null}
           {ar.data?.areas.length ? (
             <div className="overflow-x-auto">
-              <table className="w-full text-[12.5px]">
+              <table className="w-full text-[12px]">
                 <thead><tr className="text-label">
                   <th className="py-1 text-left">Area</th><th className="num">SKU</th><th className="num">Stok</th>
                   <th className="num">Jual 30 hr</th><th className="num">Batal 30 hr</th><th className="num">% batal</th><th className="num">Jual terakhir</th><th className="num">Mulai</th>
@@ -264,7 +264,7 @@ export default function SettingsPage() {
 
         <div className="card card-pad lg:col-span-2">
           <div className="card-title mb-1">Tanggal yang dikecualikan (Opsi 1)</div>
-          <div className="mb-3 text-[12.5px] text-label">Dihasilkan otomatis dari aturan di atas (gajian & double date), ditambah tanggal manual di bawah — misalnya flash sale khusus atau hari libur besar.</div>
+          <div className="mb-3 text-[12px] text-label">Dihasilkan otomatis dari aturan di atas (gajian & double date), ditambah tanggal manual di bawah — misalnya flash sale khusus atau hari libur besar.</div>
           <div className="flex flex-wrap items-end gap-2">
             <div><label className="label">Tanggal</label><input type="date" className="input w-44" value={newDate} onChange={(e) => setNewDate(e.target.value)} /></div>
             <div className="w-64"><label className="label">Alasan</label><input className="input" value={newReason} onChange={(e) => setNewReason(e.target.value)} placeholder="mis. Flash sale brand" /></div>
@@ -272,9 +272,9 @@ export default function SettingsPage() {
           </div>
           <div className="mt-3 flex flex-wrap gap-1.5">
             {ex.data?.rows.length ? ex.data.rows.map((r) => (
-              <span key={r.date} className={`chip ${r.manual ? 'chip-brand' : 'chip-gray'}`}>
-                {r.date} · {r.reason}
-                {r.manual ? <button className="ml-1 text-negative" title="hapus" onClick={() => removeDate(r.date)}>×</button> : null}
+              <span key={r.date} className={`tag ${r.manual ? 'tag-brand' : ''}`}>
+                <span><span className="mono">{r.date}</span> · {r.reason}</span>
+                {r.manual ? <button className="tag-x" aria-label={`Hapus ${r.date}`} onClick={() => removeDate(r.date)}>×</button> : null}
               </span>
             )) : <Empty>—</Empty>}
           </div>

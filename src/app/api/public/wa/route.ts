@@ -18,6 +18,10 @@ export const dynamic = 'force-dynamic';
  */
 const TREN_HARI = 30;
 
+/** Nilai barang dalam perjalanan: qty transit × harga satuan saat snapshot. */
+const nilaiTransit = (rows: { transitQty: number; unitPrice: number }[]) =>
+  rows.reduce((t, r) => t + r.transitQty * r.unitPrice, 0);
+
 export async function GET(req: Request) {
   const token = process.env.WA_PAGE_TOKEN;
   const k = new URL(req.url).searchParams.get('k');
@@ -75,9 +79,15 @@ export async function GET(req: Request) {
         sku: s?.totalSku ?? 0,
         doi1: s?.total.doi1 ?? null,
         doi2: s?.total.doi2 ?? null,
+        ads1: s?.total.ads1 ?? 0,
+        ads2: s?.total.ads2 ?? 0,
         stock: s?.total.stock ?? 0,
         transit: s?.total.transit ?? 0,
         value: s?.total.value ?? 0,
+        // `value` di ringkasan HANYA stok di tangan — `stockValue` per SKU itu
+        // unitPrice × availableQty, transit tidak ikut. Nilai barang dalam
+        // perjalanan karena itu dihitung di sini dari baris snapshot.
+        valueTransit: nilaiTransit(snap.rows),
         noPrice: s?.total.noPrice ?? 0,
         byStatus: s?.byStatus ?? null,
         perluPo: blok.po ? snap.rows.filter((r) => Math.max(r.suggested1, r.suggested2) > 0).length : 0,
@@ -102,9 +112,12 @@ export async function GET(req: Request) {
           sku: gab.summary.totalSku,
           doi1: gab.summary.total.doi1,
           doi2: gab.summary.total.doi2,
+          ads1: gab.summary.total.ads1,
+          ads2: gab.summary.total.ads2,
           stock: gab.summary.total.stock,
           transit: gab.summary.total.transit,
           value: gab.summary.total.value,
+          valueTransit: nilaiTransit(gab.rows),
           kritis: gab.summary.byStatus.CRITICAL,
           low: gab.summary.byStatus.LOW,
         }

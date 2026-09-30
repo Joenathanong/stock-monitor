@@ -83,6 +83,17 @@ export function angkaRingkas(n: number): string {
   return n.toLocaleString('id-ID');
 }
 
+/**
+ * ADS: unit per hari. Angka besar TIDAK pakai satu desimal — "33501,0/hari"
+ * lebih panjang dan lebih sulit dibaca daripada "33.501/hari", dan desimalnya
+ * tidak bermakna pada skala puluhan ribu.
+ */
+export function adsTeks(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return '—';
+  if (Math.abs(n) >= 100) return `${Math.round(n).toLocaleString('id-ID')}/hari`;
+  return `${n.toFixed(1).replace('.', ',')}/hari`;
+}
+
 export const hari = (n: number | null | undefined) =>
   n === null || n === undefined || !Number.isFinite(n) ? '—' : n.toFixed(1).replace('.', ',');
 

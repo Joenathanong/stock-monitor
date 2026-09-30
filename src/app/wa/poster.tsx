@@ -5,7 +5,7 @@
 // SVG ke JPG dengan sharp/ImageMagick. Satu sumber gambar, tidak ada dua versi
 // yang bisa berbeda.
 import {
-  FONT, FONT_MONO, KANVAS, WARNA, angkaRingkas, deretTren, hari, jalurSpark, labelDoi, lebarKartu,
+  FONT, FONT_MONO, KANVAS, WARNA, adsTeks, angkaRingkas, deretTren, hari, jalurSpark, labelDoi, lebarKartu,
   rupiahRingkas, segmenStatus, tampil1, tampil2,
 } from '@/lib/wa-poster';
 import type { DataWa, AreaWa } from './types';
@@ -106,10 +106,16 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, onKlik }: {
     }
 
     cy += 26;
+    // Berpasangan menurut satuannya: rupiah dengan rupiah, pcs dengan pcs.
+    // "Nilai stok" HANYA barang di tangan; "Nilai + SIT" menambahkan barang
+    // dalam perjalanan — dua angka itu sengaja bersebelahan supaya selisihnya
+    // langsung terbaca, bukan harus dihitung sendiri.
     const kotak = [
       { l: 'Nilai stok', v: rupiahRingkas(a.value) },
+      { l: 'Nilai + SIT', v: rupiahRingkas(a.value + a.valueTransit) },
       { l: 'Stok', v: `${angkaRingkas(a.stock)} pcs` },
       { l: 'Dalam perjalanan', v: `${angkaRingkas(a.transit)} pcs` },
+      { l: `ADS ${labelDoi(tampil1(disp) ? 1 : 2, disp) === 'DOI' ? '' : `Opsi ${tampil1(disp) ? 1 : 2}`}`.trim(), v: adsTeks(tampil1(disp) ? a.ads1 : a.ads2) },
       { l: 'Perlu open PO', v: `${a.perluPo} SKU` },
     ];
     const kw = (isi - 8) / 2;
@@ -120,7 +126,7 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, onKlik }: {
       bagian.push(<Teks key={`kl${i}`} x={kx + 8} y={ky + 15} size={11} fill={WARNA.tintaLabel}>{k.l}</Teks>);
       bagian.push(<Teks key={`kv${i}`} x={kx + 8} y={ky + 32} size={14} weight={700} mono>{k.v}</Teks>);
     });
-    cy += 92 + 8;
+    cy += 3 * 46 - 6 + 8;
   }
 
   // --- sebaran status ---
@@ -209,12 +215,17 @@ export function Poster({ data, onPilihArea }: Props) {
     { l: 'SKU dihitung', v: t ? angkaRingkas(t.sku) : '—' },
     ...(tampil1(disp) ? [{ l: labelDoi(1, disp), v: t ? `${hari(t.doi1)} hari` : '—' }] : []),
     ...(tampil2(disp) ? [{ l: labelDoi(2, disp), v: t ? `${hari(t.doi2)} hari` : '—' }] : []),
+    { l: 'ADS', v: t ? adsTeks(tampil1(disp) ? t.ads1 : t.ads2) : '—' },
     { l: 'Total stok', v: t ? `${angkaRingkas(t.stock)} pcs` : '—' },
     { l: 'Dalam perjalanan', v: t ? `${angkaRingkas(t.transit)} pcs` : '—' },
     { l: 'Nilai stok', v: t ? rupiahRingkas(t.value) : '—' },
+    { l: 'Nilai + SIT', v: t ? rupiahRingkas(t.value + t.valueTransit) : '—' },
     { l: 'Kritis + Low', v: t ? `${t.kritis + t.low} SKU` : '—', tone: t && t.kritis > 0 ? WARNA.kritisFg : undefined },
   ] as { l: string; v: string; tone?: string }[];
   const rw = (KANVAS.w - 2 * M) / ringkas.length;
+  // Angka strip mengecil saat kolomnya bertambah. Tanpa ini "105 rb pcs" di 26px
+  // (±156px) tidak muat di kolom 170px saat kedua opsi DOI ikut tampil.
+  const rFs = ringkas.length <= 7 ? 26 : ringkas.length === 8 ? 22 : 20;
 
   return (
     <svg
@@ -244,7 +255,7 @@ export function Poster({ data, onPilihArea }: Props) {
         <g key={r.l}>
           {i > 0 ? <line x1={M + i * rw} y1={116} x2={M + i * rw} y2={172} stroke={WARNA.garisHalus} /> : null}
           <Teks x={M + i * rw + 20} y={126} size={11} weight={600} fill={WARNA.tintaLabel}>{r.l.toUpperCase()}</Teks>
-          <Teks x={M + i * rw + 20} y={162} size={26} weight={700} fill={r.tone ?? WARNA.tinta} mono>{r.v}</Teks>
+          <Teks x={M + i * rw + 20} y={162} size={rFs} weight={700} fill={r.tone ?? WARNA.tinta} mono>{r.v}</Teks>
         </g>
       ))}
 

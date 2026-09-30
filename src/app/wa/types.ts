@@ -8,9 +8,13 @@ export type AreaWa = {
   sku: number;
   doi1: number | null;
   doi2: number | null;
+  ads1: number;
+  ads2: number;
   stock: number;
   transit: number;
   value: number;
+  /** Nilai barang dalam perjalanan — TIDAK termasuk di `value`. */
+  valueTransit: number;
   noPrice: number;
   byStatus: StatusMap | null;
   perluPo: number;
@@ -28,7 +32,9 @@ export type DataWa = {
   computedAt: string | null;
   total: {
     sku: number; doi1: number | null; doi2: number | null;
-    stock: number; transit: number; value: number; kritis: number; low: number;
+    ads1: number; ads2: number;
+    stock: number; transit: number; value: number; valueTransit: number;
+    kritis: number; low: number;
   } | null;
   areas: AreaWa[];
   trenLabel: string[];

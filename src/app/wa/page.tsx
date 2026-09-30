@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Poster } from './poster';
 import type { AreaWa, DataWa } from './types';
-import { KANVAS, WARNA, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
+import { KANVAS, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
 
 /**
  * Halaman poster WhatsApp.
@@ -42,8 +42,10 @@ function Rincian({ a, disp, onTutup }: { a: AreaWa; disp: DoiDisplay; onTutup: (
           <div className="kpi-grid">
             {tampil1(disp) ? <div className="card card-pad"><div className="kpi-label">{labelDoi(1, disp)}</div><div className="kpi-value">{hari(a.doi1)}<span className="ml-1 text-[13px] font-medium text-label">hari</span></div></div> : null}
             {tampil2(disp) ? <div className="card card-pad"><div className="kpi-label">{labelDoi(2, disp)}</div><div className="kpi-value">{hari(a.doi2)}<span className="ml-1 text-[13px] font-medium text-label">hari</span></div></div> : null}
-            <div className="card card-pad"><div className="kpi-label">Nilai stok</div><div className="kpi-value">{rupiahRingkas(a.value)}</div>{a.noPrice ? <div className="kpi-hint">{a.noPrice} SKU belum ada harganya</div> : null}</div>
+            <div className="card card-pad"><div className="kpi-label">{`ADS ${tampil1(disp) ? 'Opsi 1' : 'Opsi 2'}`}</div><div className="kpi-value">{adsTeks(tampil1(disp) ? a.ads1 : a.ads2).replace('/hari', '')}<span className="ml-1 text-[13px] font-medium text-label">/hari</span></div></div>
             <div className="card card-pad"><div className="kpi-label">Dalam perjalanan</div><div className="kpi-value">{angkaRingkas(a.transit)}</div><div className="kpi-hint">tidak menambah DOI total</div></div>
+            <div className="card card-pad"><div className="kpi-label">Nilai stok</div><div className="kpi-value">{rupiahRingkas(a.value)}</div><div className="kpi-hint">stok di tangan saja{a.noPrice ? ` · ${a.noPrice} SKU belum ada harganya` : ''}</div></div>
+            <div className="card card-pad"><div className="kpi-label">Nilai + SIT</div><div className="kpi-value">{rupiahRingkas(a.value + a.valueTransit)}</div><div className="kpi-hint">termasuk {rupiahRingkas(a.valueTransit)} dalam perjalanan</div></div>
           </div>
 
           <div className="card card-pad">
@@ -100,6 +102,15 @@ export default function WaPage() {
   const [unduh, setUnduh] = useState<'idle' | 'proses' | 'gagal'>('idle');
 
   const kunci = useMemo(() => (typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('k') ?? ''), []);
+  /**
+   * `?bare=1` — mode untuk bot penangkap layar.
+   *
+   * Halaman jadi PERSIS 1600×900: tanpa padding, tanpa baris tombol di bawah,
+   * tanpa popup. Bot cukup `setViewport({width:1600,height:900})` lalu
+   * `page.screenshot()` — tidak perlu mencari elemen, tidak perlu memotong, dan
+   * ukurannya tidak berubah kalau tata letak halaman diubah nanti.
+   */
+  const bare = useMemo(() => (typeof window === 'undefined' ? false : new URLSearchParams(window.location.search).get('bare') === '1'), []);
 
   useEffect(() => {
     let alive = true;
@@ -168,8 +179,18 @@ export default function WaPage() {
 
   const areaTerpilih = data.areas.find((a) => a.area === pilih) ?? null;
 
+  if (bare) {
+    // `data-siap` adalah tanda bagi bot: tunggu selector ini, bukan timer.
+    // networkidle saja tidak cukup — datanya diambil setelah halaman siap.
+    return (
+      <div className="wa-root is-bare" data-siap="1">
+        <div className="wa-canvas"><Poster data={data} /></div>
+      </div>
+    );
+  }
+
   return (
-    <div className="wa-root">
+    <div className="wa-root" data-siap="1">
       <div className="wa-canvas">
         <Poster data={data} onPilihArea={setPilih} />
       </div>

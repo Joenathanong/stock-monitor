@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, rupiahRingkas, segmenStatus, tampil1, tampil2 } from './wa-poster';
+import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, rupiahRingkas, segmenStatus, tampil1, tampil2 } from './wa-poster';
 
 test('rupiah diringkas per satuan', () => {
   assert.equal(rupiahRingkas(52_431_882_100), 'Rp 52,4 M');
@@ -79,4 +79,12 @@ test('sparkline memakai deret opsi yang ditampilkan, bukan selalu opsi 1', () =>
   assert.deepEqual(deretTren(tren, 'OPSI1'), [10, 11]);
   assert.deepEqual(deretTren(tren, 'OPSI2'), [20, 21]);
   assert.deepEqual(deretTren(tren, 'BOTH'), [10, 11]);
+});
+
+test('ADS besar tanpa desimal, ADS kecil dengan satu desimal', () => {
+  assert.equal(adsTeks(33501), '33.501/hari');
+  assert.equal(adsTeks(2180.4), '2.180/hari');
+  assert.equal(adsTeks(12.54), '12,5/hari');
+  assert.equal(adsTeks(0), '0,0/hari');
+  assert.equal(adsTeks(null), '—');
 });

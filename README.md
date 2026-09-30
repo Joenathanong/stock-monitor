@@ -460,12 +460,23 @@ Bot WhatsApp berjalan di server lain, jadi ia tidak punya sesi. Dua jalur, kedua
 minta token `WA_PAGE_TOKEN`:
 
 ```
-# 1. tanpa browser — paling ringan untuk bot
+# 1. bot berbasis browser (dipakai bot WhatsApp IEG) — ?bare=1
+#    Halaman jadi PERSIS 1600×900: tanpa padding, tanpa baris tombol, tanpa popup.
+#    Tangkapan layar viewport sudah jadi gambar jadi — tidak perlu mencari elemen
+#    atau memotong, dan ukurannya tidak berubah kalau tata letak diubah nanti.
+#    Tunggu [data-siap="1"], BUKAN timer: datanya diambil setelah halaman siap.
+
+# 2. tanpa browser sama sekali
 curl -s "https://doi-monitor.vercel.app/api/public/wa/svg?k=RAHASIA" -o doi.svg
 convert doi.svg doi.jpg            # ImageMagick, atau sharp
 
-# 2. lewat browser — buka /wa?k=RAHASIA lalu tekan "Unduh JPG"
+# 3. manual — buka /wa?k=RAHASIA lalu tekan "Unduh JPG"
 ```
+
+**WhatsApp tidak bisa mengirim SVG.** Jalur 2 WAJIB dikonversi dulu; menyuapkan
+SVG langsung ke `MessageMedia` membuat WhatsApp Web melempar galat internal
+("Data passed to getter must include an id property") yang terbaca seperti masalah
+id grup, padahal medianya yang salah format.
 
 **Kalau `WA_PAGE_TOKEN` tidak diset, endpoint-nya menolak (503), bukan terbuka.**
 Angka stok dan nilai rupiah seluruh area tidak boleh jadi publik hanya karena
@@ -486,6 +497,13 @@ dipakai dua kali: oleh halaman di browser, dan oleh route handler yang merendern
 jadi teks SVG di server. Tidak ada dua versi gambar yang bisa berbeda diam-diam.
 (Next menolak `import … from 'react-dom/server'` di app router, jadi impornya
 dinamis di dalam handler.)
+
+**Nilai stok TIDAK termasuk barang dalam perjalanan.** `stockValue` per SKU itu
+`unitPrice × availableQty` — transit tidak ikut, sama seperti DOI total. Poster
+karena itu menampilkan dua angka bersebelahan: *Nilai stok* (di tangan) dan
+*Nilai + SIT*. Nilai transitnya dihitung di route publik dari baris snapshot
+(`Σ transitQty × unitPrice`), bukan dari ringkasan, karena ringkasan tidak
+menyimpannya.
 
 Opsi DOI yang digambar mengikuti **`doi_display`** di Pengaturan — setelan yang
 sama dengan seluruh layar lain, bukan setelan sendiri, supaya poster dan dashboard

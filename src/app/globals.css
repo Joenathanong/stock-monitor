@@ -422,6 +422,11 @@ body {
 /* Lebar poster dikunci 1600px lalu diperkecil mengikuti layar — perbandingannya
    tidak boleh berubah, karena itu yang menentukan hasil unduhan. */
 .wa-canvas { width: 100%; max-width: 1600px; }
+
+/* Mode bot (?bare=1): halaman PERSIS seukuran poster, tanpa sisa apa pun, supaya
+   tangkapan layar viewport 1600×900 sudah jadi gambar jadi. */
+.wa-root.is-bare { min-height: 0; padding: 0; gap: 0; display: block; width: 1600px; }
+.wa-root.is-bare .wa-canvas { width: 1600px; max-width: none; }
 .wa-bar {
   width: 100%; max-width: 1600px;
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;

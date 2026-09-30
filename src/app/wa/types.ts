@@ -22,6 +22,7 @@ export type DataWa = {
   ok: boolean;
   judul: string;
   blok: { angka: boolean; status: boolean; tren: boolean; po: boolean };
+  doiDisplay: 'OPSI1' | 'OPSI2' | 'BOTH';
   dibuatPada: string;
   snapshotDate: string | null;
   computedAt: string | null;

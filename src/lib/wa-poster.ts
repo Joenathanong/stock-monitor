@@ -121,6 +121,30 @@ export function jalurSpark(
   return { d: d.trim(), min, max, titikAkhir: akhir };
 }
 
+export type DoiDisplay = 'OPSI1' | 'OPSI2' | 'BOTH';
+
+/**
+ * Opsi DOI mana yang ikut digambar — mengikuti `doi_display` di Pengaturan.
+ *
+ * Poster ini sebelumnya SELALU menampilkan dua-duanya, padahal seluruh halaman
+ * lain sudah menghormati setelan itu lewat show1/show2 di ui.tsx. Kalau orang
+ * memilih satu opsi, opsi kedua bukan sekadar mubazir: ia memakan tempat yang
+ * bisa dipakai angka yang memang dipakai, dan menimbulkan pertanyaan "yang mana
+ * yang benar" di grup WhatsApp.
+ */
+export const tampil1 = (d: DoiDisplay | undefined) => d !== 'OPSI2';
+export const tampil2 = (d: DoiDisplay | undefined) => d !== 'OPSI1';
+
+/** "DOI OPSI 1" saat keduanya tampil; "DOI" saja saat cuma satu — nomornya jadi tanpa makna. */
+export const labelDoi = (n: 1 | 2, d: DoiDisplay | undefined) =>
+  d === 'OPSI1' || d === 'OPSI2' ? 'DOI' : `DOI OPSI ${n}`;
+
+/** Deret tren yang dipakai sparkline: opsi yang ditampilkan, bukan selalu opsi 1. */
+export const deretTren = (
+  tren: { doi1: number | null; doi2: number | null }[],
+  d: DoiDisplay | undefined,
+): (number | null)[] => (tampil1(d) ? tren.map((t) => t.doi1) : tren.map((t) => t.doi2));
+
 /** Lebar kartu area supaya 5 kartu + jarak pas di dalam margin poster. */
 export function lebarKartu(jumlah: number, total = KANVAS.w, margin = 32, jarak = 16): number {
   if (jumlah <= 0) return 0;

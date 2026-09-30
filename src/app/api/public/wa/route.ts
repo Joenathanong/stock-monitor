@@ -37,6 +37,11 @@ export async function GET(req: Request) {
     po: raw.wa_blok_po !== '0',
   };
   const kritisMaks = Math.max(0, Math.min(6, Number(raw.wa_kritis_maks ?? 3)));
+  // Opsi DOI yang ditampilkan ikut Pengaturan yang sama dengan seluruh layar lain
+  // (`doi_display`), bukan setelan sendiri — supaya poster dan dashboard tidak
+  // pernah menyebut angka yang berbeda.
+  const dispRaw = String(raw.doi_display ?? 'BOTH').toUpperCase();
+  const doiDisplay = dispRaw === 'OPSI1' || dispRaw === 'OPSI2' ? dispRaw : 'BOTH';
   const judul = raw.wa_judul || 'Ringkasan DOI Harian — IEG';
 
   // Kota saja; GABUNGAN dihitung terpisah dan ditampilkan sebagai ringkasan atas,
@@ -88,6 +93,7 @@ export async function GET(req: Request) {
     ok: true,
     judul,
     blok,
+    doiDisplay,
     dibuatPada: new Date().toISOString(),
     snapshotDate: gab.snapshotDate ?? perArea[0]?.snapshotDate ?? null,
     computedAt: gab.computedAt,

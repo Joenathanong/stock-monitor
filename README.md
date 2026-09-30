@@ -487,6 +487,14 @@ jadi teks SVG di server. Tidak ada dua versi gambar yang bisa berbeda diam-diam.
 (Next menolak `import … from 'react-dom/server'` di app router, jadi impornya
 dinamis di dalam handler.)
 
+Opsi DOI yang digambar mengikuti **`doi_display`** di Pengaturan — setelan yang
+sama dengan seluruh layar lain, bukan setelan sendiri, supaya poster dan dashboard
+tidak pernah menyebut angka yang berbeda. Kalau hanya Opsi 1 dipilih: kolom Opsi 2
+hilang dari strip ringkasan, angka besar di kartu memakai Opsi 1, labelnya jadi
+"DOI" tanpa nomor (nomornya tak bermakna kalau cuma ada satu), dan sparkline-nya
+memakai deret opsi itu. Helper-nya `tampil1/tampil2/labelDoi/deretTren` di
+`wa-poster.ts`, sejajar dengan `show1/show2/doiLabel` di `ui.tsx`.
+
 Blok yang tampil diatur di Pengaturan → *Poster WhatsApp*: angka inti, sebaran
 status, tren 30 hari, open PO & SKU mendesak. Blok yang dimatikan tidak
 meninggalkan lubang — kursor vertikal di `KartuArea` membuat blok berikutnya naik.

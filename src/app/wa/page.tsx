@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Poster } from './poster';
 import type { AreaWa, DataWa } from './types';
-import { KANVAS, WARNA, angkaRingkas, hari, rupiahRingkas, segmenStatus } from '@/lib/wa-poster';
+import { KANVAS, WARNA, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
 
 /**
  * Halaman poster WhatsApp.
@@ -16,7 +16,7 @@ import { KANVAS, WARNA, angkaRingkas, hari, rupiahRingkas, segmenStatus } from '
  */
 const fmt = (n: number) => n.toLocaleString('id-ID');
 
-function Rincian({ a, onTutup }: { a: AreaWa; onTutup: () => void }) {
+function Rincian({ a, disp, onTutup }: { a: AreaWa; disp: DoiDisplay; onTutup: () => void }) {
   const seg = segmenStatus(a.byStatus);
   const total = seg.reduce((t, s) => t + s.n, 0) || 1;
 
@@ -40,8 +40,8 @@ function Rincian({ a, onTutup }: { a: AreaWa; onTutup: () => void }) {
 
         <div className="wa-sheet-body">
           <div className="kpi-grid">
-            <div className="card card-pad"><div className="kpi-label">DOI Opsi 1</div><div className="kpi-value">{hari(a.doi1)}<span className="ml-1 text-[13px] font-medium text-label">hari</span></div></div>
-            <div className="card card-pad"><div className="kpi-label">DOI Opsi 2</div><div className="kpi-value">{hari(a.doi2)}<span className="ml-1 text-[13px] font-medium text-label">hari</span></div></div>
+            {tampil1(disp) ? <div className="card card-pad"><div className="kpi-label">{labelDoi(1, disp)}</div><div className="kpi-value">{hari(a.doi1)}<span className="ml-1 text-[13px] font-medium text-label">hari</span></div></div> : null}
+            {tampil2(disp) ? <div className="card card-pad"><div className="kpi-label">{labelDoi(2, disp)}</div><div className="kpi-value">{hari(a.doi2)}<span className="ml-1 text-[13px] font-medium text-label">hari</span></div></div> : null}
             <div className="card card-pad"><div className="kpi-label">Nilai stok</div><div className="kpi-value">{rupiahRingkas(a.value)}</div>{a.noPrice ? <div className="kpi-hint">{a.noPrice} SKU belum ada harganya</div> : null}</div>
             <div className="card card-pad"><div className="kpi-label">Dalam perjalanan</div><div className="kpi-value">{angkaRingkas(a.transit)}</div><div className="kpi-hint">tidak menambah DOI total</div></div>
           </div>
@@ -80,10 +80,10 @@ function Rincian({ a, onTutup }: { a: AreaWa; onTutup: () => void }) {
           </div>
 
           <div className="card card-pad">
-            <div className="card-title mb-2">Tren DOI Opsi 1</div>
+            <div className="card-title mb-2">{`Tren ${labelDoi(tampil1(disp) ? 1 : 2, disp)}`}</div>
             {a.tren.length ? (
               <div className="text-[12px] text-label">
-                {a.tren.length} hari tercatat · terlama {a.tren[0]?.date} ({hari(a.tren[0]?.doi1)}) · terbaru {a.tren[a.tren.length - 1]?.date} ({hari(a.tren[a.tren.length - 1]?.doi1)})
+                {a.tren.length} hari tercatat · terlama {a.tren[0]?.date} ({hari(tampil1(disp) ? a.tren[0]?.doi1 : a.tren[0]?.doi2)}) · terbaru {a.tren[a.tren.length - 1]?.date} ({hari(tampil1(disp) ? a.tren[a.tren.length - 1]?.doi1 : a.tren[a.tren.length - 1]?.doi2)})
               </div>
             ) : <div className="text-[12px] text-label">Riwayat belum cukup.</div>}
           </div>
@@ -179,7 +179,7 @@ export default function WaPage() {
           {unduh === 'proses' ? 'Menyiapkan…' : unduh === 'gagal' ? 'Gagal — coba lagi' : 'Unduh JPG'}
         </button>
       </div>
-      {areaTerpilih ? <Rincian a={areaTerpilih} onTutup={() => setPilih(null)} /> : null}
+      {areaTerpilih ? <Rincian a={areaTerpilih} disp={data.doiDisplay ?? 'BOTH'} onTutup={() => setPilih(null)} /> : null}
     </div>
   );
 }

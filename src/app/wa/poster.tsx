@@ -5,7 +5,8 @@
 // SVG ke JPG dengan sharp/ImageMagick. Satu sumber gambar, tidak ada dua versi
 // yang bisa berbeda.
 import {
-  FONT, FONT_MONO, KANVAS, WARNA, angkaRingkas, hari, jalurSpark, lebarKartu, rupiahRingkas, segmenStatus,
+  FONT, FONT_MONO, KANVAS, WARNA, angkaRingkas, deretTren, hari, jalurSpark, labelDoi, lebarKartu,
+  rupiahRingkas, segmenStatus, tampil1, tampil2,
 } from '@/lib/wa-poster';
 import type { DataWa, AreaWa } from './types';
 
@@ -44,9 +45,9 @@ const Teks = ({
   </text>
 );
 
-function KartuArea({ a, x, y, w, h, blok, kritisMaks, onKlik }: {
+function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, onKlik }: {
   a: AreaWa; x: number; y: number; w: number; h: number;
-  blok: DataWa['blok']; kritisMaks: number; onKlik?: () => void;
+  blok: DataWa['blok']; disp: DataWa['doiDisplay']; kritisMaks: number; onKlik?: () => void;
 }) {
   const pad = 16;
   const isi = w - 2 * pad;
@@ -56,7 +57,7 @@ function KartuArea({ a, x, y, w, h, blok, kritisMaks, onKlik }: {
 
   const seg = segmenStatus(a.byStatus);
   const totalSeg = seg.reduce((t, s) => t + s.n, 0) || 1;
-  const spark = jalurSpark(a.tren.map((t) => t.doi1), isi, 56);
+  const spark = jalurSpark(deretTren(a.tren, disp), isi, 56);
   const nKritis = a.byStatus?.CRITICAL ?? 0;
 
   const bagian: React.ReactNode[] = [];
@@ -78,8 +79,15 @@ function KartuArea({ a, x, y, w, h, blok, kritisMaks, onKlik }: {
   // --- angka inti ---
   if (blok.angka) {
     cy += 26;
-    bagian.push(<Teks key="l1" x={x + pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel}>DOI OPSI 1</Teks>);
-    bagian.push(<Teks key="l2" x={x + w - pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel} anchor="end">OPSI 2</Teks>);
+    // Hanya opsi yang dipilih di Pengaturan. Saat cuma satu, angka besarnya
+    // memakai opsi itu dan kolom kanan dikosongkan — bukan diisi opsi lain.
+    const utama = tampil1(disp) ? 1 : 2;
+    const nilaiUtama = utama === 1 ? a.doi1 : a.doi2;
+    const keduanya = tampil1(disp) && tampil2(disp);
+    bagian.push(<Teks key="l1" x={x + pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel}>{labelDoi(utama as 1 | 2, disp)}</Teks>);
+    if (keduanya) {
+      bagian.push(<Teks key="l2" x={x + w - pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel} anchor="end">OPSI 2</Teks>);
+    }
     cy += 34;
     // Satuannya di dalam <text> yang sama sebagai <tspan>, bukan elemen terpisah
     // dengan x tetap: lebar angka 38px tidak bisa ditebak, dan "hari" pernah
@@ -89,11 +97,13 @@ function KartuArea({ a, x, y, w, h, blok, kritisMaks, onKlik }: {
         key="v1" x={x + pad} y={cy} fontFamily={FONT_MONO} fontSize={38} fontWeight={700}
         fill={WARNA.tinta} style={{ fontVariantNumeric: 'tabular-nums' }}
       >
-        {hari(a.doi1)}
+        {hari(nilaiUtama)}
         <tspan fontFamily={FONT} fontSize={13} fontWeight={400} fill={WARNA.tintaLabel} dx={6}>hari</tspan>
       </text>,
     );
-    bagian.push(<Teks key="v2" x={x + w - pad} y={cy} size={22} weight={700} fill={WARNA.tintaLabel} anchor="end" mono>{hari(a.doi2)}</Teks>);
+    if (keduanya) {
+      bagian.push(<Teks key="v2" x={x + w - pad} y={cy} size={22} weight={700} fill={WARNA.tintaLabel} anchor="end" mono>{hari(a.doi2)}</Teks>);
+    }
 
     cy += 26;
     const kotak = [
@@ -135,7 +145,7 @@ function KartuArea({ a, x, y, w, h, blok, kritisMaks, onKlik }: {
   // --- tren DOI ---
   if (blok.tren) {
     cy += 16;
-    bagian.push(<Teks key="tr" x={x + pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel}>TREN DOI OPSI 1 — 30 HARI</Teks>);
+    bagian.push(<Teks key="tr" x={x + pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel}>{`TREN ${labelDoi(tampil1(disp) ? 1 : 2, disp)} — 30 HARI`}</Teks>);
     cy += 6;
     if (spark.d) {
       bagian.push(<path key="sp" d={spark.d} fill="none" stroke={WARNA.primary} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" transform={`translate(${x + pad} ${cy})`} />);
@@ -194,15 +204,16 @@ export function Poster({ data, onPilihArea }: Props) {
   const kartuH = KANVAS.h - kartuY - 56;
   const t = data.total;
 
+  const disp = data.doiDisplay ?? 'BOTH';
   const ringkas = [
     { l: 'SKU dihitung', v: t ? angkaRingkas(t.sku) : '—' },
-    { l: 'DOI Opsi 1', v: t ? `${hari(t.doi1)} hari` : '—' },
-    { l: 'DOI Opsi 2', v: t ? `${hari(t.doi2)} hari` : '—' },
+    ...(tampil1(disp) ? [{ l: labelDoi(1, disp), v: t ? `${hari(t.doi1)} hari` : '—' }] : []),
+    ...(tampil2(disp) ? [{ l: labelDoi(2, disp), v: t ? `${hari(t.doi2)} hari` : '—' }] : []),
     { l: 'Total stok', v: t ? `${angkaRingkas(t.stock)} pcs` : '—' },
     { l: 'Dalam perjalanan', v: t ? `${angkaRingkas(t.transit)} pcs` : '—' },
     { l: 'Nilai stok', v: t ? rupiahRingkas(t.value) : '—' },
     { l: 'Kritis + Low', v: t ? `${t.kritis + t.low} SKU` : '—', tone: t && t.kritis > 0 ? WARNA.kritisFg : undefined },
-  ];
+  ] as { l: string; v: string; tone?: string }[];
   const rw = (KANVAS.w - 2 * M) / ringkas.length;
 
   return (
@@ -247,6 +258,7 @@ export function Poster({ data, onPilihArea }: Props) {
           w={w}
           h={kartuH}
           blok={data.blok}
+          disp={disp}
           kritisMaks={6}
           onKlik={onPilihArea ? () => onPilihArea(a.area) : undefined}
         />

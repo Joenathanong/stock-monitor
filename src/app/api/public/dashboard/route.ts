@@ -13,7 +13,8 @@ export async function GET(req: Request) {
   if (token && new URL(req.url).searchParams.get('key') !== token) {
     return NextResponse.json({ ok: false, error: 'Kunci dashboard salah' }, { status: 401 });
   }
-  const view = await dashboardView();
+  const area = new URL(req.url).searchParams.get('area')?.trim() || null;
+  const view = await dashboardView(area);
   const res = NextResponse.json({ ok: true, ...view });
   res.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=1800');
   return res;

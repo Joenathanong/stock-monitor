@@ -6,11 +6,33 @@
  * dan di-cache di memori proses.
  */
 import { wibDayStartIso, addDays, type DateKey } from './dates';
+import type { OcsReceiveDoc, OcsReceiveLine } from './receive';
 
 const BASE = (process.env.OCS_BASE_URL || 'https://ocs.iegsystem.id').replace(/\/+$/, '');
-const USERNAME = process.env.OCS_USERNAME || 'ADMIN';
-const PASSWORD = process.env.OCS_PASSWORD || 'ADMIN';
 const COMPANY_DB = process.env.OCS_COMPANY_DB || 'EJI_WMS';
+
+/**
+ * Kredensial OCS TIDAK punya nilai bawaan — sengaja.
+ *
+ * Akun menentukan AREA MANA yang boleh dilihat: akun ADMIN hanya mengembalikan
+ * Pusat, walaupun diminta `area=All`. Dulu berkas ini jatuh ke 'ADMIN'/'ADMIN'
+ * kalau variabel lingkungan lupa diisi — hasilnya bukan galat, melainkan data
+ * yang diam-diam menyusut jadi satu area saja. Lebih baik gagal keras.
+ */
+function wajib(nama: 'OCS_USERNAME' | 'OCS_PASSWORD'): string {
+  const v = process.env[nama];
+  if (!v) {
+    throw new Error(
+      `${nama} belum diisi. Kredensial OCS menentukan area mana yang terlihat — ` +
+      'tanpa ini penarikan bisa menyusut diam-diam ke satu area. ' +
+      'Isi OCS_USERNAME & OCS_PASSWORD di .env (lokal) dan di Environment Variables Vercel (produksi).',
+    );
+  }
+  return v;
+}
+
+/** Akun OCS yang dipakai — ikut dicatat di sync_log supaya perubahan cakupan area terlihat. */
+export const ocsUser = () => process.env.OCS_USERNAME ?? '(belum diisi)';
 
 let cachedToken: string | null = null;
 let tokenExpiresAt = 0;
@@ -59,7 +81,7 @@ async function doLogin(): Promise<string> {
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: USERNAME, password: PASSWORD, companydb: COMPANY_DB }),
+      body: JSON.stringify({ username: wajib('OCS_USERNAME'), password: wajib('OCS_PASSWORD'), companydb: COMPANY_DB }),
     },
     30_000,
   );
@@ -282,6 +304,17 @@ export function demandStatusCodes(opts: { includeReady: boolean; includeReturn: 
 }
 
 /**
+ * Status yang TIDAK memakan stok: belum bayar, sedang/sudah batal.
+ * Qty-nya tetap ditarik supaya kelihatan, tapi disimpan di kolom sendiri.
+ */
+export const CANCEL_STATUS: number[] = [
+  OCS_STATUS.NA, OCS_STATUS.UNPAID, OCS_STATUS.IN_CANCEL, OCS_STATUS.CANCELLED,
+];
+
+/** SELURUH status yang dikenal OCS — tanpa satu pun pengecualian. */
+export const ALL_STATUS_CODES: number[] = [...new Set(Object.values(OCS_STATUS))].sort((a, b) => a - b);
+
+/**
  * Penjualan per SKU untuk SATU tanggal WIB.
  *
  * OCS mengembalikan tanggal `from` DAN tanggal `to` sekaligus — satu hari yang
@@ -290,13 +323,25 @@ export function demandStatusCodes(opts: { includeReady: boolean; includeReturn: 
  *
  * Rentang panjang membuat OCS menjawab 504, jadi penarikan memang harus per hari.
  */
-export async function fetchSalesForDate(day: DateKey, area = 'Pusat', statusCodes: number[] = DEMAND_CORE): Promise<OcsSalesRow[]> {
+export async function fetchSalesForDate(
+  day: DateKey,
+  /**
+   * Nama kota, WAJIB — tidak ada nilai bawaan. Sengaja: dulu bawaannya 'All',
+   * dan karena cakupan area ikut akun OCS, satu pemanggil yang lupa mengisi
+   * cukup untuk menyusutkan data jadi satu area tanpa galat apa pun.
+   */
+  area: string,
+  statusCodes: number[] = DEMAND_CORE,
+  timeoutMs = 25_000,
+  attempts = 2,
+): Promise<OcsSalesRow[]> {
+  if (!area?.trim()) throw new Error('fetchSalesForDate: nama area wajib diisi (satu kota, bukan All).');
   const from = wibDayStartIso(day);
   const to = wibDayStartIso(addDays(day, 1));
   const qs = new URLSearchParams({ from, to, platform: 'All', shop: 'All' });
   for (const c of statusCodes) qs.append('status', String(c));
   qs.append('area', area);
-  const rows = await authedGet<OcsSalesRow[]>(`/Report/OrderPerSkuReport?${qs}`, 90_000, 3);
+  const rows = await authedGet<OcsSalesRow[]>(`/Report/OrderPerSkuReport?${qs}`, timeoutMs, attempts);
   if (!Array.isArray(rows)) throw new Error('Format respons OrderPerSkuReport tidak dikenali');
   return rows.filter((r) => typeof r?.Date === 'string' && r.Date.slice(0, 10) === day);
 }
@@ -314,3 +359,31 @@ export async function testConnection() {
     expiresAt: typeof claims.exp === 'number' ? new Date(claims.exp * 1000).toISOString() : null,
   };
 }
+
+// ---------- Barang dalam perjalanan (receive stock) ----------
+
+/**
+ * Dua endpoint yang dipakai halaman /stocks/receive-stock (dibongkar 25 Sep 2026).
+ * Hanya dokumen yang BELUM selesai diterima yang dikembalikan `docs` — jadi apa
+ * yang ada di situ memang barang yang masih dalam perjalanan.
+ *
+ * `/api/receive-stock/submit` TIDAK PERNAH dipanggil aplikasi ini. Dashboard
+ * hanya membaca; penerimaan barang tetap dikerjakan orang lewat OCS.
+ */
+export async function fetchReceiveDocs(timeoutMs = 30_000, attempts = 2): Promise<OcsReceiveDoc[]> {
+  const data = await authedGet<OcsReceiveDoc[] | { value: OcsReceiveDoc[] }>('/api/receive-stock/docs', timeoutMs, attempts);
+  const rows = Array.isArray(data) ? data : data?.value;
+  if (!Array.isArray(rows)) throw new Error('Format respons receive-stock/docs tidak dikenali');
+  return rows;
+}
+
+export async function fetchReceiveLines(docNum: number, timeoutMs = 25_000, attempts = 2): Promise<OcsReceiveLine[]> {
+  const data = await authedGet<OcsReceiveLine[] | { value: OcsReceiveLine[] }>(
+    `/api/receive-stock/lines?docNum=${encodeURIComponent(String(docNum))}`, timeoutMs, attempts,
+  );
+  const rows = Array.isArray(data) ? data : data?.value;
+  // Dokumen yang sudah keburu ditutup menjawab bukan-array; itu bukan galat fatal,
+  // cukup dilewati supaya satu dokumen tidak menggagalkan seluruh penarikan.
+  return Array.isArray(rows) ? rows : [];
+}
+

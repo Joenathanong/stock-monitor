@@ -27,13 +27,15 @@ export async function GET(req: Request) {
       sheet: 'Stok Dalam Perjalanan',
       columns: [
         { header: 'SKU', key: 'sku', width: 34 },
+        { header: 'Area', key: 'area', width: 14 },
         { header: 'Qty', key: 'qty', width: 10 },
         { header: 'ETA', key: 'eta', width: 14 },
         { header: 'Catatan', key: 'note', width: 28 },
       ],
       rows: [
-        { sku: 'CONTOH-SKU-A', qty: 500, eta: addDays(today, 5), note: 'PO-2026-001' },
-        { sku: 'CONTOH-SKU-B', qty: 1200, eta: '', note: '' },
+        // Qty dalam PCS, bukan karton — sama seperti DoQty di OCS.
+        { sku: 'CONTOH-SKU-A', area: 'Pusat', qty: 500, eta: addDays(today, 5), note: 'PO-2026-001' },
+        { sku: 'CONTOH-SKU-B', area: 'Surabaya', qty: 1200, eta: '', note: 'Area kosong dianggap Pusat' },
       ],
     },
     leadtime: {

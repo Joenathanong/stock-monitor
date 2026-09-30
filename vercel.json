@@ -25,6 +25,9 @@
     "src/app/api/sync/route.ts": {
       "maxDuration": 60
     },
+    "src/app/api/transit/sync/route.ts": {
+      "maxDuration": 60
+    },
     "src/app/api/import/sales/route.ts": {
       "maxDuration": 60
     }

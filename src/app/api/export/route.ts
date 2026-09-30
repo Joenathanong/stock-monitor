@@ -1,4 +1,5 @@
 import { latestSnapshot } from '@/lib/query';
+import { areaDariUrl } from '@/lib/http-area';
 import { writeSheet } from '@/lib/xlsx';
 import { STATUS_LABEL } from '@/lib/doi';
 import { windowLabel } from '@/lib/labels';
@@ -10,7 +11,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const status = url.searchParams.get('status') || 'ALL';
   const abc = url.searchParams.get('abc') || 'ALL';
-  const snap = await latestSnapshot();
+  const snap = await latestSnapshot(areaDariUrl(req));
   let rows = snap.rows;
   if (status !== 'ALL') rows = rows.filter((r) => r.status === status);
   if (abc !== 'ALL') rows = rows.filter((r) => r.abcClass === abc);

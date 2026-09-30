@@ -37,7 +37,7 @@ export function parseParams(url: URL, doiDisplay: string | undefined): SimParams
 }
 
 export async function runSimulation(url: URL) {
-  const snap = await latestSnapshot();
+  const snap = await latestSnapshot(url.searchParams.get('area')?.trim() || null);
   if (!snap.rows.length) return { snap, params: null, hasil: null, saran: null } as const;
 
   const params = parseParams(url, snap.settings?.doiDisplay);

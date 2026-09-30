@@ -4,9 +4,35 @@
  */
 import { prisma } from './prisma';
 import { sapKey } from './phase-out';
-import { toDateKeyUtc, type DateKey } from './dates';
+import { keyToUtcDate, toDateKeyUtc, type DateKey } from './dates';
 import type { HealthSummary, ProductStatus } from './doi';
 import type { DoiSettings } from './settings';
+import { AREA_GABUNGAN } from './areas';
+
+/**
+ * Area mana yang dibaca kalau pemanggil tidak menyebut.
+ *
+ * GABUNGAN kalau ada, karena itu angka perusahaan; kalau cuma satu kota
+ * (mis. sebelum cabang punya data), kota itu sendiri. Diambil dari snapshot
+ * TERBARU, jadi daftar area ikut berubah sendiri saat cabang baru muncul.
+ */
+export async function areaTersedia(): Promise<{ areas: string[]; bawaan: string | null; snapshotDate: DateKey | null }> {
+  const terbaru = await prisma.doiSummary.findFirst({ orderBy: { snapshotDate: 'desc' }, select: { snapshotDate: true } });
+  if (!terbaru) return { areas: [], bawaan: null, snapshotDate: null };
+  const rows = await prisma.doiSummary.findMany({
+    where: { snapshotDate: terbaru.snapshotDate }, select: { areaId: true },
+  });
+  const areas = rows.map((r) => r.areaId).sort((a, b) =>
+    (a === AREA_GABUNGAN ? -1 : b === AREA_GABUNGAN ? 1 : a.localeCompare(b)));
+  return { areas, bawaan: areas[0] ?? null, snapshotDate: toDateKeyUtc(terbaru.snapshotDate) };
+}
+
+/** Pilih area yang diminta kalau memang ada snapshot-nya; kalau tidak, bawaan. */
+async function pilihArea(minta?: string | null): Promise<{ areaId: string | null; areas: string[]; snapshotDate: DateKey | null }> {
+  const { areas, bawaan, snapshotDate } = await areaTersedia();
+  const areaId = minta && areas.includes(minta) ? minta : bawaan;
+  return { areaId, areas, snapshotDate };
+}
 
 export type SnapshotRow = {
   sku: string;
@@ -60,6 +86,10 @@ export type SnapshotRow = {
 
 export type SnapshotView = {
   snapshotDate: DateKey | null;
+  /** Area yang sedang ditampilkan; null bila belum ada snapshot sama sekali. */
+  areaId: string | null;
+  /** Seluruh area yang punya snapshot pada tanggal itu — untuk pemilih area. */
+  areas: string[];
   computedAt: string | null;
   trigger: string | null;
   summary: HealthSummary | null;
@@ -70,16 +100,19 @@ export type SnapshotView = {
 };
 
 /** Snapshot terakhir (hari ini bila ada, kalau tidak yang paling baru). */
-export async function latestSnapshot(): Promise<SnapshotView> {
-  const summary = await prisma.doiSummary.findFirst({ orderBy: { snapshotDate: 'desc' } });
+export async function latestSnapshot(area?: string | null): Promise<SnapshotView> {
+  const { areaId, areas, snapshotDate } = await pilihArea(area);
+  const summary = areaId && snapshotDate
+    ? await prisma.doiSummary.findFirst({ where: { snapshotDate: keyToUtcDate(snapshotDate), areaId } })
+    : null;
   if (!summary) {
-    return { snapshotDate: null, computedAt: null, trigger: null, summary: null, exclusions: [], earliestDataDate: null, settings: null, rows: [] };
+    return { snapshotDate: null, computedAt: null, trigger: null, summary: null, exclusions: [], earliestDataDate: null, settings: null, rows: [], areaId, areas };
   }
   const payload = JSON.parse(summary.payload) as {
     summary: HealthSummary; exclusions: { date: DateKey; reason: string }[]; earliestDataDate: DateKey | null; settings: DoiSettings;
   };
   const [rows, poRows] = await Promise.all([
-    prisma.doiSnapshot.findMany({ where: { snapshotDate: summary.snapshotDate }, orderBy: { sku: 'asc' } }),
+    prisma.doiSnapshot.findMany({ where: { snapshotDate: summary.snapshotDate, areaId: summary.areaId }, orderBy: { sku: 'asc' } }),
     prisma.phaseOut.findMany().catch(() => []),
   ]);
   // Keterangan phase out dicocokkan sama persis seperti saat compute: lewat SKU,
@@ -89,6 +122,8 @@ export async function latestSnapshot(): Promise<SnapshotView> {
   const poFor = (sku: string, sap: string | null) => poBySku.get(sku) ?? poBySap.get(sapKey(sap) ?? '\u0000') ?? null;
   return {
     snapshotDate: toDateKeyUtc(summary.snapshotDate),
+    areaId: summary.areaId,
+    areas,
     computedAt: summary.computedAt.toISOString(),
     trigger: summary.trigger,
     summary: normalizeSummary(payload.summary),
@@ -146,6 +181,8 @@ export async function latestSnapshot(): Promise<SnapshotView> {
 
 export type DashboardView = {
   snapshotDate: string | null; computedAt: string | null; trigger: string | null;
+  /** Area yang ditampilkan, dan seluruh area yang bisa dipilih. */
+  areaId: string | null; areas: string[];
   summary: HealthSummary | null; settings: DoiSettings | null;
   exclusions: { date: DateKey; reason: string }[]; earliestDataDate: DateKey | null;
   po: SnapshotRow[]; overstock: SnapshotRow[]; npl: SnapshotRow[]; phaseOut: SnapshotRow[];
@@ -232,15 +269,18 @@ function normalizeSummary(sum: HealthSummary | null): HealthSummary | null {
  * plus empat daftar pendek. Jauh lebih ringan daripada mengirim seluruh SKU:
  * ±20 KB, bukan ratusan KB, dan hanya satu query ke doi_snapshot.
  */
-export async function dashboardView(): Promise<DashboardView> {
-  const summary = await prisma.doiSummary.findFirst({ orderBy: { snapshotDate: 'desc' } });
-  const empty = { snapshotDate: null, computedAt: null, trigger: null, summary: null, settings: null, exclusions: [], earliestDataDate: null, po: [], overstock: [], npl: [], phaseOut: [], totals: { po: NOL, overstock: NOL, npl: NOL, phaseOut: NOL } };
+export async function dashboardView(area?: string | null): Promise<DashboardView> {
+  const { areaId, areas, snapshotDate } = await pilihArea(area);
+  const summary = areaId && snapshotDate
+    ? await prisma.doiSummary.findFirst({ where: { snapshotDate: keyToUtcDate(snapshotDate), areaId } })
+    : null;
+  const empty = { snapshotDate: null, areaId, areas, computedAt: null, trigger: null, summary: null, settings: null, exclusions: [], earliestDataDate: null, po: [], overstock: [], npl: [], phaseOut: [], totals: { po: NOL, overstock: NOL, npl: NOL, phaseOut: NOL } };
   if (!summary) return empty;
 
   const payload = JSON.parse(summary.payload) as {
     summary: HealthSummary; exclusions: { date: DateKey; reason: string }[]; earliestDataDate: DateKey | null; settings: DoiSettings;
   };
-  const snap = await latestSnapshot();
+  const snap = await latestSnapshot(areaId);
 
   const byRefDoi = (a: SnapshotRow, b: SnapshotRow) => (a.refDoi ?? 0) - (b.refDoi ?? 0) || b.sales90 - a.sales90;
   // Qty stok terbesar; kalau seri, yang penjualannya lebih besar duluan.
@@ -255,6 +295,8 @@ export async function dashboardView(): Promise<DashboardView> {
 
   return {
     snapshotDate: toDateKeyUtc(summary.snapshotDate),
+    areaId: summary.areaId,
+    areas,
     computedAt: summary.computedAt.toISOString(),
     trigger: summary.trigger,
     summary: normalizeSummary(payload.summary),
@@ -276,9 +318,10 @@ export async function dashboardView(): Promise<DashboardView> {
 }
 
 /** Riwayat DOI satu SKU (untuk tren), terbaru dulu. */
-export async function skuHistory(sku: string, days = 60) {
+export async function skuHistory(sku: string, days = 60, area?: string | null) {
+  const { areaId } = await pilihArea(area);
   const rows = await prisma.doiSnapshot.findMany({
-    where: { sku },
+    where: areaId ? { sku, areaId } : { sku },
     orderBy: { snapshotDate: 'desc' },
     take: days,
     select: { snapshotDate: true, availableQty: true, transitQty: true, ads1: true, ads2: true, doi1: true, doi2: true, status: true },
@@ -287,8 +330,11 @@ export async function skuHistory(sku: string, days = 60) {
 }
 
 /** Ringkasan harian untuk tren DOI total (terbaru dulu). */
-export async function summaryHistory(days = 90) {
-  const rows = await prisma.doiSummary.findMany({ orderBy: { snapshotDate: 'desc' }, take: days });
+export async function summaryHistory(days = 90, area?: string | null) {
+  const { areaId } = await pilihArea(area);
+  const rows = await prisma.doiSummary.findMany({
+    where: areaId ? { areaId } : undefined, orderBy: { snapshotDate: 'desc' }, take: days,
+  });
   return rows.map((r) => {
     const p = JSON.parse(r.payload) as { summary: HealthSummary };
     return {
@@ -299,4 +345,71 @@ export async function summaryHistory(days = 90) {
       critical: p.summary.byStatus.CRITICAL + p.summary.byStatus.LOW,
     };
   });
+}
+
+/**
+ * Daftar area yang BENAR-BENAR ada datanya, bukan daftar yang dihardcode.
+ * Penarikan sekarang mengambil seluruh area dan menyimpannya terpisah per
+ * areaId, jadi daftar ini juga berfungsi sebagai bukti bahwa pemisahannya jalan.
+ */
+export type AreaRow = {
+  areaId: string;
+  skuCount: number;
+  stock: number;
+  transit: number;
+  sales30: number;
+  cancel30: number;
+  lastSales: DateKey | null;
+};
+
+/**
+ * Sampai kapan histori kolom `qtyCancel` bisa dipercaya.
+ *
+ * Data yang ditarik sebelum 25 Sep 2026 tidak punya angka order batal sama
+ * sekali, jadi menyalakan "ikutkan qty order batal" tanpa backfill membuat ADS
+ * timpang: hari baru punya angkanya, hari lama nol. Ini yang dipakai halaman
+ * Pengaturan untuk memperingatkan.
+ */
+export type CakupanBatal = { salesMulai: DateKey | null; batalMulai: DateKey | null; hariTanpaBatal: number };
+
+export async function cakupanBatal(): Promise<CakupanBatal> {
+  const rows = await prisma.$queryRawUnsafe<{ mulai: Date | null; batal: Date | null }[]>(
+    `SELECT MIN(salesDate) AS mulai, MIN(CASE WHEN qtyCancel > 0 THEN salesDate END) AS batal FROM sales_daily`,
+  );
+  const mulai = rows[0]?.mulai ? toDateKeyUtc(new Date(rows[0].mulai)) : null;
+  const batal = rows[0]?.batal ? toDateKeyUtc(new Date(rows[0].batal)) : null;
+  let hariTanpaBatal = 0;
+  if (mulai && batal) {
+    hariTanpaBatal = Math.max(0, Math.round((Date.parse(batal) - Date.parse(mulai)) / 86_400_000));
+  } else if (mulai && !batal) {
+    hariTanpaBatal = Math.max(0, Math.round((Date.now() - Date.parse(mulai)) / 86_400_000));
+  }
+  return { salesMulai: mulai, batalMulai: batal, hariTanpaBatal };
+}
+
+export async function areaList(days = 30): Promise<AreaRow[]> {
+  const [stok, jual] = await Promise.all([
+    prisma.$queryRawUnsafe<{ areaId: string; skuCount: bigint; stock: bigint }[]>(
+      `SELECT areaId, COUNT(*) AS skuCount, COALESCE(SUM(availableQty),0) AS stock
+         FROM stock_current WHERE category = 'Sku' GROUP BY areaId`,
+    ),
+    prisma.$queryRawUnsafe<{ areaId: string; sales: bigint; cancel: bigint; last: Date | null }[]>(
+      `SELECT areaId, COALESCE(SUM(qty),0) AS sales, COALESCE(SUM(qtyCancel),0) AS cancel, MAX(salesDate) AS last
+         FROM sales_daily WHERE salesDate >= DATE_SUB(CURDATE(), INTERVAL ? DAY) GROUP BY areaId`,
+      days,
+    ),
+  ]);
+  const map = new Map<string, AreaRow>();
+  const ambil = (areaId: string) => {
+    let r = map.get(areaId);
+    if (!r) { r = { areaId, skuCount: 0, stock: 0, transit: 0, sales30: 0, cancel30: 0, lastSales: null }; map.set(areaId, r); }
+    return r;
+  };
+  for (const r of stok) { const a = ambil(r.areaId); a.skuCount = Number(r.skuCount); a.stock = Number(r.stock); }
+  for (const r of jual) {
+    const a = ambil(r.areaId);
+    a.sales30 = Number(r.sales); a.cancel30 = Number(r.cancel);
+    a.lastSales = r.last ? toDateKeyUtc(new Date(r.last)) : null;
+  }
+  return [...map.values()].sort((a, b) => b.stock - a.stock || a.areaId.localeCompare(b.areaId));
 }

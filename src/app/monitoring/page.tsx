@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { AbcChip, Alert, Empty, RefreshButton, STATUS_ORDER, STATUS_TEXT, StatusChip, doiLabel, fmt, fmtDateTime, fmtDoi, fmtRp, fmtRpShort, opsi2Label, show1, show2, useApi, windowLabel } from '@/components/ui';
 import { DataGrid, type Column } from '@/components/DataGrid';
+import { AreaPicker, useArea, labelArea } from '@/components/AreaPicker';
 import type { SnapshotRow, SnapshotView } from '@/lib/query';
 
 type Resp = SnapshotView & { ok: boolean };
@@ -18,7 +19,8 @@ export default function MonitoringPage() {
 
 function Monitoring() {
   const params = useSearchParams();
-  const { data, error, loading, reload } = useApi<Resp>('/api/monitoring');
+  const { area, setArea, withArea, siap } = useArea();
+  const { data, error, loading, reload } = useApi<Resp>(siap ? withArea('/api/monitoring') : null);
   const [status, setStatus] = useState(params.get('status') || 'ALL');
   const [abc, setAbc] = useState('ALL');
   const [nplOnly, setNplOnly] = useState(params.get('npl') === '1');
@@ -87,7 +89,9 @@ function Monitoring() {
     { key: 'sap', label: 'SAP', get: (r) => r.sapCode, mono: true, width: 100, prio: 'p3' },
   ], [earliest, disp, s1, s2, win1, win2]);
 
-  const exportUrl = `/api/export?status=${encodeURIComponent(status === 'PO' ? 'ALL' : status)}&abc=${abc}`;
+  // Export mengikuti area yang sedang dilihat — kalau tidak, orang mengunduh
+  // Pusat padahal layarnya menampilkan Surabaya.
+  const exportUrl = withArea(`/api/export?status=${encodeURIComponent(status === 'PO' ? 'ALL' : status)}&abc=${abc}`);
 
   return (
     <div className="space-y-4">
@@ -95,10 +99,11 @@ function Monitoring() {
         <div>
           <h1 className="page-title">Tabel DOI</h1>
           <div className="mt-1 text-[12.5px] text-label">
-            {data?.computedAt ? <>Snapshot {data.snapshotDate}, dihitung {fmtDateTime(data.computedAt)} · {fmt(data.rows.length)} SKU</> : 'Belum ada snapshot'}
+            {data?.computedAt ? <>Snapshot {data.snapshotDate}, dihitung {fmtDateTime(data.computedAt)} · {fmt(data.rows.length)} SKU · area <b>{labelArea(data.areaId ?? '—')}</b></> : 'Belum ada snapshot'}
           </div>
         </div>
         <div className="btn-group flex flex-wrap items-center gap-2">
+          <AreaPicker areas={data?.areas ?? []} value={data?.areaId ?? area} onChange={setArea} />
           <a className="btn" href={exportUrl}>Export XLSX</a>
           <RefreshButton onDone={reload} />
         </div>

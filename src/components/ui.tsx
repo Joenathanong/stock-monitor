@@ -96,7 +96,9 @@ export function useApi<T>(url: string | null) {
       .then(async (r) => {
         const j = await r.json();
         if (!alive) return;
-        if (!r.ok || j.ok === false) setError(j.error || `HTTP ${r.status}`);
+        // `j.message` ikut dipakai: respons 200 dengan ok:false dulu tampil
+        // sebagai "HTTP 200" — pesan yang tidak memberi tahu apa pun.
+        if (!r.ok || j.ok === false) setError(j.error || j.message || `HTTP ${r.status}`);
         else { setData(j as T); setError(null); }
       })
       .catch((e) => alive && setError(String(e)))
@@ -113,14 +115,14 @@ export async function postJson(url: string, body?: unknown, method = 'POST', sig
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
+  if (!r.ok || j.ok === false) throw new Error(j.error || j.message || `HTTP ${r.status}`);
   return j;
 }
 
 export async function postForm(url: string, form: FormData) {
   const r = await fetch(url, { method: 'POST', body: form });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
+  if (!r.ok || j.ok === false) throw new Error(j.error || j.message || `HTTP ${r.status}`);
   return j;
 }
 

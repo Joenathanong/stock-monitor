@@ -41,6 +41,9 @@ export const DEFAULT_SETTINGS = {
   sales_sync_lookback_days: 7,  // tarik ulang N hari terakhir tiap 01.00
   sales_include_ready: 1,       // ikutkan status READY_TO_PROCESS (20000)
   sales_include_return: 1,      // ikutkan status RETURN* (70000-72000)
+  sales_include_cancel: 0,      // ikutkan qty order batal/belum bayar ke ADS (bawaan: tidak)
+  sales_pull_areas: '',         // area yang ditarik; kosong = dideteksi dari stok. TIDAK PERNAH area=All
+  sales_area_start: '',         // tanggal mulai operasional per area, mis. "Surabaya=2026-06-01,Medan=2026-06-01"
   auto_sync_sales: 1,
   auto_compute: 1,
 
@@ -48,6 +51,10 @@ export const DEFAULT_SETTINGS = {
   tv_slide_seconds: 15,         // detik per slide
   tv_rows_per_slide: 12,        // baris tabel per slide
   tv_refresh_minutes: 5,        // muat ulang data tiap N menit
+
+  // --- Barang dalam perjalanan (SIT) dari OCS /api/receive-stock ---
+  transit_enabled: 1,           // tarik SIT otomatis dari OCS
+  transit_refresh_hours: 3,     // dokumen receive jarang berubah; jangan tarik tiap Refresh
 
   // --- Nilai stok (harga dari OCS /Products/GetProductSkus)
   price_enabled: 1,             // tampilkan nilai rupiah di dashboard & tabel
@@ -87,9 +94,31 @@ export type DoiSettings = {
   /** Angka mana yang diambil dari array SalePrice OCS. */
   priceSource: 'MIN' | 'MAX' | 'AVG';
   priceRefreshHours: number;
+  /** Tarik barang dalam perjalanan dari OCS? Bawaan: ya. */
+  transitEnabled: boolean;
+  transitRefreshHours: number;
   salesSyncLookbackDays: number;
   salesIncludeReady: boolean;
   salesIncludeReturn: boolean;
+  /** Qty order batal/belum bayar ikut jadi permintaan di ADS? Bawaan: tidak. */
+  salesIncludeCancel: boolean;
+  /**
+   * Area yang ditarik, dipanggil satu per satu dengan namanya masing-masing.
+   * `area=All` tidak pernah dipakai — cakupannya ditentukan akun OCS dan pernah
+   * menyusut diam-diam jadi satu area tanpa galat.
+   *
+   * Kosong = dideteksi dari `stock_current`. Diisi oleh `npm run backfill:sales`
+   * supaya cron malam menarik area yang sama persis.
+   */
+  salesPullAreas: string[];
+  /**
+   * Tanggal mulai operasional per area. Sebelum tanggal ini area tersebut
+   * memang belum ada penjualannya, jadi menariknya cuma membuang waktu —
+   * dan membuat laporan lubang penuh "lubang" palsu.
+   *
+   * Format pengaturan: `Surabaya=2026-06-01,Medan=2026-06-01`.
+   */
+  salesAreaStart: Record<string, string>;
   autoSyncSales: boolean;
   autoCompute: boolean;
 };
@@ -134,9 +163,14 @@ export function toDoiSettings(raw: SettingsMap = {}): DoiSettings {
       return v === 'MAX' || v === 'AVG' ? v : 'MIN';
     })(),
     priceRefreshHours: Math.max(0, num(raw, 'price_refresh_hours')),
+    transitEnabled: bool(raw, 'transit_enabled'),
+    transitRefreshHours: Math.max(0, num(raw, 'transit_refresh_hours')),
     salesSyncLookbackDays: Math.max(1, num(raw, 'sales_sync_lookback_days')),
     salesIncludeReady: bool(raw, 'sales_include_ready'),
     salesIncludeReturn: bool(raw, 'sales_include_return'),
+    salesIncludeCancel: bool(raw, 'sales_include_cancel'),
+    salesPullAreas: str(raw, 'sales_pull_areas').split(',').map((v) => v.trim()).filter(Boolean),
+    salesAreaStart: parseAreaStart(str(raw, 'sales_area_start')),
     autoSyncSales: bool(raw, 'auto_sync_sales'),
     autoCompute: bool(raw, 'auto_compute'),
   };
@@ -145,4 +179,21 @@ export function toDoiSettings(raw: SettingsMap = {}): DoiSettings {
 /** Jendela terpanjang yang dibutuhkan mesin — menentukan berapa hari histori yang dibaca. */
 export function longestWindow(s: DoiSettings): number {
   return Math.max(s.opsi1WindowDays, s.opsi2W8Days, s.opsi2W4Days, s.opsi2W2Days, s.deadStockWindowDays);
+}
+
+/**
+ * Baca "Area=YYYY-MM-DD,Area2=YYYY-MM-DD" jadi objek. Entri yang formatnya
+ * salah dilewati diam-diam: pengaturan yang salah ketik tidak boleh membuat
+ * seluruh penarikan gagal, cukup area itu ikut ditarik penuh seperti biasa.
+ */
+export function parseAreaStart(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const bagian of raw.split(',')) {
+    const i = bagian.indexOf('=');
+    if (i < 1) continue;
+    const area = bagian.slice(0, i).trim();
+    const tgl = bagian.slice(i + 1).trim();
+    if (area && /^\d{4}-\d{2}-\d{2}$/.test(tgl)) out[area] = tgl;
+  }
+  return out;
 }

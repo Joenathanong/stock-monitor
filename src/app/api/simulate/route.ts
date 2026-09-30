@@ -11,6 +11,8 @@ export async function GET(req: Request) {
   return json(safe({
     ok: true,
     snapshotDate: snap.snapshotDate,
+    areaId: snap.areaId,
+    areas: snap.areas,
     computedAt: snap.computedAt,
     settings: {
       doiDisplay: snap.settings?.doiDisplay ?? 'BOTH',

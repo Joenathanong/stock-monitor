@@ -8,8 +8,9 @@ import { DEFAULT_SETTINGS, longestWindow, toDoiSettings, type DoiSettings, type 
 import { assignAbc, computeSku, summarize, type DoiResult, type HealthSummary } from './doi';
 import { sapKey } from './phase-out';
 import { buildExclusionMap } from './exclusion';
+import { AREA_GABUNGAN, labelArea } from './areas';
 import { addDays, keyToUtcDate, todayKey, toDateKeyUtc, type DateKey } from './dates';
-import { acquireLock, finishLog, lockOwner, releaseLock, startLog, syncPrices, syncStock, STALE_LOCK_MINUTES } from './sync';
+import { acquireLock, finishLog, lockOwner, releaseLock, startLog, syncPrices, syncStock, syncTransit, STALE_LOCK_MINUTES } from './sync';
 import { budget, defaultBudgetMs, Timeline } from './budget';
 
 export async function getSettingsMap(): Promise<SettingsMap> {
@@ -30,11 +31,11 @@ type StockRow = {
 };
 
 /** Stok per SKU untuk area yang dihitung. Hanya Category = Sku. */
-async function loadStock(s: DoiSettings): Promise<StockRow[]> {
-  const areaClause = s.areaScope === 'All' ? '' : 'AND areaId = ?';
+async function loadStock(s: DoiSettings, area: string): Promise<StockRow[]> {
+  const areaClause = area === AREA_GABUNGAN ? '' : 'AND areaId = ?';
   const activeClause = s.includeInactive ? '' : 'AND isActive = 1';
   const clearanceClause = s.includeClearance ? '' : "AND sku NOT LIKE 'CS-%'";
-  const params: unknown[] = s.areaScope === 'All' ? [] : [s.areaScope];
+  const params: unknown[] = area === AREA_GABUNGAN ? [] : [area];
   return prisma.$queryRawUnsafe<StockRow[]>(
     `SELECT sku, MAX(name) AS name, MAX(sapCode) AS sapCode,
             SUM(availableQty) AS availableQty, SUM(qtyOnHand) AS qtyOnHand, SUM(qtyOnOrder) AS qtyOnOrder
@@ -50,13 +51,16 @@ async function loadStock(s: DoiSettings): Promise<StockRow[]> {
  * ≈ 300 SKU × 90 hari ≈ 30 ribu baris — ringan, dan membuat mesin tetap fungsi
  * murni yang bisa diuji.
  */
-async function loadSales(s: DoiSettings, today: DateKey, windowDays: number) {
-  const areaClause = s.areaScope === 'All' ? '' : 'AND areaId = ?';
-  const params: unknown[] = s.areaScope === 'All' ? [] : [s.areaScope];
+async function loadSales(s: DoiSettings, area: string, today: DateKey, windowDays: number) {
+  const areaClause = area === AREA_GABUNGAN ? '' : 'AND areaId = ?';
+  const params: unknown[] = area === AREA_GABUNGAN ? [] : [area];
   const start = keyToUtcDate(addDays(today, -windowDays));
   const end = keyToUtcDate(addDays(today, -1));
+  // Order batal/belum bayar tidak memakan stok, jadi bawaannya TIDAK ikut ADS.
+  // Kolomnya tetap ada dan bisa dinyalakan dari Pengaturan untuk membandingkan.
+  const kolomQty = s.salesIncludeCancel ? 'SUM(qty + qtyCancel)' : 'SUM(qty)';
   const rows = await prisma.$queryRawUnsafe<{ sku: string; d: Date; qty: number }[]>(
-    `SELECT sku, salesDate AS d, SUM(qty) AS qty
+    `SELECT sku, salesDate AS d, ${kolomQty} AS qty
        FROM sales_daily
       WHERE salesDate BETWEEN ? AND ? ${areaClause}
       GROUP BY sku, salesDate`,
@@ -85,11 +89,11 @@ async function loadSales(s: DoiSettings, today: DateKey, windowDays: number) {
 }
 
 /** Tanggal ketika stok SKU tercatat ≤ 0 di dalam jendela (hanya bila fitur diaktifkan). */
-async function loadStockouts(s: DoiSettings, today: DateKey, windowDays: number): Promise<Map<string, Set<DateKey>>> {
+async function loadStockouts(s: DoiSettings, area: string, today: DateKey, windowDays: number): Promise<Map<string, Set<DateKey>>> {
   const out = new Map<string, Set<DateKey>>();
   if (!s.excludeStockoutDays) return out;
-  const areaClause = s.areaScope === 'All' ? '' : 'AND areaId = ?';
-  const params: unknown[] = s.areaScope === 'All' ? [] : [s.areaScope];
+  const areaClause = area === AREA_GABUNGAN ? '' : 'AND areaId = ?';
+  const params: unknown[] = area === AREA_GABUNGAN ? [] : [area];
   const rows = await prisma.$queryRawUnsafe<{ sku: string; d: Date }[]>(
     `SELECT sku, snapshotDate AS d FROM stock_daily
       WHERE snapshotDate BETWEEN ? AND ? AND availableQty <= 0 ${areaClause}`,
@@ -105,6 +109,7 @@ async function loadStockouts(s: DoiSettings, today: DateKey, windowDays: number)
 
 export type ComputeOutput = {
   today: DateKey;
+  areaId: string;
   settings: DoiSettings;
   rows: DoiResult[];
   summary: HealthSummary;
@@ -112,17 +117,26 @@ export type ComputeOutput = {
   earliestDataDate: DateKey | null;
 };
 
-/** Hitung seluruh SKU sekali (tanpa menyimpan). */
-export async function computeAll(now = new Date()): Promise<ComputeOutput> {
+/**
+ * Hitung seluruh SKU untuk SATU area (tanpa menyimpan).
+ *
+ * `AREA_GABUNGAN` menjumlahkan semua kota: stok dikelompokkan per SKU lintas
+ * area, penjualan dan transit ikut dijumlahkan. Itu angka perusahaan, dan
+ * sengaja dihitung terpisah — bukan dijumlahkan dari hasil per kota, karena
+ * DOI adalah pembagian: Σ(stok)/Σ(ADS) tidak sama dengan Σ(stok/ADS).
+ */
+export async function computeAll(area: string, now = new Date()): Promise<ComputeOutput> {
   const today = todayKey(now);
   const settings = await getSettings();
   const windowDays = longestWindow(settings);
 
   const [stock, sales, stockouts, transitRows, masterRows, manualEx, phaseOutRows, priceRows] = await Promise.all([
-    loadStock(settings),
-    loadSales(settings, today, windowDays),
-    loadStockouts(settings, today, windowDays),
-    prisma.transitStock.findMany(),
+    loadStock(settings, area),
+    loadSales(settings, area, today, windowDays),
+    loadStockouts(settings, area, today, windowDays),
+    area === AREA_GABUNGAN
+      ? prisma.transitStock.findMany()
+      : prisma.transitStock.findMany({ where: { areaId: area } }),
     prisma.skuMaster.findMany(),
     prisma.exclusionDate.findMany(),
     prisma.phaseOut.findMany(),
@@ -136,7 +150,10 @@ export async function computeAll(now = new Date()): Promise<ComputeOutput> {
   );
   const ctx = { today, exclusionDates: new Set(exclusionMap.keys()), earliestDataDate: sales.earliestDataDate };
 
-  const transit = new Map(transitRows.map((r) => [r.sku, r.qty]));
+  // Satu SKU bisa punya beberapa baris transit (OCS + manual, atau beberapa
+  // gudang saat GABUNGAN) — dijumlahkan, bukan yang terakhir menang.
+  const transit = new Map<string, number>();
+  for (const r of transitRows) transit.set(r.sku, (transit.get(r.sku) ?? 0) + r.qty);
   const harga = new Map(priceRows.map((r) => [r.sku, r.price]));
   const master = new Map(masterRows.map((r) => [r.sku, r]));
   // Dua jalur pencocokan: lewat SKU langsung, atau lewat 6 digit terakhir kode SAP.
@@ -176,6 +193,7 @@ export async function computeAll(now = new Date()): Promise<ComputeOutput> {
 
   return {
     today,
+    areaId: area,
     settings,
     rows,
     summary: summarize(rows, settings.excludePhaseOut),
@@ -191,10 +209,10 @@ export async function persistSnapshot(out: ComputeOutput, trigger: string) {
   const date = keyToUtcDate(out.today);
   const now = new Date();
   const cols =
-    '(snapshotDate, sku, name, sapCode, availableQty, qtyOnHand, qtyOnOrder, transitQty, leadTimeDays, firstSalesDate, ageDays, isNpl, nplNote, ' +
+    '(snapshotDate, areaId, sku, name, sapCode, availableQty, qtyOnHand, qtyOnOrder, transitQty, leadTimeDays, firstSalesDate, ageDays, isNpl, nplNote, ' +
     'sales90, salesEx, daysEx, ads1, ads8w, ads4w, ads2w, ads2, ads2Source, doi1, doi2, doi1Transit, doi2Transit, refDoi, refDoiTransit, status, action, ' +
     'suggested1, suggested2, abcClass, abcShare, abcCumShare, runOutDate, isPhaseOut, phaseOutTargetDate, phaseOutExcessQty, phaseOutLateDays, unitPrice, computedAt)';
-  const n = 42;
+  const n = 43;
   const update = [
     'name', 'sapCode', 'availableQty', 'qtyOnHand', 'qtyOnOrder', 'transitQty', 'leadTimeDays', 'firstSalesDate', 'ageDays', 'isNpl', 'nplNote',
     'sales90', 'salesEx', 'daysEx', 'ads1', 'ads8w', 'ads4w', 'ads2w', 'ads2', 'ads2Source', 'doi1', 'doi2', 'doi1Transit', 'doi2Transit', 'refDoi', 'refDoiTransit',
@@ -206,7 +224,7 @@ export async function persistSnapshot(out: ComputeOutput, trigger: string) {
     const chunk = out.rows.slice(i, i + BATCH);
     const placeholders = chunk.map(() => `(${Array(n).fill('?').join(',')})`).join(',');
     const params = chunk.flatMap((r) => [
-      date, r.sku, r.name.slice(0, 500), r.sapCode, r.availableQty, r.qtyOnHand, r.qtyOnOrder, r.transitQty, r.leadTimeDays,
+      date, out.areaId, r.sku, r.name.slice(0, 500), r.sapCode, r.availableQty, r.qtyOnHand, r.qtyOnOrder, r.transitQty, r.leadTimeDays,
       r.firstSalesDate ? keyToUtcDate(r.firstSalesDate) : null, r.ageDays, r.isNpl ? 1 : 0, r.nplNote,
       r.sales90, r.w1.sum, r.w1.days, r.ads1, r.w8.ads, r.w4.ads, r.w2.ads, r.ads2, r.ads2Source,
       r.doi1, r.doi2, r.doi1Transit, r.doi2Transit, r.refDoi, r.refDoiTransit, r.status, r.action.slice(0, 60),
@@ -220,20 +238,31 @@ export async function persistSnapshot(out: ComputeOutput, trigger: string) {
     );
   }
   // SKU yang hilang dari stok hari ini (tidak ditulis barusan) dibuang dari snapshot hari ini.
-  await prisma.$executeRawUnsafe(`DELETE FROM doi_snapshot WHERE snapshotDate = ? AND computedAt < ?`, date, now);
+  // Hanya area INI yang dibersihkan — tanpa saringan areaId, menghitung
+  // Surabaya akan menghapus snapshot Pusat yang baru saja ditulis.
+  await prisma.$executeRawUnsafe(
+    'DELETE FROM doi_snapshot WHERE snapshotDate = ? AND areaId = ? AND computedAt < ?',
+    date, out.areaId, now,
+  );
 
   const payload = JSON.stringify({
+    areaId: out.areaId,
     summary: out.summary,
     exclusions: out.exclusions,
     earliestDataDate: out.earliestDataDate,
     settings: out.settings,
     rowCount: out.rows.length,
   });
-  await prisma.doiSummary.upsert({
-    where: { snapshotDate: date },
-    create: { snapshotDate: date, trigger, payload, computedAt: now },
-    update: { trigger, payload, computedAt: now },
-  });
+  // `trigger` adalah KATA CADANGAN di MySQL 8 / TiDB (dipakai CREATE TRIGGER), jadi
+  // tanpa backtick pernyataan ini ditolak dengan error 1064 di kolom 54 — tepat di
+  // kata itu. Prisma Client mengutip nama kolom sendiri, SQL mentah tidak, jadi di
+  // sini setiap nama dibungkus backtick tanpa kecuali; lihat tes sql-cadangan.test.ts
+  // yang menjaga aturan ini untuk seluruh repo.
+  await prisma.$executeRawUnsafe(
+    'INSERT INTO `doi_summary` (`snapshotDate`, `areaId`, `trigger`, `payload`, `computedAt`) VALUES (?,?,?,?,?) ' +
+    'ON DUPLICATE KEY UPDATE `trigger`=VALUES(`trigger`), `payload`=VALUES(`payload`), `computedAt`=VALUES(`computedAt`)',
+    date, out.areaId, trigger, payload, now,
+  );
 }
 
 export type RunResult = {
@@ -246,7 +275,23 @@ export type RunResult = {
   durationMs: number;
   /** Rincian waktu per langkah — supaya "lambat" bisa ditunjuk penyebabnya. */
   steps?: string;
+  /** Area yang berhasil dihitung pada putaran ini. */
+  areas?: string[];
 };
+
+/**
+ * Area mana saja yang dihitung DOI-nya: setiap kota yang ada stoknya, plus
+ * GABUNGAN. Diambil dari data, bukan daftar tetap — cabang baru langsung ikut
+ * terhitung tanpa mengubah kode.
+ */
+export async function areaUntukHitung(): Promise<string[]> {
+  const rows = await prisma.$queryRawUnsafe<{ areaId: string }[]>(
+    "SELECT DISTINCT areaId FROM stock_current WHERE category = 'Sku' AND areaId <> '' ORDER BY areaId",
+  );
+  const kota = rows.map((r) => r.areaId);
+  // Satu kota saja: GABUNGAN cuma akan menduplikasi angka yang sama.
+  return kota.length > 1 ? [...kota, AREA_GABUNGAN] : kota;
+}
 
 /**
  * Alur lengkap: tarik stok dari OCS → hitung → simpan. Dipakai cron 07.30 dan
@@ -288,8 +333,9 @@ export async function runCompute(
       stockRows = st.rows;
       waktu.step(`stok ${st.skipped ? 'dilewati' : `${st.rows} baris`}`);
 
-      // Harga = pelengkap. Gagal di sini TIDAK BOLEH menggagalkan DOI, jadi
-      // errornya ditelan dan dicatat; perhitungan lanjut dengan harga terakhir.
+      // Harga & transit = pelengkap. Gagal di sini TIDAK BOLEH menggagalkan
+      // DOI, jadi errornya ditelan dan dicatat; perhitungan lanjut dengan data
+      // terakhir yang ada.
       if (settings.priceEnabled && anggaran.left() > 16_000) {
         try {
           const hp = await syncPrices(settings, anggaran.slice(14_000, 6_000));
@@ -298,19 +344,47 @@ export async function runCompute(
           waktu.step(`harga GAGAL (${err instanceof Error ? err.message.slice(0, 60) : err})`);
         }
       }
+      // Barang dalam perjalanan ditarik SEBELUM perhitungan, supaya SIT yang
+      // dipakai DOI adalah angka terbaru — bukan sisa penarikan tadi malam.
+      //
+      // Refresh manual memaksa penarikan (jendela kesegaran dilewati), karena
+      // orang yang menekan Refresh justru ingin dokumen yang BARU masuk ikut
+      // terhitung. Biayanya kecil: daftar dokumen memang selalu ditarik ulang,
+      // dan isi dokumen yang sudah pernah dibaca datang dari cache receive_doc.
+      // Cron tetap menghormati jendela kesegaran.
+      if (settings.transitEnabled && anggaran.left() > 20_000) {
+        try {
+          const paksa = trigger === 'manual';
+          const tr = await syncTransit(anggaran.slice(20_000, 8_000), settings.transitRefreshHours, paksa);
+          waktu.step(
+            tr.skipped ? 'transit masih segar'
+            : tr.partial ? `transit ${tr.rows} baris SEBAGIAN (${tr.docsKurang} dokumen belum terbaca)`
+            : `transit ${tr.rows} baris dari ${tr.docs} dokumen`,
+          );
+        } catch (err) {
+          waktu.step(`transit GAGAL (${err instanceof Error ? err.message.slice(0, 60) : err})`);
+        }
+      }
     }
-    anggaran.need(6_000, 'hitung DOI');
-    const out = await computeAll();
-    waktu.step(`hitung ${out.rows.length} SKU`);
 
-    anggaran.need(3_000, 'simpan snapshot');
-    await persistSnapshot(out, trigger);
-    waktu.step('simpan');
+    // Satu area = satu snapshot. GABUNGAN dihitung terpisah, bukan dijumlahkan
+    // dari hasil per kota — DOI itu pembagian, dan Σ(stok/ADS) ≠ Σstok/ΣADS.
+    const daftarArea = await areaUntukHitung();
+    let totalSku = 0;
+    for (const area of daftarArea) {
+      // Area terakhir tetap butuh waktu menyimpan; kalau tidak cukup, berhenti
+      // dengan rapi supaya area yang sudah jadi tidak ikut hilang.
+      if (anggaran.left() < 9_000) { waktu.step(`SISA AREA DILEWATI (${daftarArea.length - daftarArea.indexOf(area)})`); break; }
+      const out = await computeAll(area);
+      await persistSnapshot(out, trigger);
+      totalSku += out.rows.length;
+      waktu.step(`${labelArea(area)} ${out.rows.length} SKU`);
+    }
 
-    const catatan = `${withStockSync ? `stok ${stockRows} baris` : 'tanpa tarik stok'} · ${waktu}`;
-    await finishLog(log.id, 'ok', out.rows.length, catatan);
+    const catatan = `${withStockSync ? `stok ${stockRows} baris` : 'tanpa tarik stok'} · ${daftarArea.length} area · ${waktu}`;
+    await finishLog(log.id, 'ok', totalSku, catatan);
     return {
-      ok: true, today: out.today, skuCount: out.rows.length, stockRows,
+      ok: true, today: todayKey(), skuCount: totalSku, stockRows, areas: daftarArea,
       durationMs: Date.now() - t0, steps: String(waktu),
     };
   } catch (err) {

@@ -56,8 +56,11 @@ export default function SalesPage() {
     try {
       const r = await postJson('/api/sync', body);
       setMsg({
-        tone: r.skipped ? 'warn' : r.failed?.length ? 'warn' : 'ok',
-        text: r.skipped ? r.message : `${r.rows} baris untuk ${r.dates.length} tanggal (${Math.round(r.durationMs / 1000)} dtk).${r.failed?.length ? ` Gagal: ${r.failed.join(', ')}` : ''}`,
+        tone: r.skipped || r.failed?.length || r.sisa ? 'warn' : 'ok',
+        text: r.skipped ? r.message
+          : `${r.rows} baris · ${r.selesai} pasangan tanggal × area selesai · ${r.areas?.length ?? 0} area (${Math.round(r.durationMs / 1000)} dtk).`
+            + `${r.failed?.length ? ` Gagal: ${r.failed.join(', ')}.` : ''}`
+            + `${r.sisa ? ` Waktu fungsi habis — ${r.sisa} pasangan (tanggal × area) belum sempat. Klik lagi untuk melanjutkan; yang paling lama tidak ditarik dikerjakan duluan.` : ''}`,
       });
       refresh();
     } catch (e) { setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) }); }
@@ -70,7 +73,7 @@ export default function SalesPage() {
     <div className="space-y-4">
       <div>
         <h1 className="page-title">Data Penjualan</h1>
-        <div className="mt-1 text-[12.5px] text-label">Sumber: OCS Report ORDER › SKU, area sesuai Pengaturan, semua status order dari PROCESSED ke atas (tanpa UNPAID / CANCELLED). Tiap 01.00 WIB, 7 hari terakhir ditarik ulang dan ditimpa.</div>
+        <div className="mt-1 text-[12.5px] text-label">Sumber: OCS Report ORDER › SKU. <b>Seluruh status</b>, dan <b>tiap kota ditarik dengan namanya sendiri</b> (tidak pernah <code>area=All</code>, karena cakupannya ikut akun OCS) lalu disimpan terpisah per area; qty order batal/belum bayar (NA, UNPAID, IN_CANCEL, CANCELLED) masuk kolom sendiri dan tidak ikut ADS kecuali dinyalakan di Pengaturan. Tiap 01.00 WIB, 7 hari terakhir ditarik ulang dan ditimpa.</div>
       </div>
       {msg ? <Alert tone={msg.tone}>{msg.text}</Alert> : null}
       {cov.error ? <Alert tone="error">{cov.error}</Alert> : null}

@@ -2,10 +2,12 @@
 import { useMemo, useState } from 'react';
 import { AbcChip, Alert, Empty, StatusChip, fmt, fmtDoi, fmtRp, fmtRpShort, useApi } from '@/components/ui';
 import { DataGrid, type Column } from '@/components/DataGrid';
+import { AreaPicker, useArea, labelArea } from '@/components/AreaPicker';
 import { ABC, type AbcClass, type SimPick, type SimResult } from '@/lib/simulate';
 
 type Resp = {
   ok: boolean; snapshotDate: string | null; computedAt: string | null;
+  areaId: string | null; areas: string[];
   settings: { doiDisplay: string; targetDoiDays: number; areaScope: string };
   params: { opsi: 1 | 2; targetDoi: number; classes: AbcClass[]; floorDays: Record<AbcClass, number>; excludePhaseOut: boolean; order: string };
   saranLantai: number | null;
@@ -34,7 +36,8 @@ export default function SimulasiPage() {
     order, opsi: String(opsi),
   }).toString(), [target, classes, floors, withPhaseOut, order, opsi]);
 
-  const { data, error, loading } = useApi<Resp>(`/api/simulate?${qs}`);
+  const { area, setArea, withArea, siap } = useArea();
+  const { data, error, loading } = useApi<Resp>(siap ? withArea(`/api/simulate?${qs}`) : null);
   const h = data?.hasil;
   const saran = data?.saranLantai ?? null;
 
@@ -73,12 +76,16 @@ export default function SimulasiPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="page-title">Simulasi Target DOI</h1>
-        <div className="mt-1 text-[12.5px] text-label">
-          Tentukan target DOI total, lalu lihat SKU mana yang stoknya harus dikurangi dan berapa banyak.
-          Mengurangi stok tidak mengubah ADS, jadi target stok = target hari × ADS total.
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="page-title">Simulasi Target DOI</h1>
+          <div className="mt-1 text-[12.5px] text-label">
+            Tentukan target DOI total, lalu lihat SKU mana yang stoknya harus dikurangi dan berapa banyak.
+            Mengurangi stok tidak mengubah ADS, jadi target stok = target hari × ADS total.
+            {data?.areaId ? <> Area <b>{labelArea(data.areaId)}</b>.</> : null}
+          </div>
         </div>
+        <AreaPicker areas={data?.areas ?? []} value={data?.areaId ?? area} onChange={setArea} />
       </div>
 
       <section className="card card-pad space-y-4">

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { DayStrip } from '@/components/Charts';
 import { DataGrid, type Column } from '@/components/DataGrid';
+import { AreaPicker, useArea, labelArea } from '@/components/AreaPicker';
 import { AbcChip, Alert, Empty, StatusChip, fmt, fmtRp, fmtRpShort, useApi } from '@/components/ui';
 import type { PlatformGap, SkuStockout } from '@/lib/stockout';
 import { PLATFORM_LABEL } from '@/lib/stockout';
@@ -16,6 +17,7 @@ type Gap = PlatformGap & { name: string | null; outAllShops: boolean; outSomeSho
 type Resp = {
   ok: boolean; from: string; to: string; today: string; days: string[]; dataGaps: string[];
   snapshotDate: string | null; stockSince: string | null;
+  areaId: string | null; areas: string[];
   options: { minRunDays: number; minAds: number; minSellSharePct: number; platformMinRunDays: number; platformMinSharePct: number; withPhaseOut: boolean; withExcluded: boolean; maxDays: number; volatileDays: number };
   settings: { areaScope: string; actionBasis: string; doiDisplay: string };
   summary: {
@@ -52,11 +54,12 @@ export default function StockoutPage() {
   const [open, setOpen] = useState<string | null>(null);
   const [q, setQ] = useState(0); // penanda "terapkan"
 
+  const { area, setArea, withArea, siap } = useArea();
   const url = useMemo(
-    () => `/api/stockout?from=${from}&to=${to}&minRun=${minRun}&minAds=${minAds}&minSell=${minSell}${phaseOut ? '&phaseOut=1' : ''}#${q}`.split('#')[0],
-    [from, to, minRun, minAds, minSell, phaseOut, q],
+    () => withArea(`/api/stockout?from=${from}&to=${to}&minRun=${minRun}&minAds=${minAds}&minSell=${minSell}${phaseOut ? '&phaseOut=1' : ''}#${q}`.split('#')[0]),
+    [from, to, minRun, minAds, minSell, phaseOut, q, withArea],
   );
-  const { data, error, loading } = useApi<Resp>(url);
+  const { data, error, loading } = useApi<Resp>(siap ? url : null);
 
   const days = data?.days ?? [];
   const gapSet = useMemo(() => new Set(data?.dataGaps ?? []), [data]);
@@ -148,11 +151,15 @@ export default function StockoutPage() {
           <h1 className="page-title">Analisis Stok Kosong</h1>
           <div className="mt-1 text-[12.5px] text-label">
             Hari ketika SKU yang biasanya laku tiba-tiba tidak punya penjualan sama sekali — beserta perkiraan penjualan yang hilang.
+            {data?.areaId ? <> Area <b>{labelArea(data.areaId)}</b>.</> : null}
           </div>
         </div>
-        <button className="btn btn-sm" onClick={() => setShowOpts((v) => !v)} aria-expanded={showOpts}>
-          {showOpts ? 'Sembunyikan setelan' : 'Setelan lanjutan'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <AreaPicker areas={data?.areas ?? []} value={data?.areaId ?? area} onChange={setArea} />
+          <button className="btn btn-sm" onClick={() => setShowOpts((v) => !v)} aria-expanded={showOpts}>
+            {showOpts ? 'Sembunyikan setelan' : 'Setelan lanjutan'}
+          </button>
+        </div>
       </div>
 
       <section className="card card-pad">

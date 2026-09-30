@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { getSettings } from '@/lib/compute';
 import { latestSnapshot } from '@/lib/query';
+import { AREA_GABUNGAN } from '@/lib/areas';
 import { addDays, keyToUtcDate, rangeKeys, toDateKeyUtc, todayKey, type DateKey } from '@/lib/dates';
 import { buildExclusionMap } from '@/lib/exclusion';
 import {
@@ -52,16 +53,20 @@ export async function GET(req: Request) {
   const withExcluded = url.searchParams.get('excluded') === '1';
 
   const settings = await getSettings();
-  const areaClause = settings.areaScope === 'All' ? {} : { areaId: settings.areaScope };
+  // Area diambil dari URL, bukan dari area_scope: halaman ini punya pemilih
+  // areanya sendiri, dan area_scope hanya menentukan bawaan lama.
+  const snapAwal = await latestSnapshot(url.searchParams.get('area')?.trim() || null);
+  const area = snapAwal.areaId;
+  const areaClause = !area || area === AREA_GABUNGAN ? {} : { areaId: area };
 
   const [snap, salesRows, adsRows, stockRows, master, manualEx, stokOcs] = await Promise.all([
-    latestSnapshot(),
+    Promise.resolve(snapAwal),
     prisma.salesDaily.findMany({
       where: { salesDate: { gte: keyToUtcDate(from), lte: keyToUtcDate(to) }, ...areaClause },
       select: { sku: true, salesDate: true, qty: true, qtyShopee: true, qtyTiktok: true, qtyTokped: true, qtyLazada: true, qtyOther: true },
     }),
     prisma.doiSnapshot.findMany({
-      where: { snapshotDate: { lte: keyToUtcDate(to) } },
+      where: { snapshotDate: { lte: keyToUtcDate(to) }, ...(area ? { areaId: area } : {}) },
       select: { sku: true, snapshotDate: true, ads1: true, ads2: true },
       orderBy: { snapshotDate: 'asc' },
     }),
@@ -221,6 +226,8 @@ export async function GET(req: Request) {
 
   return json(safe({
     ok: true,
+    areaId: snap.areaId,
+    areas: snap.areas,
     from, to, today, days, dataGaps,
     snapshotDate: snap.snapshotDate,
     stockSince: stockRows.length ? [...new Set(stockRows.map((r) => toDateKeyUtc(r.snapshotDate)))].sort()[0] : null,

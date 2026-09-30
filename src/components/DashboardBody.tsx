@@ -4,6 +4,15 @@ import { useMemo, useState } from 'react';
 import { AbcChip, Alert, Bars, Empty, Kpi, RefreshButton, STATUS_COLOR, STATUS_ORDER, STATUS_TEXT, StatusChip, doiLabel, doiTotalLabel, fmt, fmtDateTime, fmtDoi, fmtRp, fmtRpShort, opsi2Label, show1, show2, useApi, windowLabel } from '@/components/ui';
 import { DataGrid, type Column } from '@/components/DataGrid';
 import type { DashboardView, SnapshotRow } from '@/lib/query';
+import { AreaPicker, useArea, labelArea } from '@/components/AreaPicker';
+
+/**
+ * DOI kalau barang dalam perjalanan dihitung ikut. Angka utama sengaja tetap
+ * memakai stok di tangan saja; ini hanya pendamping supaya transit tidak
+ * kelihatan hilang dari dashboard.
+ */
+const doiT = (stock: number, transit: number, ads: number) =>
+  transit > 0 && ads > 0 ? (stock + transit) / ads : null;
 
 type Resp = DashboardView & { ok: boolean };
 
@@ -48,7 +57,10 @@ const PO_OUT_COLS: Column<SnapshotRow>[] = [
 
 /** Isi dashboard — dipakai versi berlogin (/) dan versi publik (/dashboard). */
 export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; readOnly?: boolean }) {
-  const { data, error, loading, reload } = useApi<Resp>(apiUrl);
+  const { area, setArea, withArea, siap } = useArea();
+  // Menunggu localStorage dibaca dulu — kalau tidak, dashboard sempat memuat
+  // area bawaan lalu memuat ulang area pilihan: dua permintaan, layar berkedip.
+  const { data, error, loading, reload } = useApi<Resp>(siap ? withArea(apiUrl) : null);
   const [withPhaseOut, setWithPhaseOut] = useState(false);
   const s = data?.summary;
   const set = data?.settings;
@@ -79,11 +91,13 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
           <h1 className="page-title">Dashboard DOI</h1>
           <div className="mt-1 text-[12.5px] text-label">
             {data?.computedAt
-              ? <>Terakhir dihitung {fmtDateTime(data.computedAt)} ({data.trigger === 'cron' ? 'otomatis 07.30' : data.trigger}) · snapshot {data.snapshotDate} · area {set?.areaScope}</>
+              ? <>Terakhir dihitung {fmtDateTime(data.computedAt)} ({data.trigger === 'cron' ? 'otomatis 07.30' : data.trigger}) · snapshot {data.snapshotDate} · area <b>{labelArea(data.areaId ?? '—')}</b></>
               : 'Belum ada perhitungan'}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <AreaPicker areas={data?.areas ?? []} value={data?.areaId ?? area} onChange={setArea}
+            hint="Tiap kota dihitung sendiri; Semua area = seluruh kota dijumlahkan jadi satu DOI" />
           {poSum.count > 0 ? (
             <label className="flex items-center gap-2 text-[13px]" title="Secara default SKU phase out tidak dihitung di DOI total & ABC">
               <input type="checkbox" checked={withPhaseOut} onChange={(e) => setWithPhaseOut(e.target.checked)} />
@@ -111,9 +125,14 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
                   ? <span className="text-critical">{fmt(tot!.noPrice)} SKU belum ada harganya</span>
                   : `${fmt(tot!.stock)} pcs × harga OCS`} />
             ) : null}
-            <Kpi label="Total stok (Available)" value={fmt(tot!.stock)} hint={`+ ${fmt(tot!.transit)} dalam perjalanan`} />
-            {show1(disp) ? <Kpi label={doiTotalLabel(1, disp)} value={fmtDoi(tot!.doi1)} unit="hari" hint={`ADS total ${fmt(tot!.ads1, 1)}/hari · ${win1} ex campaign`} /> : null}
-            {show2(disp) ? <Kpi label={doiTotalLabel(2, disp)} value={fmtDoi(tot!.doi2)} unit="hari" hint={`ADS total ${fmt(tot!.ads2, 1)}/hari · ${win2}`} /> : null}
+            <Kpi label="Total stok (Available)" value={fmt(tot!.stock)}
+              hint={tot!.transit
+                ? <Link className="underline decoration-dotted" href="/transit">+ {fmt(tot!.transit)} pcs dalam perjalanan</Link>
+                : 'tidak ada stok dalam perjalanan'} />
+            {show1(disp) ? <Kpi label={doiTotalLabel(1, disp)} value={fmtDoi(tot!.doi1)} unit="hari"
+              hint={`ADS total ${fmt(tot!.ads1, 1)}/hari · ${win1} ex campaign${doiT(tot!.stock, tot!.transit, tot!.ads1) ? ` · dengan transit ${fmtDoi(doiT(tot!.stock, tot!.transit, tot!.ads1))} hari` : ''}`} /> : null}
+            {show2(disp) ? <Kpi label={doiTotalLabel(2, disp)} value={fmtDoi(tot!.doi2)} unit="hari"
+              hint={`ADS total ${fmt(tot!.ads2, 1)}/hari · ${win2}${doiT(tot!.stock, tot!.transit, tot!.ads2) ? ` · dengan transit ${fmtDoi(doiT(tot!.stock, tot!.transit, tot!.ads2))} hari` : ''}`} /> : null}
             <Kpi label="Perlu open PO" value={fmt(s.byStatus.CRITICAL + s.byStatus.LOW)} hint={`${fmt(s.byStatus.CRITICAL)} kritis · ${fmt(s.byStatus.LOW)} low`} tone="text-negative" />
             <Kpi label="Produk baru (NPL)" value={fmt(s.npl)} hint={`${fmt(s.byStatus.NPL_WAIT)} data belum cukup`} />
           </div>

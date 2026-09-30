@@ -1,23 +1,31 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Empty, RefreshButton, opsi2Label, postJson, useApi, windowLabel } from '@/components/ui';
 
 type Resp = { ok: boolean; settings: Record<string, string>; defaults: Record<string, string | number> };
 type Exclusions = { ok: boolean; today: string; rows: { date: string; reason: string; manual: boolean }[] };
 
 type Field = { key: string; label: string; hint?: string; type?: 'number' | 'bool' | 'select' | 'text'; options?: { v: string; l: string }[] };
+type AreaRow = { areaId: string; skuCount: number; stock: number; transit: number; sales30: number; cancel30: number; lastSales: string | null };
+type Batal = { salesMulai: string | null; batalMulai: string | null; hariTanpaBatal: number };
+type Areas = { ok: boolean; areas: AreaRow[]; batal?: Batal };
 /**
  * Judul & pilihan ikut angka yang sedang diisi di form — kalau jendela diubah
  * jadi 30 hari, keterangannya berubah jadi "1 bln", bukan tetap "3 bulan".
  */
-const groupsFor = (v: Record<string, string>): { title: string; fields: Field[] }[] => {
+const groupsFor = (v: Record<string, string>, areas: AreaRow[] = []): { title: string; fields: Field[] }[] => {
   const win1 = windowLabel(Number(v.opsi1_window_days));
   const win2 = opsi2Label(Number(v.opsi2_w8_days), Number(v.opsi2_w4_days), Number(v.opsi2_w2_days));
   return [
   {
     title: 'Cakupan data',
     fields: [
-      { key: 'area_scope', label: 'Area OCS', type: 'select', options: ['Pusat', 'All', 'Surabaya', 'Medan', 'Yogyakarta', 'Makassar'].map((v) => ({ v, l: v })), hint: 'Stok dan penjualan dihitung untuk area ini saja.' },
+      { key: 'area_scope', label: 'Area bawaan di layar', type: 'select',
+        options: [{ v: 'All', l: 'All — semua area digabung' },
+          ...areas.map((a) => ({ v: a.areaId, l: `${a.areaId} — ${a.skuCount.toLocaleString('id-ID')} SKU` })),
+          ...(v.area_scope && v.area_scope !== 'All' && !areas.some((a) => a.areaId === v.area_scope)
+            ? [{ v: v.area_scope, l: `${v.area_scope} — belum ada datanya` }] : [])],
+        hint: 'DOI dihitung untuk SEMUA kota sekaligus, plus satu baris gabungan — pengaturan ini tidak lagi membatasi apa pun, hanya jadi bawaan lama. Pilih area di pojok kanan atas tiap halaman.' },
       { key: 'include_inactive', label: 'Ikutkan SKU Tidak Aktif', type: 'bool' },
       { key: 'include_clearance', label: 'Ikutkan SKU CS- (clearance)', type: 'bool' },
     ],
@@ -87,6 +95,15 @@ const groupsFor = (v: Record<string, string>): { title: string; fields: Field[] 
     ],
   },
   {
+    title: 'Barang dalam perjalanan (SIT)',
+    fields: [
+      { key: 'transit_enabled', label: 'Tarik otomatis dari OCS Receive Stock', type: 'bool',
+        hint: 'Qty diambil dari DoQty — angka itu sudah total pcs, jadi tidak dikalikan isi karton. Baris unggahan manual tidak pernah ditimpa.' },
+      { key: 'transit_refresh_hours', label: 'Tarik ulang transit tiap (jam)', type: 'number',
+        hint: 'Dokumen receive jarang berubah; 0 = tarik setiap kali Refresh (Refresh jadi lebih lambat).' },
+    ],
+  },
+  {
     title: 'Phase out',
     fields: [
       { key: 'exclude_phase_out', label: 'Keluarkan SKU phase out dari DOI total & kelas ABC', type: 'bool' },
@@ -100,6 +117,11 @@ const groupsFor = (v: Record<string, string>): { title: string; fields: Field[] 
       { key: 'sales_sync_lookback_days', label: 'Tarik ulang N hari terakhir', type: 'number' },
       { key: 'sales_include_ready', label: 'Ikutkan status READY_TO_PROCESS', type: 'bool', hint: 'Order sudah dibayar, belum diproses gudang.' },
       { key: 'sales_include_return', label: 'Ikutkan status RETURN', type: 'bool', hint: 'Order yang berakhir retur tetap dihitung sebagai permintaan.' },
+      { key: 'sales_pull_areas', label: 'Area yang ditarik', type: 'text',
+        hint: 'Dipisah koma, dipanggil satu per satu. Kosongkan untuk mendeteksi otomatis dari data stok. Diisi otomatis oleh npm run backfill:sales.' },
+      { key: 'sales_area_start', label: 'Mulai operasional per area', type: 'text',
+        hint: 'Format Area=YYYY-MM-DD dipisah koma, mis. Surabaya=2026-06-01,Medan=2026-06-01. Tanggal sebelum ini tidak ditarik untuk area tersebut dan tidak dihitung sebagai lubang data.' },
+      { key: 'sales_include_cancel', label: 'Ikutkan qty order batal ke ADS', type: 'bool', hint: 'Seluruh status selalu ditarik; qty NA/UNPAID/IN_CANCEL/CANCELLED disimpan terpisah. Menyalakan ini menaikkan ADS dan MENURUNKAN DOI — order batal tidak pernah memakan stok.' },
     ],
   },
   {
@@ -115,6 +137,7 @@ const groupsFor = (v: Record<string, string>): { title: string; fields: Field[] 
 export default function SettingsPage() {
   const { data, error, reload } = useApi<Resp>('/api/settings');
   const ex = useApi<Exclusions>('/api/exclusion');
+  const ar = useApi<Areas>('/api/areas');
   const [form, setForm] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -122,6 +145,17 @@ export default function SettingsPage() {
   const [newReason, setNewReason] = useState('');
 
   useEffect(() => { if (data) setForm(data.settings); }, [data]);
+
+  // "Area=YYYY-MM-DD,..." → objek, supaya tabel area bisa menampilkan kolom Mulai.
+  const mulaiArea = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const bagian of (form.sales_area_start ?? '').split(',')) {
+      const i = bagian.indexOf('=');
+      if (i > 0) out[bagian.slice(0, i).trim()] = bagian.slice(i + 1).trim();
+    }
+    return out;
+  }, [form.sales_area_start]);
+
 
   async function save() {
     setBusy(true); setMsg(null);
@@ -166,7 +200,7 @@ export default function SettingsPage() {
       {msg ? <Alert tone={msg.tone}>{msg.text}</Alert> : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {groupsFor(form).map((g) => (
+        {groupsFor(form, ar.data?.areas ?? []).map((g) => (
           <div key={g.title} className="card card-pad">
             <div className="card-title mb-3">{g.title}</div>
             <div className="space-y-3">
@@ -182,6 +216,51 @@ export default function SettingsPage() {
             </div>
           </div>
         ))}
+
+        <div className="card card-pad lg:col-span-2">
+          <div className="card-title mb-1">Area yang terdeteksi</div>
+          <div className="mb-3 text-[12.5px] text-label">
+            Diambil dari data yang sudah masuk, bukan daftar tetap. Penarikan mengambil SELURUH area dan menyimpannya terpisah per area,
+            jadi tabel ini sekaligus bukti pemisahannya jalan. Baris bertanda adalah area yang sedang dihitung.
+          </div>
+          {ar.data?.batal && form.sales_include_cancel === '1' && ar.data.batal.hariTanpaBatal > 3 ? (
+            <Alert tone="warn">
+              Toggle <b>Ikutkan qty order batal ke ADS</b> menyala, tapi histori order batal baru ada sejak{' '}
+              <b>{ar.data.batal.batalMulai ?? 'belum ada sama sekali'}</b> sementara data penjualan dimulai{' '}
+              <b>{ar.data.batal.salesMulai}</b> — ada <b>{ar.data.batal.hariTanpaBatal} hari</b> yang angka batalnya masih nol
+              karena ditarik dengan aturan lama. ADS jadi timpang: hari baru terhitung lebih tinggi daripada hari lama.
+              Jalankan <code>npm run backfill:sales</code> dulu, baru nyalakan toggle ini.
+            </Alert>
+          ) : null}
+          {ar.data?.areas.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12.5px]">
+                <thead><tr className="text-label">
+                  <th className="py-1 text-left">Area</th><th className="num">SKU</th><th className="num">Stok</th>
+                  <th className="num">Jual 30 hr</th><th className="num">Batal 30 hr</th><th className="num">% batal</th><th className="num">Jual terakhir</th><th className="num">Mulai</th>
+                </tr></thead>
+                <tbody>
+                  {ar.data.areas.map((a) => {
+                    const dipakai = form.area_scope === a.areaId || form.area_scope === 'All';
+                    const total = a.sales30 + a.cancel30;
+                    return (
+                      <tr key={a.areaId} className={dipakai ? '' : 'text-label'}>
+                        <td className="py-1">{a.areaId}{dipakai ? <span className="ml-1.5 chip chip-brand">dihitung</span> : null}</td>
+                        <td className="num mono">{a.skuCount.toLocaleString('id-ID')}</td>
+                        <td className="num mono">{a.stock.toLocaleString('id-ID')}</td>
+                        <td className="num mono">{a.sales30.toLocaleString('id-ID')}</td>
+                        <td className="num mono">{a.cancel30.toLocaleString('id-ID')}</td>
+                        <td className="num mono">{total ? `${((a.cancel30 / total) * 100).toFixed(1)}%` : '—'}</td>
+                        <td className="num mono">{a.lastSales ?? '—'}</td>
+                        <td className="num mono">{mulaiArea[a.areaId] ?? <span className="empty">—</span>}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : <Empty>Belum ada data area — jalankan Refresh atau tunggu cron 01.00.</Empty>}
+        </div>
 
         <div className="card card-pad lg:col-span-2">
           <div className="card-title mb-1">Tanggal yang dikecualikan (Opsi 1)</div>

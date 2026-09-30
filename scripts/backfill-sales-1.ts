@@ -18,8 +18,7 @@ import { addDays, keyToUtcDate, toDateKeyUtc, todayKey, type DateKey } from '../
  * Sekarang tiap pasangan dilacak sendiri, gagalnya dicoba ulang otomatis di
  * akhir, dan sisa lubang dilaporkan dengan tanggal + kota yang tepat.
  *
- *   npm run backfill:sales                       # 30 hari terakhir (BAWAAN), semua area
- *   npm run backfill:sales -- --penuh            # seluruh rentang yang ada di database
+ *   npm run backfill:sales                       # seluruh rentang yang ada di database
  *   npm run backfill:sales -- --dry-run          # lihat rencananya
  *   npm run backfill:sales -- --resume           # HANYA isi lubang: pasangan yang belum punya data
  *   npm run backfill:sales -- --segarkan=12      # tarik ulang yang datanya lebih tua dari 12 jam
@@ -37,37 +36,6 @@ function arg(name: string): string | undefined {
   // (mis. --mulai=Surabaya=2026-06-01,Medan=2026-06-01).
   return a?.slice(name.length + 3);
 }
-/**
- * Rentang bawaan kalau tidak disebutkan: 30 hari terakhir.
- *
- * Dulu bawaannya "seluruh rentang yang ada di database" — 267 hari untuk Pusat,
- * jadi sekali salah ketik berarti ±1 jam menarik ulang data yang sudah benar.
- * Riwayat panjang tetap bisa ditarik, tapi harus diminta: --penuh atau --days=N.
- */
-const HARI_BAWAAN = 30;
-
-/**
- * Nama area yang TIDAK BOLEH dipakai.
- *
- * OCS menerima area=All, dan hasilnya menggoda karena satu panggilan saja. Tapi
- * cakupannya ditentukan akunnya, bukan parameternya: dengan akun ADMIN, All cuma
- * mengembalikan Pusat — diam-diam, tanpa error. Data seolah lengkap padahal 4
- * kota hilang. Keputusan user 25 Sep 2026: simpan per kota, jangan pernah All.
- */
-const TERLARANG = new Set(['all', 'semua', '']);
-const saringArea = (daftar: string[], asal: string): string[] => {
-  const buruk = daftar.filter((a) => TERLARANG.has(a.trim().toLowerCase()));
-  if (buruk.length) {
-    console.error(`\nArea terlarang di ${asal}: ${buruk.map((b) => JSON.stringify(b)).join(', ')}`);
-    console.error('Penarikan harus per kota. area=All mengembalikan cakupan yang ditentukan');
-    console.error('akun OCS, bukan parameternya — dengan akun tertentu hanya Pusat yang keluar,');
-    console.error('tanpa error, dan 4 kota hilang diam-diam. Sebutkan namanya satu per satu.');
-    process.exitCode = 1;
-    return [];
-  }
-  return daftar;
-};
-
 const rp = (n: number) => n.toLocaleString('id-ID');
 const jam = (ms: number) => {
   const d = Math.round(ms / 1000);
@@ -110,7 +78,7 @@ async function main() {
     from = arg('from')!; to = arg('to')!; asal = 'rentang dari argumen';
   } else if (arg('days')) {
     to = kemarin; from = addDays(to, -(Number(arg('days')) - 1)); asal = `${arg('days')} hari terakhir`;
-  } else if (process.argv.includes('--penuh')) {
+  } else {
     const batas = await prisma.salesDaily.aggregate({ _min: { salesDate: true }, _max: { salesDate: true } });
     if (!batas._min.salesDate) {
       console.error('Database penjualan masih kosong. Sebutkan rentangnya: --from=YYYY-MM-DD --to=YYYY-MM-DD');
@@ -118,18 +86,11 @@ async function main() {
     }
     from = toDateKeyUtc(batas._min.salesDate);
     to = kemarin > toDateKeyUtc(batas._max.salesDate!) ? kemarin : toDateKeyUtc(batas._max.salesDate!);
-    asal = 'seluruh rentang yang sudah ada di database (--penuh)';
-  } else {
-    to = kemarin; from = addDays(to, -(HARI_BAWAAN - 1));
-    asal = `${HARI_BAWAAN} hari terakhir (bawaan)`;
+    asal = 'seluruh rentang yang sudah ada di database';
   }
 
   console.log(`Akun OCS: ${ocsUser()}`);
   let daftarArea = arg('areas')?.split(',').map((v) => v.trim()).filter(Boolean) ?? [];
-  if (arg('areas')) {
-    daftarArea = saringArea(daftarArea, '--areas');
-    if (!daftarArea.length) return;
-  }
   if (!daftarArea.length) {
     if (verify) {
       daftarArea = settings.salesPullAreas;
@@ -141,9 +102,6 @@ async function main() {
     }
   }
   if (!daftarArea.length) { console.error('Tidak ada area.'); process.exitCode = 1; return; }
-  // Sumbernya boleh apa saja — argumen, Pengaturan, atau OCS — saringannya sama.
-  daftarArea = saringArea(daftarArea, arg('areas') ? '--areas' : verify ? 'Pengaturan sales_pull_areas' : 'daftar area OCS');
-  if (!daftarArea.length) return;
   console.log(`  ${daftarArea.length} area: ${daftarArea.join(', ')}`);
 
   // Tanggal mulai operasional per area: dari argumen kalau ada, kalau tidak dari Pengaturan.
@@ -263,9 +221,6 @@ async function main() {
              : segarkanJam > 0 ? `data lebih tua dari ${segarkanJam} jam`
              : 'SELURUH rentang — tarik ulang penuh';
   console.log(`  mode        : ${mode}`);
-  if (asal.includes('bawaan')) {
-    console.log(`  (bawaan ${HARI_BAWAAN} hari — untuk riwayat lebih panjang: --days=N, --from/--to, atau --penuh)`);
-  }
   console.log(`  akan ditarik: ${antre.length} pasangan${antre.length < semua.length ? ` (${semua.length - antre.length} dilewati, sudah punya data)` : ''}`);
   if (!resume && segarkanJam <= 0 && semua.length > 30) {
     console.log('\n  PERHATIAN: ini menarik ulang semua, bukan mengisi lubang.');
@@ -326,23 +281,12 @@ async function main() {
        FROM sales_daily WHERE salesDate BETWEEN ? AND ? GROUP BY areaId ORDER BY SUM(qty) DESC`,
     keyToUtcDate(from), keyToUtcDate(to),
   );
-  // Seluruh database, di luar rentang yang baru ditarik. Wajib ikut ditampilkan:
-  // sejak bawaannya jadi 30 hari, angka rentang saja bikin panik — 37.900 baris
-  // terbaca seperti "riwayat 174.010 baris hilang" padahal cuma beda cakupan.
-  const sAll = (await prisma.$queryRawUnsafe<{ baris: bigint; qty: bigint; cancel: bigint; area: bigint; awal: Date | null; akhir: Date | null }[]>(
-    `SELECT COUNT(*) AS baris, COALESCE(SUM(qty),0) AS qty, COALESCE(SUM(qtyCancel),0) AS cancel,
-            COUNT(DISTINCT areaId) AS area, MIN(salesDate) AS awal, MAX(salesDate) AS akhir
-       FROM sales_daily`,
-  ))[0];
-
   const hariPerArea = new Map<string, number>();
   for (const t of semua) hariPerArea.set(t.area, (hariPerArea.get(t.area) ?? 0) + 1);
 
   console.log(`\nSelesai dalam ${jam(Date.now() - t0)} — ${rp(rowsTulis)} baris ditulis.`);
-  console.log(`  dalam rentang ${from} s/d ${to}: ${rp(Number(s1.baris))} baris · qty ${rp(Number(s1.qty))} · batal ${rp(Number(s1.cancel))} · ${Number(s1.area)} area`);
-  console.log(`  SELURUH database${sAll.awal ? ` (${toDateKeyUtc(sAll.awal)} s/d ${toDateKeyUtc(sAll.akhir!)})` : ''}: ` +
-    `${rp(Number(sAll.baris))} baris · qty ${rp(Number(sAll.qty))} · batal ${rp(Number(sAll.cancel))} · ${Number(sAll.area)} area`);
-  console.log(`\n  Per area DI DALAM RENTANG ${from} s/d ${to} (hari terisi / hari yang memang dicakup):`);
+  console.log(`  total sekarang: ${rp(Number(s1.baris))} baris · qty ${rp(Number(s1.qty))} · batal ${rp(Number(s1.cancel))} · ${Number(s1.area)} area`);
+  console.log('\n  Per area (hari terisi / hari yang memang dicakup):');
   console.table(perArea.map((r) => ({
     area: r.areaId, hari: `${Number(r.hari)}/${hariPerArea.get(r.areaId) ?? '?'}`, baris: Number(r.baris),
     qty: Number(r.qty), batal: Number(r.cancel),

@@ -14,7 +14,8 @@ export async function GET(req: Request) {
   if (token && new URL(req.url).searchParams.get('key') !== token) {
     return NextResponse.json({ ok: false, error: 'Kunci dashboard salah' }, { status: 401 });
   }
-  const [snap, settings] = await Promise.all([latestSnapshot(), getSettingsMap()]);
+  const area = new URL(req.url).searchParams.get('area')?.trim() || null;
+  const [snap, settings] = await Promise.all([latestSnapshot(area), getSettingsMap()]);
   const rows = snap.rows.map((r) => ({
     sku: r.sku, name: r.name, abc: r.abcClass, stock: r.availableQty, transit: r.transitQty,
     ads1: r.ads1, ads2: r.ads2, doi1: r.doi1, doi2: r.doi2, refDoi: r.refDoi, refDoiT: r.refDoiTransit,

@@ -55,6 +55,8 @@ model SalesDaily {
   sku        String   @db.VarChar(120)
   areaId     String   @db.VarChar(60)
   qty        Int      @default(0)
+  /** Qty dari order yang TIDAK memakan stok: NA, UNPAID, IN_CANCEL, CANCELLED. */
+  qtyCancel  Int      @default(0)
   qtyShopee  Int      @default(0)
   qtyTiktok  Int      @default(0)
   qtyTokped  Int      @default(0)
@@ -72,15 +74,94 @@ model SalesDaily {
 
 /// Stok dalam perjalanan — satu angka per SKU. Unggahan bersifat REPLACE:
 /// seluruh isi tabel diganti dengan isi berkas terakhir.
+/// Catatan bahwa satu pasangan (tanggal, area) PERNAH ditarik — termasuk
+/// ketika hasilnya nol baris.
+///
+/// Tanpa tabel ini, "tidak ada baris" dan "belum pernah ditarik" tidak bisa
+/// dibedakan. Akibatnya nyata: cabang Medan & Makassar memang belum berjualan
+/// di awal Juni, hasilnya 0 baris, dan `--verify` melaporkannya sebagai 30
+/// lubang yang tidak pernah bisa ditambal — sementara `--resume` menarik ulang
+/// hari-hari itu setiap kali dijalankan, selamanya.
+model SalesPull {
+  salesDate DateTime @db.Date
+  areaId    String   @db.VarChar(60)
+  /// Jumlah baris hasil penarikan. BUKAN bernama `rows`: itu kata cadangan di
+  /// MySQL 8 / TiDB (fungsi window), dan query-nya gagal dengan error 1064.
+  rowCount  Int      @default(0)
+  pulledAt  DateTime @default(now())
+
+  @@id([salesDate, areaId])
+  @@map("sales_pull")
+}
+
+/// Barang dalam perjalanan (SIT), satu baris per SKU per gudang tujuan.
+///
+/// Kuncinya (sku, areaId) — bukan sku saja. Barang yang menuju Surabaya adalah
+/// stok Surabaya, bukan stok perusahaan tanpa alamat; tanpa areaId, transit ke
+/// lima kota saling menimpa dan DOI per area mustahil dibuat.
 model TransitStock {
-  sku        String    @id @db.VarChar(120)
+  sku        String    @db.VarChar(120)
+  areaId     String    @default("Pusat") @db.VarChar(60)
   qty        Int       @default(0)
   eta        DateTime? @db.Date
   note       String?   @db.VarChar(300)
   batchId    String?   @db.VarChar(40)
+  /// ocs = ditarik dari /api/receive-stock dan ditimpa tiap sinkronisasi.
+  /// manual = diunggah orang, tidak pernah disentuh sinkronisasi.
+  source     String    @default("manual") @db.VarChar(10)
+  /// Nomor DO OCS, untuk menelusuri baris ini kembali ke dokumennya.
+  docNums    String?   @db.VarChar(300)
+  /// Jumlah versi BatchQuantity — disimpan sebagai pembanding, tidak dipakai DOI.
+  qtyBatch   Int       @default(0)
   updatedAt  DateTime  @default(now()) @updatedAt
 
+  @@id([sku, areaId])
+  @@index([areaId, source])
   @@map("transit_stock")
+}
+
+/// Cache baris satu dokumen Receive OCS.
+///
+/// Satu dokumen butuh ±5,5 dtk untuk ditarik, dan ada ±20 dokumen — total ±110
+/// dtk, jauh di atas batas 60 dtk satu fungsi Vercel. Tanpa cache, tombol
+/// Refresh selalu berhenti di tengah: dokumen yang tersisa tidak pernah terbaca,
+/// pembersihan dilewati terus, dan setiap klik memulai dari dokumen pertama lagi
+/// sehingga tidak pernah maju.
+///
+/// Dengan cache, klik pertama mengisi sebagian, klik berikutnya hanya menarik
+/// dokumen yang belum ada, dan sesudah itu sinkronisasi selesai dalam hitungan
+/// detik. Isi dokumen Receive praktis tidak berubah setelah dibuat, jadi yang
+/// penting hanya mendeteksi dokumen BARU — dan itu datang dari daftar dokumen
+/// yang selalu ditarik ulang.
+model ReceiveDoc {
+  docNum    Int      @id
+  /// Baris mentah apa adanya dari OCS, JSON.
+  lines     String   @db.LongText
+  lineCount Int      @default(0)
+  pulledAt  DateTime @default(now())
+
+  @@index([pulledAt])
+  @@map("receive_doc")
+}
+
+/// Isi satu karton per SKU. Dipakai HANYA untuk menampilkan "39 ctn 32 pcs";
+/// total pcs selalu datang dari DoQty, tidak pernah dari perkalian ini.
+///
+/// `fromOcs` = PerCtnQty dari OCS (sering 0), `fromName` = angka setelah " x "
+/// di akhir nama produk. `manual` menang atas keduanya kalau diisi.
+model SkuBox {
+  sku       String   @id @db.VarChar(120)
+  perCtn    Int      @default(0)
+  fromOcs   Int      @default(0)
+  fromName  Int      @default(0)
+  manual    Int?
+  /// true bila fromOcs dan fromName sama-sama ada tapi BERBEDA — tanda master
+  /// OCS atau penamaan produknya perlu dibetulkan.
+  mismatch  Boolean  @default(false)
+  name      String   @default("") @db.VarChar(500)
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@map("sku_box")
 }
 
 /// Master per SKU: lead time kirim (hari) dan penanda dikecualikan.
@@ -127,6 +208,8 @@ model ExclusionDate {
 /// Hasil perhitungan DOI per SKU per hari. Baris hari ini ditimpa oleh Refresh.
 model DoiSnapshot {
   snapshotDate   DateTime @db.Date
+  /// Area yang dihitung. `GABUNGAN` = seluruh kota dijumlahkan jadi satu angka.
+  areaId         String   @default("Pusat") @db.VarChar(60)
   sku            String   @db.VarChar(120)
   name           String   @default("") @db.VarChar(500)
   sapCode        String?  @db.VarChar(60)
@@ -171,19 +254,24 @@ model DoiSnapshot {
   unitPrice      Int      @default(0)
   computedAt     DateTime @default(now())
 
-  @@id([snapshotDate, sku])
-  @@index([snapshotDate, status])
+  @@id([snapshotDate, areaId, sku])
+  @@index([snapshotDate, areaId, status])
   @@index([sku, snapshotDate])
   @@map("doi_snapshot")
 }
 
 /// Ringkasan satu perhitungan (KPI + parameter yang dipakai), satu baris per hari.
+/// Ringkasan per (tanggal, area). Area khusus `GABUNGAN` menyimpan hasil
+/// seluruh kota dijumlahkan — dihitung sekali dan disimpan, bukan dijumlahkan
+/// ulang tiap halaman dibuka.
 model DoiSummary {
-  snapshotDate DateTime @id @db.Date
+  snapshotDate DateTime @db.Date
+  areaId       String   @default("Pusat") @db.VarChar(60)
   computedAt   DateTime @default(now())
   trigger      String   @default("cron") @db.VarChar(20)
   payload      String   @db.Text
 
+  @@id([snapshotDate, areaId])
   @@map("doi_summary")
 }
 

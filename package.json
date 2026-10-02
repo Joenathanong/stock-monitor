@@ -20,6 +20,7 @@
     "check:db": "tsx scripts/check-db.ts",
     "check:ocs": "tsx scripts/check-ocs.ts",
     "check:areas": "tsx scripts/check-areas.ts",
+    "check:transit": "tsx scripts/check-transit-area.ts",
     "sync:stock": "tsx scripts/sync-stock.ts",
     "sync:transit": "tsx scripts/sync-transit.ts",
     "sync:sales": "tsx scripts/sync-sales.ts",

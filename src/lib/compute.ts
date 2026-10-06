@@ -9,6 +9,8 @@ import { assignAbc, computeSku, summarize, type DoiResult, type HealthSummary } 
 import { sapKey } from './phase-out';
 import { buildExclusionMap } from './exclusion';
 import { AREA_GABUNGAN, labelArea } from './areas';
+import { ambangDoi } from './area-master';
+import { muatArea } from './area-store';
 import { addDays, keyToUtcDate, todayKey, toDateKeyUtc, type DateKey } from './dates';
 import { acquireLock, finishLog, lockOwner, releaseLock, startLog, syncPrices, syncStock, syncTransit, STALE_LOCK_MINUTES } from './sync';
 import { budget, defaultBudgetMs, Timeline } from './budget';
@@ -148,7 +150,33 @@ export async function computeAll(area: string, now = new Date()): Promise<Comput
     { paydayDay: settings.paydayDay, excludeDoubleDates: settings.excludeDoubleDates },
     manualEx.map((m) => ({ date: toDateKeyUtc(m.date), reason: m.reason })),
   );
-  const ctx = { today, exclusionDates: new Set(exclusionMap.keys()), earliestDataDate: sales.earliestDataDate };
+  // Ambang DOI area ini. Dicocokkan lewat NAMA, karena `area` di sini adalah
+  // nama yang dipakai stock_current/sales_daily, bukan kode gudang.
+  //
+  // GABUNGAN sengaja TIDAK memakai ambang area mana pun: pitanya berbeda jauh
+  // antar kota (Pusat 4/5/7 vs Makassar 14/31/45), jadi memakai salah satunya
+  // untuk angka gabungan akan salah untuk semua yang lain. Gabungan jatuh ke
+  // pengaturan global, dan itu harus terbaca jelas di layar gabungan.
+  let ambang = null as ReturnType<typeof ambangDoi> | null;
+  if (area !== AREA_GABUNGAN) {
+    const baris = (await muatArea()).find((a) => a.name === area) ?? null;
+    // Hanya dipakai kalau area ini BENAR-BENAR punya ambang sendiri. Kalau
+    // belum diisi, ctx.ambang tetap null supaya perilaku lama (relatif terhadap
+    // lead time) dipertahankan apa adanya.
+    if (baris && (baris.doiCritical !== null || baris.doiMin !== null || baris.doiMax !== null)) {
+      ambang = ambangDoi(baris, {
+        kritis: settings.defaultLeadTimeDays,
+        min: settings.defaultLeadTimeDays + settings.safetyDays,
+        max: settings.targetDoiDays,
+      });
+    }
+  }
+  const ctx = {
+    today,
+    exclusionDates: new Set(exclusionMap.keys()),
+    earliestDataDate: sales.earliestDataDate,
+    ambang,
+  };
 
   // Satu SKU bisa punya beberapa baris transit (OCS + manual, atau beberapa
   // gudang saat GABUNGAN) — dijumlahkan, bukan yang terakhir menang.

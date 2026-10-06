@@ -1,20 +1,28 @@
 /**
  * Saran Open PO — modul murni: tanpa jaringan, tanpa database.
  *
- * Kebutuhan tiap SKU sudah dihitung mesin DOI (`suggested1/2` =
- * ceil(target DOI × ADS − stok − transit)). Modul ini mengerjakan tiga hal yang
- * TIDAK dikerjakan mesin DOI:
+ * Kebutuhan tiap SKU sudah dihitung mesin DOI. Modul ini mengerjakan tiga hal
+ * yang TIDAK dikerjakan mesin DOI:
  *
- *   1. membatasi saran dengan stok yang benar-benar ada di GBJD (Gudang Pusat
- *      EJI), kolom "Balance (With SQ)";
+ *   1. membatasi saran dengan stok yang benar-benar ada di gudang pemasok
+ *      (GBJD-nya EJI, kolom "Balance (With SQ)");
  *   2. membulatkan ke KARTON, karena barang dikirim per karton;
- *   3. membagi ke dua kode SAP: prefiks 122 dulu, sisanya 120.
+ *   3. membagi ke BEBERAPA kode SAP menurut prioritas.
  *
- * Aturan pembulatan (dari permintaan 25 Sep 2026, dipertahankan kata per kata):
+ * PERUBAHAN 2 Okt 2026 — dari dua slot jadi daftar berprioritas.
+ * Versi sebelumnya mengunci tepat dua kode (`saldo122`/`saldo120`). Itu sah
+ * selama satu produk hanya punya dua wadah dan keduanya bisa dikenali dari
+ * prefiks kodenya. Dua hal membatalkannya: satu produk bisa punya lebih dari
+ * dua kode SAP, dan ada produk yang 6 digit terakhirnya TIDAK lagi sama antar
+ * wadah — jadi hubungan antar kode harus dipetakan (tabel `sku_link`), bukan
+ * disimpulkan dari bentuk kode. Urutan 122-dulu-lalu-120 sekarang cuma kasus
+ * khusus dari `priority`.
+ *
+ * Aturan pembulatan (permintaan 25 Sep 2026, dipertahankan kata per kata):
  *   - "semua sugest open PO full karton" → kebutuhan dibulatkan NAIK ke karton
- *   - "kode awal 122 dulu full karton" → ambil karton utuh dari 122 lebih dulu
+ *   - "kode awal 122 dulu full karton" → ambil karton utuh dari prioritas teratas
  *   - "jika kurang … sisanya ke 120, jika receh maka roundup 1 karton" →
- *     sisanya dari 120, pecahan karton dibulatkan naik
+ *     sisanya dari prioritas berikutnya, pecahan karton dibulatkan naik
  *   - "jika kosong atau hanya ada 1 kode tapi jumlah kurang, maka round down" →
  *     tidak bisa dipenuhi penuh: ambil karton utuh yang ada, sisanya dilaporkan
  *   - "jika stock kurang dari 1 karton dan doi sudah tipis, proses saja
@@ -26,49 +34,98 @@
 /** Status DOI yang dianggap "tipis" — boleh dikirim pecahan karton. */
 export const STATUS_TIPIS = new Set(['CRITICAL', 'LOW']);
 
+/**
+ * Satu SUMBER barang = satu kode SAP di satu gudang pemasok.
+ *
+ * Sejak 2 Okt 2026 ada dua gudang (GBJD2 dan GBJD), jadi satu kode SAP bisa
+ * punya saldo di dua tempat sekaligus. Masing-masing jadi sumber sendiri dengan
+ * saldonya sendiri — menjumlahkan keduanya akan menjanjikan karton dari gudang
+ * yang sebenarnya tidak memilikinya, dan baris PO tidak bisa menyebut barangnya
+ * diambil dari mana.
+ */
+export type KodeSumber = {
+  sapCode: string;
+  /** Kecil = diambil lebih dulu. Dari `sku_link.priority`. */
+  priority: number;
+  /** Gudang pemasok asal saldo ini (mis. GBJD2). Kosong = tanpa pembedaan gudang. */
+  supplierWhs?: string;
+  /**
+   * Urutan gudang; kecil = diperiksa lebih dulu. Dari urutan `EJI_WHS`.
+   *
+   * KEPUTUSAN USER 2 Okt 2026: GUDANG yang menentukan lebih dulu, kode kedua.
+   * Jadi GBJD2 dihabiskan dulu apa pun kodenya, baru pindah ke GBJD. Akibatnya
+   * kode 120 dari GBJD2 bisa terkirim walau 122 masih ada di GBJD — aturan
+   * "122 dulu" berlaku DI DALAM satu gudang, tidak lintas gudang. Ini disengaja.
+   */
+  whsPriority?: number;
+  /**
+   * Isi satu karton (pcs) untuk kode INI. 0 = tidak diketahui.
+   *
+   * Sengaja per kode: dari 51 pasangan kode di GBJD (28 Sep 2026), 35 pasangan
+   * isi kartonnya TIDAK sama — mis. "Power Bright Expert Serum 20ml x 64 - IEG"
+   * (122) vs "… 20ml x 48" (120). Satu angka untuk semuanya membuat jumlah
+   * kiriman salah tanpa ada yang kelihatan keliru.
+   */
+  perCtn: number;
+  /** Balance (With SQ) di gudang pemasok. */
+  saldo: number;
+};
+
 export type BarisOpenPo = {
+  /** Kunci produk logis — beberapa kode SAP bisa menunjuk produk yang sama. */
+  groupKey: string;
+  /** SKU OCS yang DOI-nya dihitung. */
   sku: string;
   name: string;
   areaId: string;
   /** Kebutuhan dalam pcs, dari saran mesin DOI. */
   need: number;
   status: string;
-  /** DOI acuan — dipakai mengurutkan kemendesakan saat stok GBJD terbatas. */
+  /** DOI acuan — dipakai mengurutkan kemendesakan saat saldo terbatas. */
   doi: number | null;
+  /** Kode sumber, urutan bebas: modul ini yang mengurutkannya menurut priority. */
+  kode: KodeSumber[];
   /**
-   * Isi satu karton (pcs) untuk MASING-MASING kode. 0 = tidak diketahui.
+   * Batas atas qty (pcs) supaya posisi stok tidak melewati DOI max area.
    *
-   * Dipisah karena memang berbeda: dari 51 pasangan kode di GBJD (28 Sep 2026),
-   * 35 pasangan isi kartonnya tidak sama — mis. "Power Bright Expert Serum
-   * 20ml x 64 - IEG" (122) vs "… 20ml x 48" (120). Memakai satu angka untuk
-   * keduanya membuat jumlah kiriman salah tanpa ada yang kelihatan keliru.
+   * DITAMBAHKAN 5 Okt 2026 setelah data GBJD nyata terbaca. Isi karton di
+   * lapangan bukan 48–144 seperti contoh awal: Naturgo Peel Off Mask isinya
+   * **1000 pcs/karton**. Tanpa batas atas, `Math.ceil(sisa / perCtn)` pada
+   * kebutuhan 50 pcs menyarankan 1 karton = 1000 pcs — 20x kebutuhan, dan DOI
+   * langsung melesat jauh di atas max. Jadi "full box" HARUS dibandingkan
+   * dengan DOI max, bukan hanya DOI min.
+   *
+   * Dihitung PEMANGGIL (mesin DOI yang tahu ADS & stok sekarang), bukan di
+   * sini: modul ini tidak boleh tahu soal ADS.
+   *
+   * undefined / <= 0 = tanpa batas (perilaku lama dipertahankan).
    */
-  perCtn122: number;
-  perCtn120: number;
-  /** Balance (With SQ) di GBJD untuk kode berprefiks 122. */
-  saldo122: number;
-  /** Balance (With SQ) di GBJD untuk kode berprefiks 120. */
-  saldo120: number;
-  sap122?: string | null;
-  sap120?: string | null;
+  maxQty?: number;
 };
 
 export type AlasanPo =
   | 'OK'                 // kebutuhan terpenuhi penuh, karton utuh
-  | 'KURANG'             // stok GBJD tidak cukup; diambil karton utuh yang ada
+  | 'KURANG'             // saldo tidak cukup; diambil karton utuh yang ada
   | 'PECAHAN_TIPIS'      // < 1 karton, tapi DOI tipis → tetap diproses
-  | 'KOSONG'             // saldo GBJD ≤ 0
+  | 'KOSONG'             // saldo ≤ 0
   | 'TIDAK_PERLU'        // kebutuhan ≤ 0
-  | 'TANPA_ISI_KARTON';  // isi karton tidak diketahui → dikirim apa adanya
+  | 'TANPA_ISI_KARTON'   // isi karton tidak diketahui → dikirim apa adanya
+  | 'DIBATASI_DOI_MAX'   // dibulatkan TURUN supaya tidak melewati DOI max
+  | 'KARTON_LEBIH_DARI_MAX'; // 1 karton saja sudah melewati DOI max
+
+/** Berapa yang diambil dari satu kode. */
+export type AmbilKode = {
+  sapCode: string;
+  /** Gudang asal barang ini — tanpa ini baris PO tidak bisa dieksekusi orang gudang. */
+  supplierWhs?: string;
+  perCtn: number;
+  ctn: number;
+  qty: number;
+};
 
 export type HasilOpenPo = BarisOpenPo & {
-  /** Karton dari tiap kode — isi kartonnya bisa berbeda, jadi dilaporkan terpisah. */
-  ctn122: number;
-  ctn120: number;
-  /** Qty yang disarankan dari kode 122 (pcs). */
-  qty122: number;
-  /** Qty yang disarankan dari kode 120 (pcs). */
-  qty120: number;
+  /** Hanya kode yang benar-benar dipakai (qty > 0), berurut priority. */
+  ambil: AmbilKode[];
   qtyTotal: number;
   /** Jumlah karton utuh dalam qtyTotal; pecahan tidak dihitung di sini. */
   ctnTotal: number;
@@ -80,81 +137,188 @@ export type HasilOpenPo = BarisOpenPo & {
 
 const bulat = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0);
 
+/**
+ * Urutan pengambilan: GUDANG dulu (`whsPriority`), lalu kode (`priority`),
+ * lalu urutan aslinya sebagai penentu terakhir supaya hasilnya selalu sama.
+ */
+const urutKode = (kode: KodeSumber[]) =>
+  [...kode].map((k, i) => ({ k, i }))
+    .sort((a, b) =>
+      ((a.k.whsPriority ?? 0) - (b.k.whsPriority ?? 0))
+      || (a.k.priority - b.k.priority)
+      || (a.i - b.i))
+    .map(({ k }) => ({
+      sapCode: k.sapCode,
+      priority: k.priority,
+      supplierWhs: k.supplierWhs,
+      whsPriority: k.whsPriority,
+      perCtn: bulat(k.perCtn),
+      saldo: bulat(k.saldo),
+    }));
+
+/** Kunci saldo: satu kode di dua gudang adalah DUA saldo, bukan satu. */
+const kunciSaldo = (k: { sapCode: string; supplierWhs?: string }) =>
+  `${k.supplierWhs ?? ''}\u0000${k.sapCode}`;
+
+/** Label sumber untuk keterangan: "GBJD2/1222…" kalau gudangnya diketahui. */
+const labelSumber = (k: { sapCode: string; supplierWhs?: string }) =>
+  (k.supplierWhs ? `${k.supplierWhs}/${k.sapCode}` : k.sapCode);
+
 /** Hitung saran untuk SATU baris. Murni, tidak menyentuh apa pun di luar. */
 export function hitungBaris(b: BarisOpenPo): HasilOpenPo {
   const need = bulat(b.need);
-  const c122 = bulat(b.perCtn122);
-  const c120 = bulat(b.perCtn120);
-  const s122 = bulat(b.saldo122);
-  const s120 = bulat(b.saldo120);
-  const dasar = { ...b, qty122: 0, qty120: 0, qtyTotal: 0, ctn122: 0, ctn120: 0, ctnTotal: 0, kurang: 0 };
+  const kode = urutKode(b.kode ?? []);
+  const totalSaldo = kode.reduce((a, k) => a + k.saldo, 0);
+  const dasar = { ...b, ambil: [] as AmbilKode[], qtyTotal: 0, ctnTotal: 0, kurang: 0 };
 
-  if (need <= 0) {
-    return { ...dasar, alasan: 'TIDAK_PERLU', keterangan: '' };
-  }
+  if (need <= 0) return { ...dasar, alasan: 'TIDAK_PERLU', keterangan: '' };
+
   // "jika jumlah <0 maka tidak ada angka sugest PO" — saldo nol pun sama saja:
   // tidak ada yang bisa diambil.
-  if (s122 + s120 <= 0) {
+  if (totalSaldo <= 0) {
     return { ...dasar, kurang: need, alasan: 'KOSONG', keterangan: 'Stock GBJD Kosong' };
   }
-  // Tanpa isi karton di KEDUA kode, pembulatan karton mustahil. Dikirim apa
+
+  /** Ambil apa adanya dalam pcs, berurut prioritas — tanpa pembulatan karton. */
+  const ambilPcs = (): AmbilKode[] => {
+    let sisa = need;
+    const out: AmbilKode[] = [];
+    for (const k of kode) {
+      if (sisa <= 0) break;
+      const qty = Math.min(sisa, k.saldo);
+      if (qty > 0) { out.push({ sapCode: k.sapCode, supplierWhs: k.supplierWhs, perCtn: k.perCtn, ctn: 0, qty }); sisa -= qty; }
+    }
+    return out;
+  };
+  const jumlah = (a: AmbilKode[]) => a.reduce((x, k) => x + k.qty, 0);
+
+  // Tanpa isi karton di SEMUA kode, pembulatan karton mustahil. Dikirim apa
   // adanya dan ditandai, bukan ditebak — menebak isi karton berarti menebak
   // jumlah kiriman.
-  if (c122 <= 0 && c120 <= 0) {
-    const a = Math.min(need, s122);
-    const c = Math.min(need - a, s120);
+  if (!kode.some((k) => k.perCtn > 0)) {
+    const ambil = ambilPcs();
+    const total = jumlah(ambil);
     return {
-      ...dasar, qty122: a, qty120: c, qtyTotal: a + c,
-      kurang: Math.max(0, need - a - c),
+      ...dasar, ambil, qtyTotal: total, kurang: Math.max(0, need - total),
       alasan: 'TANPA_ISI_KARTON',
       keterangan: 'Isi karton tidak diketahui — qty dalam pcs',
     };
   }
 
-  // "kode awal 122 dulu full karton" — dengan isi karton milik 122 sendiri.
-  const ctn122 = c122 > 0 ? Math.min(Math.ceil(need / c122), Math.floor(s122 / c122)) : 0;
-  const qty122 = ctn122 * c122;
+  // Jalur utama: karton utuh, sumber teratas dulu (gudang lalu kode), sisanya
+  // ke sumber berikutnya.
+  // Contoh user 2 Okt 2026: need 96, kode A isi 48 saldo 50, kode B isi 12 →
+  // A: min(ceil(96/48), floor(50/48)) = min(2,1) = 1 ctn = 48 pcs; sisa 48 →
+  // B: ceil(48/12) = 4 ctn = 48 pcs. Total 96, semuanya full box.
+  //
+  // Batas atas DOI max (lihat BarisOpenPo.maxQty). Tanpa batas kalau <= 0.
+  const maxQty = bulat(b.maxQty ?? 0);
+  const adaBatas = maxQty > 0;
+  // Kalau batasnya lebih kecil dari kebutuhan, kebutuhanlah yang menang: DOI
+  // min dan DOI max tidak boleh saling mengunci sampai tidak ada yang dikirim.
+  const plafon = adaBatas ? Math.max(maxQty, need) : Infinity;
 
-  // "sisanya ke 120, jika receh maka roundup 1 karton" — ceil() inilah roundup-nya,
-  // dan isi kartonnya milik 120, yang sering berbeda dari 122.
-  const sisa = Math.max(0, need - qty122);
-  const ctn120 = sisa > 0 && c120 > 0 ? Math.min(Math.ceil(sisa / c120), Math.floor(s120 / c120)) : 0;
-  const qty120 = ctn120 * c120;
+  const ambil: AmbilKode[] = [];
+  let sisa = need;
+  let dibatasi = false;   // pernah dibulatkan TURUN karena plafon
+  for (const k of kode) {
+    if (sisa <= 0 || k.perCtn <= 0) continue;
+    const sudah = ambil.reduce((a, x) => a + x.qty, 0);
+    const naik = Math.ceil(sisa / k.perCtn);               // "full box", bulat naik
+    const adaStok = Math.floor(k.saldo / k.perCtn);        // yang benar-benar ada
+    // Karton yang masih masuk plafon. Kalau bulat-naik melewatinya, pakai yang
+    // masih masuk — itulah "bulat TURUN" yang dimaksud.
+    const masukPlafon = plafon === Infinity
+      ? naik
+      : Math.floor(Math.max(0, plafon - sudah) / k.perCtn);
+    const ctn = Math.min(naik, adaStok, masukPlafon);
+    if (ctn < Math.min(naik, adaStok)) dibatasi = true;
+    if (ctn <= 0) continue;
+    const qty = ctn * k.perCtn;
+    ambil.push({ sapCode: k.sapCode, supplierWhs: k.supplierWhs, perCtn: k.perCtn, ctn, qty });
+    sisa -= qty;
+  }
 
-  const ctnTotal = ctn122 + ctn120;
+  const ctnTotal = ambil.reduce((a, k) => a + k.ctn, 0);
   if (ctnTotal > 0) {
-    const total = qty122 + qty120;
+    const total = jumlah(ambil);
     const cukup = total >= need;
-    const rinci = [ctn122 ? `122: ${ctn122} ctn×${c122}` : '', ctn120 ? `120: ${ctn120} ctn×${c120}` : '']
-      .filter(Boolean).join(', ');
+    const rinci = ambil.map((k) => `${labelSumber(k)}: ${k.ctn} ctn×${k.perCtn}`).join(', ');
+    if (!cukup && dibatasi) {
+      // Sebut batas yang BENAR-BENAR mengikat. Kalau plafon berasal dari
+      // `need` (karena maxQty lebih kecil dari kebutuhan), menyebut "DOI max
+      // 400" padahal yang dikirim 432 adalah pesan yang berbohong — ketemu
+      // lewat tes 5 Okt 2026.
+      const dariMax = plafon === maxQty;
+      return {
+        ...dasar, ambil, qtyTotal: total, ctnTotal, kurang: need - total,
+        alasan: 'DIBATASI_DOI_MAX',
+        keterangan: dariMax
+          ? `Dibulatkan turun agar tidak melewati DOI max (batas ${maxQty} pcs) — ${rinci}`
+          : `Dibulatkan turun agar tidak melebihi kebutuhan ${need} pcs sebanyak 1 karton `
+            + `(DOI max ${maxQty} pcs lebih kecil dari kebutuhan, jadi kebutuhan yang dipakai) — ${rinci}`,
+      };
+    }
     return {
-      ...dasar, qty122, qty120, qtyTotal: total, ctn122, ctn120, ctnTotal,
+      ...dasar, ambil, qtyTotal: total, ctnTotal,
       kurang: cukup ? 0 : need - total,
       alasan: cukup ? 'OK' : 'KURANG',
       keterangan: cukup ? rinci : `Stok GBJD kurang — ${rinci || '0 ctn'}, kurang ${need - total} pcs`,
     };
   }
 
-  // Sampai sini: dua-duanya kurang dari satu karton, tapi saldonya tidak nol.
-  // "jika stock kurang dari 1 karton dan doi sudah tipis proses saja".
-  if (STATUS_TIPIS.has(b.status)) {
-    const a = Math.min(need, s122);
-    const c = Math.min(need - a, s120);
+  // Tidak ada karton utuh YANG MASUK PLAFON, padahal stoknya ada dan kartonnya
+  // diketahui. Artinya satu karton terkecil pun sudah melewati DOI max —
+  // kasus Naturgo: karton 1000 pcs, kebutuhan 50.
+  //
+  // Dua-duanya merugikan, jadi dipilih berdasarkan kemendesakan dan DILAPORKAN,
+  // tidak diputuskan diam-diam:
+  //   DOI tipis (CRITICAL/LOW) -> kirim 1 karton terkecil. Kehabisan barang
+  //     lebih mahal daripada kelebihan stok.
+  //   DOI tidak tipis          -> JANGAN kirim. Ditandai supaya orangnya yang
+  //     memutuskan, bukan sistem.
+  if (adaBatas && kode.some((k) => k.perCtn > 0 && k.saldo >= k.perCtn)) {
+    const muat = kode.filter((k) => k.perCtn > 0 && k.saldo >= k.perCtn)
+      .sort((x, y) => x.perCtn - y.perCtn)[0];
+    const lipat = Math.round((muat.perCtn / Math.max(1, need)) * 10) / 10;
+    if (STATUS_TIPIS.has(b.status)) {
+      const qty = muat.perCtn;
+      return {
+        ...dasar,
+        ambil: [{ sapCode: muat.sapCode, supplierWhs: muat.supplierWhs, perCtn: muat.perCtn, ctn: 1, qty }],
+        qtyTotal: qty, ctnTotal: 1, kurang: 0,
+        alasan: 'KARTON_LEBIH_DARI_MAX',
+        keterangan: `1 karton (${muat.perCtn} pcs) melewati DOI max, tapi DOI tipis (${b.status}) `
+          + `— tetap dikirim, ${lipat}x kebutuhan ${need} pcs`,
+      };
+    }
     return {
-      ...dasar, qty122: a, qty120: c, qtyTotal: a + c,
-      kurang: Math.max(0, need - a - c),
+      ...dasar, kurang: need,
+      alasan: 'KARTON_LEBIH_DARI_MAX',
+      keterangan: `TIDAK dikirim: karton terkecil ${muat.perCtn} pcs = ${lipat}x kebutuhan `
+        + `${need} pcs dan melewati DOI max (${maxQty} pcs). Putuskan manual.`,
+    };
+  }
+
+  // Sampai sini: tidak ada satu pun kode yang punya karton utuh, tapi saldonya
+  // tidak nol. "jika stock kurang dari 1 karton dan doi sudah tipis proses saja".
+  if (STATUS_TIPIS.has(b.status)) {
+    const pecah = ambilPcs();
+    const total = jumlah(pecah);
+    return {
+      ...dasar, ambil: pecah, qtyTotal: total, kurang: Math.max(0, need - total),
       alasan: 'PECAHAN_TIPIS',
       keterangan: `Kurang dari 1 karton, tapi DOI tipis (${b.status}) — tetap diproses`,
     };
   }
   return {
     ...dasar, kurang: need, alasan: 'KURANG',
-    keterangan: `Stok GBJD kurang dari 1 karton (${s122 + s120} pcs) dan DOI belum tipis`,
+    keterangan: `Stok GBJD kurang dari 1 karton (${totalSaldo} pcs) dan DOI belum tipis`,
   };
 }
 
 /**
- * Urutan pelayanan saat stok GBJD diperebutkan beberapa kota.
+ * Urutan pelayanan saat saldo pemasok diperebutkan beberapa kota.
  *
  * Paling mendesak didahulukan: CRITICAL, lalu LOW, lalu DOI terkecil. Tanpa
  * urutan yang tegas, kota yang kebetulan diproses duluan akan memborong stok
@@ -170,48 +334,57 @@ export type RingkasOpenPo = {
   baris: number;
   sku: number;
   qtyTotal: number;
-  qty122: number;
-  qty120: number;
-  ctn122: number;
-  ctn120: number;
   ctnTotal: number;
+  /** Qty & karton per (gudang, kode SAP) — menggantikan qty122/qty120 yang dulu dipatok dua. */
+  perKode: { sapCode: string; supplierWhs?: string; qty: number; ctn: number }[];
   kurang: number;
   kosong: number;
   pecahan: number;
 };
 
 /**
- * Hitung seluruh baris dengan stok GBJD yang DIPAKAI BERSAMA antar kota.
+ * Hitung seluruh baris dengan saldo pemasok yang DIPAKAI BERSAMA antar kota.
  *
- * Saldo dikurangi setiap kali dipakai, jadi satu karton tidak pernah
- * dijanjikan ke dua kota sekaligus — kesalahan yang baru ketahuan saat barang
- * tidak cukup di gudang.
+ * Saldo dikurangi setiap kali dipakai, jadi satu karton tidak pernah dijanjikan
+ * ke dua kota sekaligus — kesalahan yang baru ketahuan saat barang tidak cukup
+ * di gudang. Kuncinya kode SAP, bukan kota: satu kode melayani semua kota.
  */
 export function hitungSemua(rows: BarisOpenPo[]): { hasil: HasilOpenPo[]; ringkas: RingkasOpenPo } {
-  const sisa = new Map<string, { s122: number; s120: number }>();
+  const sisa = new Map<string, number>();
   for (const r of rows) {
-    // Saldo GBJD milik SKU, bukan milik kota — jadi dikunci per SKU.
-    if (!sisa.has(r.sku)) sisa.set(r.sku, { s122: bulat(r.saldo122), s120: bulat(r.saldo120) });
+    for (const k of r.kode ?? []) {
+      const kk = kunciSaldo(k);
+      if (!sisa.has(kk)) sisa.set(kk, bulat(k.saldo));
+    }
   }
 
   const hasil: HasilOpenPo[] = [];
   for (const r of [...rows].sort(urutKemendesakan)) {
-    const s = sisa.get(r.sku)!;
-    const h = hitungBaris({ ...r, saldo122: s.s122, saldo120: s.s120 });
-    s.s122 -= h.qty122;
-    s.s120 -= h.qty120;
+    const kode = (r.kode ?? []).map((k) => ({ ...k, saldo: sisa.get(kunciSaldo(k)) ?? bulat(k.saldo) }));
+    const h = hitungBaris({ ...r, kode });
+    for (const a of h.ambil) {
+      const kk = kunciSaldo(a);
+      sisa.set(kk, Math.max(0, (sisa.get(kk) ?? 0) - a.qty));
+    }
     hasil.push(h);
+  }
+
+  const perKode = new Map<string, { sapCode: string; supplierWhs?: string; qty: number; ctn: number }>();
+  for (const h of hasil) {
+    for (const a of h.ambil) {
+      const kk = kunciSaldo(a);
+      const e = perKode.get(kk) ?? { sapCode: a.sapCode, supplierWhs: a.supplierWhs, qty: 0, ctn: 0 };
+      e.qty += a.qty; e.ctn += a.ctn;
+      perKode.set(kk, e);
+    }
   }
 
   const ringkas: RingkasOpenPo = {
     baris: hasil.length,
     sku: new Set(hasil.filter((h) => h.qtyTotal > 0).map((h) => h.sku)).size,
     qtyTotal: hasil.reduce((a, h) => a + h.qtyTotal, 0),
-    qty122: hasil.reduce((a, h) => a + h.qty122, 0),
-    qty120: hasil.reduce((a, h) => a + h.qty120, 0),
-    ctn122: hasil.reduce((a, h) => a + h.ctn122, 0),
-    ctn120: hasil.reduce((a, h) => a + h.ctn120, 0),
     ctnTotal: hasil.reduce((a, h) => a + h.ctnTotal, 0),
+    perKode: [...perKode.values()].sort((a, b) => b.qty - a.qty),
     kurang: hasil.reduce((a, h) => a + h.kurang, 0),
     kosong: hasil.filter((h) => h.alasan === 'KOSONG').length,
     pecahan: hasil.filter((h) => h.alasan === 'PECAHAN_TIPIS').length,

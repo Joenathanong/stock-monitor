@@ -75,11 +75,27 @@ function berkasTs(dir: string, hasil: string[] = []): string[] {
   return hasil;
 }
 
-/** Potongan teks yang tampak seperti pernyataan SQL, dari literal apa pun. */
+/**
+ * Potongan teks yang tampak seperti pernyataan SQL, dari literal apa pun.
+ *
+ * JEBAKAN yang kena 5 Okt 2026: pemindai ini tidak mengerti literal REGEX. Satu
+ * apostrof di dalam regex — `/doesn't exist/` — dibaca sebagai pembuka string,
+ * sehingga paritas kutip SELURUH berkas bergeser dan potongan KODE (bukan SQL)
+ * ikut terbaca sebagai SQL. Hasilnya tuduhan palsu yang menunjuk baris yang
+ * sama sekali tidak memuat SQL, dan itu memakan waktu untuk dibedah.
+ *
+ * Penangkalnya: kandidat harus BERAWAL dengan kata kerja SQL setelah dirapikan.
+ * SQL mentah yang nyata selalu begitu; potongan kode yang kebetulan memuat kata
+ * "update" di tengahnya tidak. Ini menyempitkan tanpa melemahkan — tes
+ * "masih menangkap pelanggaran" di bawah membuktikannya.
+ */
+const AWALAN_SQL = /^\s*\(?\s*(SELECT|INSERT|UPDATE|DELETE|REPLACE|RENAME|WITH)\b/i;
+
 function petikanSql(kode: string): string[] {
   const out: string[] = [];
   for (const m of kode.matchAll(/(['"`])((?:\\.|(?!\1)[\s\S])*?)\1/g)) {
     const t = m[2];
+    if (!AWALAN_SQL.test(t)) continue;
     if (/\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|DUPLICATE\s+KEY|RENAME\s+TABLE)\b/i.test(t)) out.push(t);
   }
   return out;
@@ -103,4 +119,18 @@ test('kata cadangan SQL selalu dibungkus backtick di SQL mentah', () => {
     }
   }
   assert.deepEqual(pelanggaran, [], `\n${pelanggaran.join('\n')}\n`);
+});
+
+test('pemindai masih MENANGKAP pelanggaran setelah dipersempit', () => {
+  // Tanpa tes ini, mempersempit AWALAN_SQL bisa membuat penjaga diam-diam
+  // tidak menjaga apa pun — kegagalan yang tidak akan pernah terlihat.
+  const jahat = `const q = 'SELECT id, system FROM sku_link WHERE groupKey = ?';`;
+  const petikan = petikanSql(jahat);
+  assert.equal(petikan.length, 1, 'SQL mentah yang jelas harus tetap terbaca');
+  assert.match(petikan[0], /system/);
+
+  // Dan tidak lagi tertipu apostrof di dalam regex.
+  const palsu = `const ada = /doesn't exist/i.test(m);\n`
+    + `const baris = lama ? await prisma.x.update({ a: 1 }) : await prisma.x.create({ b: 2 });`;
+  assert.deepEqual(petikanSql(palsu), [], 'potongan kode bukan SQL');
 });

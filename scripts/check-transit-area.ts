@@ -17,6 +17,7 @@ import { prisma } from '../src/lib/prisma';
 
 const areaArg = process.argv[2] || null;
 const n = (x: unknown) => Number(x ?? 0).toLocaleString('id-ID');
+const iso = (d: unknown) => (d instanceof Date ? `${d.toISOString().replace('T', ' ').slice(0, 19)} UTC` : String(d ?? '-'));
 
 async function main() {
   const where = areaArg ? 'WHERE t.areaId = ?' : '';
@@ -49,20 +50,42 @@ async function main() {
     ...p,
   );
 
+  const totalBaris = await prisma.$queryRawUnsafe<{ n: number }[]>('SELECT COUNT(*) AS n FROM transit_stock');
   console.log('\n=== TRANSIT per area: berapa yang benar-benar ikut dihitung ===\n');
-  console.log('area        baris   qty        IKUT       tanpa stok   nonaktif   bukan Sku   CS-*');
-  for (const r of ringkas) {
-    console.log(
-      r.areaId.padEnd(11),
-      String(r.baris).padStart(5),
-      n(r.qty).padStart(10),
-      `${n(r.qtyAdaStok)} (${r.adaStok})`.padStart(14),
-      `${n(r.qtyTanpaStok)} (${r.tanpaStok})`.padStart(12),
-      `${n(r.qtyNonaktif)} (${r.nonaktif})`.padStart(10),
-      `${n(r.qtyBukanSku)} (${r.bukanSku})`.padStart(11),
-      `${n(r.qtyClearance)} (${r.clearance})`.padStart(8),
-    );
+  if (!ringkas.length) {
+    // Tabel kosong BUKAN "semuanya sehat" - itu dua hal yang sangat berbeda.
+    console.log(areaArg
+      ? `  TIDAK ADA satu pun baris transit untuk area "${areaArg}".`
+        + `\n  (transit_stock berisi ${n(totalBaris[0]?.n)} baris untuk area lain.)`
+        + '\n  Jadi masalahnya BUKAN penyaringan stok - datanya memang belum pernah ditulis.'
+        + '\n  Jalankan tanpa nama area untuk melihat area mana yang terisi,'
+        + '\n  lalu "npm run sync:transit" untuk melihat pembagian per area + takCocok dari OCS.'
+      : `  transit_stock KOSONG (${n(totalBaris[0]?.n)} baris).`);
+  } else {
+    console.log('area        baris   qty        IKUT       tanpa stok   nonaktif   bukan Sku   CS-*');
+    for (const r of ringkas) {
+      console.log(
+        r.areaId.padEnd(11),
+        String(r.baris).padStart(5),
+        n(r.qty).padStart(10),
+        `${n(r.qtyAdaStok)} (${r.adaStok})`.padStart(14),
+        `${n(r.qtyTanpaStok)} (${r.tanpaStok})`.padStart(12),
+        `${n(r.qtyNonaktif)} (${r.nonaktif})`.padStart(10),
+        `${n(r.qtyBukanSku)} (${r.bukanSku})`.padStart(11),
+        `${n(r.qtyClearance)} (${r.clearance})`.padStart(8),
+      );
+    }
   }
+
+  // Area mana saja yang PUNYA baris transit - selalu ditampilkan, supaya saat
+  // satu area kosong langsung kelihatan bandingannya.
+  const perArea = await prisma.$queryRawUnsafe<{ areaId: string; baris: number; qty: number; src: string }[]>(
+    `SELECT areaId, COUNT(*) AS baris, SUM(qty) AS qty, GROUP_CONCAT(DISTINCT source) AS src
+       FROM transit_stock GROUP BY areaId ORDER BY areaId`,
+  );
+  console.log('\n=== isi transit_stock, SELURUH area ===');
+  if (!perArea.length) console.log('  (kosong)');
+  for (const a of perArea) console.log(`  ${a.areaId.padEnd(12)} ${String(a.baris).padStart(5)} baris  ${n(a.qty).padStart(10)} pcs  source: ${a.src}`);
 
   // Apakah areanya punya stok sama sekali? Tanpa baris stok, SELURUH transit
   // area itu hilang - dan itu sebab yang berbeda dari SKU per SKU.
@@ -93,7 +116,7 @@ async function main() {
     for (const h of hilang) {
       console.log(`  ${h.areaId.padEnd(11)} ${h.sku.padEnd(22)} ${n(h.qty).padStart(9)} pcs  ${h.sebab}  [${h.note ?? ''}]`);
     }
-  } else {
+  } else if (ringkas.length) {
     console.log('\nSemua baris transit punya pasangan stok yang lolos saringan.');
   }
 
@@ -103,11 +126,11 @@ async function main() {
   );
   console.log('\n=== perhitungan terakhir (transit baru tidak tampil sebelum ini diperbarui) ===');
   for (const s of sum) {
-    console.log(`  ${s.areaId.padEnd(12)} snapshot ${String(s.snapshotDate).slice(0, 10)}  dihitung ${String(s.computedAt).slice(0, 19)}`);
+    console.log(`  ${s.areaId.padEnd(12)} snapshot ${iso(s.snapshotDate).slice(0, 10)}  dihitung ${iso(s.computedAt)}`);
   }
 
   const tr = await prisma.$queryRawUnsafe<{ t: Date }[]>('SELECT MAX(updatedAt) AS t FROM transit_stock');
-  console.log(`\ntransit_stock terakhir diperbarui: ${String(tr[0]?.t ?? '-').slice(0, 19)}\n`);
+  console.log(`\ntransit_stock terakhir diperbarui: ${iso(tr[0]?.t)}\n`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); }).finally(() => prisma.$disconnect());

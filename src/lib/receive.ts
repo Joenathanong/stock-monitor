@@ -23,6 +23,7 @@
  *    sama — cara pencocokan yang sudah dipakai modul Phase Out.
  */
 import { sapKey } from './phase-out';
+import { namaAreaDari } from './area-master';
 
 export type OcsReceiveDoc = {
   DoDocNum: number;
@@ -46,21 +47,11 @@ export type OcsReceiveLine = {
   AddressCode?: string;
 };
 
-/** Kode gudang OCS → nama area seperti yang dipakai stok & penjualan. */
-export const KODE_AREA: Record<string, string> = {
-  GBJD: 'Pusat',
-  GJSB: 'Surabaya',
-  GJYG: 'Yogyakarta',
-  GJMK: 'Makassar',
-  GJMD: 'Medan',
-};
-
-/** Terjemahkan kode gudang. Kode tak dikenal dikembalikan apa adanya supaya
- *  kelihatan di layar sebagai area asing, bukan hilang diam-diam. */
-export const namaArea = (kode: string | null | undefined): string => {
-  const k = String(kode ?? '').trim().toUpperCase();
-  return KODE_AREA[k] ?? (k || 'Pusat');
-};
+// Daftar kode gudang TIDAK lagi ada di sini. Dulu konstanta `KODE_AREA` di
+// berkas ini yang memutuskan kode mana milik area mana, jadi menambah cabang
+// berarti mengubah kode dan deploy. Sekarang sumbernya tabel `area` (lihat
+// `area-master.ts`), dan `mapReceive` menerima petanya sebagai argumen - sama
+// pola dengan `sapKeIndex`, supaya modul ini tetap murni dan bisa diuji.
 
 /**
  * Isi karton dari nama produk: angka setelah " x " yang TERAKHIR.
@@ -106,6 +97,14 @@ export type HasilReceive = {
   box: BarisBox[];
   /** ItemCode yang tidak ketemu SKU-nya — dilaporkan, bukan dibuang diam-diam. */
   takCocok: { sapCode: string; name: string; areaId: string; qty: number }[];
+  /**
+   * Kode gudang yang TIDAK terdaftar di tabel area.
+   *
+   * Dulu kode semacam ini diam-diam dihitung sebagai "Pusat", jadi cabang baru
+   * yang belum didaftarkan menambah SIT Pusat tanpa ada yang tahu. Sekarang
+   * dikumpulkan di sini supaya bisa ditampilkan sebagai peringatan.
+   */
+  kodeAsing: { kode: string; baris: number; qty: number }[];
   totalDoQty: number;
   totalBatchQty: number;
 };
@@ -119,10 +118,13 @@ export type HasilReceive = {
 export function mapReceive(
   lines: OcsReceiveLine[],
   sapKeIndex: Map<string, { sku: string; name: string }>,
+  /** Kode gudang → nama area, dari tabel `area`. Dibangun pemanggil. */
+  petaArea: Map<string, string>,
 ): HasilReceive {
   const transit = new Map<string, BarisTransit>();
   const box = new Map<string, BarisBox>();
   const takCocok = new Map<string, { sapCode: string; name: string; areaId: string; qty: number }>();
+  const kodeAsing = new Map<string, { kode: string; baris: number; qty: number }>();
   let totalDoQty = 0, totalBatchQty = 0;
 
   for (const l of lines) {
@@ -130,7 +132,13 @@ export function mapReceive(
     const qty = Math.max(0, Math.trunc(Number(l.DoQty) || 0));
     const qtyBatch = Math.max(0, Math.trunc(Number(l.BatchQuantity) || 0));
     if (!kode || qty <= 0) continue;
-    const areaId = namaArea(l.AddressCode);
+    const area = namaAreaDari(l.AddressCode, petaArea);
+    const areaId = area.name;
+    if (area.asing) {
+      const a = kodeAsing.get(areaId) ?? { kode: areaId, baris: 0, qty: 0 };
+      a.baris += 1; a.qty += qty;
+      kodeAsing.set(areaId, a);
+    }
     const nama = String(l.ItemName ?? '').slice(0, 500);
     totalDoQty += qty; totalBatchQty += qtyBatch;
 
@@ -181,6 +189,7 @@ export function mapReceive(
     transit: [...transit.values()].sort((a, b) => a.areaId.localeCompare(b.areaId) || b.qty - a.qty),
     box: [...box.values()],
     takCocok: [...takCocok.values()].sort((a, b) => b.qty - a.qty),
+    kodeAsing: [...kodeAsing.values()].sort((a, b) => b.qty - a.qty),
     totalDoQty, totalBatchQty,
   };
 }

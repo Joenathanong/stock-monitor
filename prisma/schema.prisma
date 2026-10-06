@@ -185,6 +185,114 @@ model PhaseOut {
   @@map("phase_out")
 }
 
+/// Cabang / gudang yang dipantau. DIISI DARI PENGATURAN, bukan dari kode:
+/// menambah cabang baru tidak boleh perlu deploy.
+///
+/// `code` = kode gudang OCS - `AddressCode` di receive-stock, `AreaId` di stok.
+/// `name` = nama area yang dipakai di SELURUH aplikasi (stock_current.areaId,
+/// sales_daily.areaId, transit_stock.areaId, doi_summary.areaId).
+///
+/// PERINGATAN: gudang pemasok EJI di web.eji.co.id/sap_whs/stock kebetulan juga
+/// bernama "GBJD", dan itu BUKAN area ini. Tabel ini hanya untuk gudang IEG.
+/// Saldo pemasok tinggal di tabel sendiri dengan kolom `supplierWhs`.
+model Area {
+  code      String    @id @db.VarChar(20)
+  name      String    @db.VarChar(60)
+  isActive  Boolean   @default(true)
+  sortOrder Int       @default(100)
+  /// Batas atas pita KRITIS (hari). DOI <= ini -> CRITICAL.
+  ///
+  /// Tiga kolom di bawah ini menyimpan EMPAT pita stok dengan TIGA angka, dan itu
+  /// disengaja: dengan tiga batas, celah dan tumpang-tindih antar pita mustahil
+  /// terjadi. Menyimpan batas bawah DAN atas setiap pita (6-8 angka) membuka
+  /// kemungkinan "kritis <=13, low mulai 15" — hari ke-14 tidak masuk pita mana
+  /// pun, dan SKU di hari itu hilang dari semua laporan tanpa jejak.
+  ///
+  /// Semuanya MUTLAK dalam hari, bukan tambahan di atas lead time:
+  ///   DOI <= doiCritical           -> CRITICAL
+  ///   DOI <= doiMin                -> LOW         (masuk Sugest PO)
+  ///   DOI <= doiMax                -> HEALTHY
+  ///   DOI >  doiMax                -> OVERSTOCK
+  /// Harus naik: doiCritical < doiMin <= doiMax. Kosong = pakai pengaturan global.
+  doiCritical Int?
+  /// Batas atas pita LOW (hari) = titik pesan. DOI <= ini masuk Sugest PO.
+  doiMin    Int?
+  /// Batas atas pita AMAN (hari) = tingkat isi-ulang DAN ambang overstock.
+  doiMax    Int?
+  /// Tanggal mulai operasional - menggantikan pengaturan `sales_area_start`.
+  startDate DateTime? @db.Date
+  note      String?   @db.VarChar(300)
+  updatedAt DateTime  @default(now()) @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("area")
+}
+
+/// Satu produk, beberapa kode. Menggantikan pencocokan "6 digit terakhir sama".
+///
+/// Dulu hubungan antar wadah bisa disimpulkan dari bentuk kodenya: wadah IEG
+/// berprefiks 1222/122, wadah EJI 1201/120, dan 6 digit terakhirnya sama. Dua
+/// hal membatalkan itu: satu produk bisa punya LEBIH DARI dua kode, dan ada
+/// produk yang 6 digit terakhirnya sudah tidak sama antar wadah. Jadi
+/// hubungannya dipetakan, bukan diterka.
+///
+/// `groupKey` mengikat semuanya. `priority` menentukan kode mana diambil lebih
+/// dulu saat Sugest PO (122 dulu, lalu 120, hanyalah priority 1 dan 2).
+/// `perCtn` per kode karena isi kartonnya memang sering berbeda.
+model SkuLink {
+  id        Int      @id @default(autoincrement())
+  groupKey  String   @db.VarChar(120)
+  /// OCS | SAP
+  system    String   @db.VarChar(8)
+  code      String   @db.VarChar(60)
+  /// Kecil = diambil lebih dulu saat Sugest PO.
+  priority  Int      @default(9)
+  /// Isi satu karton untuk kode INI (pcs). 0/null = belum diketahui.
+  perCtn    Int?
+  note      String?  @db.VarChar(300)
+  updatedAt DateTime @default(now()) @updatedAt
+
+  /// Satu kode hanya boleh milik satu produk - kalau tidak, saldo gudang bisa
+  /// dijanjikan ke dua produk sekaligus.
+  @@unique([system, code], name: "sku_link_code")
+  @@index([groupKey])
+  @@map("sku_link")
+}
+
+/// Saldo stok di gudang PEMASOK (EJI), sumber barang untuk Sugest PO.
+///
+/// Dibaca dari https://web.eji.co.id/sap_whs/stock lewat endpoint DataTables
+/// `GET /dt/report_iv_stok`. Kolom yang dipakai Sugest PO adalah `bal`
+/// = "BALANCE ( WITH SQ )" - sudah memperhitungkan SQ terbuka.
+///
+/// PERINGATAN: `supplierWhs` di sini adalah gudang EJI, dan nilainya kebetulan
+/// juga "GBJD". Itu BUKAN area Pusat IEG di tabel `area`. Dua dunia berbeda yang
+/// bernama sama; jangan pernah dibandingkan atau di-join satu sama lain.
+model SupplierStock {
+  supplierWhs String   @db.VarChar(20)
+  sapCode     String   @db.VarChar(60)
+  name        String   @default("") @db.VarChar(500)
+  /// ON HAND
+  onHand      Int      @default(0)
+  /// COMMITED
+  committed   Int      @default(0)
+  /// SQ (OPEN)
+  sqOpen      Int      @default(0)
+  /// ORDER
+  ordered     Int      @default(0)
+  /// BALANCE ( NO SQ )
+  balNoSq     Int      @default(0)
+  /// BALANCE ( WITH SQ ) - INI yang dipakai Sugest PO.
+  bal         Int      @default(0)
+  /// Isi karton dari nama produk ("… 20ml X 100" → 100). 0 = tidak terbaca.
+  perCtn      Int      @default(0)
+  pulledAt    DateTime @default(now())
+
+  @@id([supplierWhs, sapCode])
+  @@index([sapCode])
+  @@map("supplier_stock")
+}
+
 model SkuMaster {
   sku          String   @id @db.VarChar(120)
   leadTimeDays Int?

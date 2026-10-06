@@ -286,3 +286,81 @@ test('kunci baris phase out dipisahkan per jenis pencocokan', () => {
   assert.equal(phaseOutKey('SKU', '123456'), 'SKU:123456');
   assert.notEqual(phaseOutKey('SAP', '123456'), phaseOutKey('SKU', '123456'));
 });
+
+// ---------------------------------------------------------------------------
+// Ambang DOI per area (data user 5 Okt 2026). Tiga batas MUTLAK dalam hari.
+// ---------------------------------------------------------------------------
+
+/** SKU dengan ADS = 1/hari, jadi DOI = stok. Membuat pita bisa diuji langsung. */
+function skuDoi(stok: number, transit = 0): SkuInput {
+  const salesByDate: Record<string, number> = {};
+  for (let i = 1; i <= 30; i++) {
+    const d = new Date(Date.UTC(2026, 8, 1) + 0);
+    d.setUTCDate(d.getUTCDate() + i);
+    salesByDate[d.toISOString().slice(0, 10)] = 1;
+  }
+  return {
+    sku: 'S1', name: 'Uji', availableQty: stok, transitQty: transit,
+    leadTimeDays: 7, salesByDate, firstSalesDate: '2026-09-02',
+  };
+}
+
+test('ambang per area dipakai apa adanya — Surabaya 7/14/21', () => {
+  const s = S;
+  const am = { kritis: 7, min: 14, max: 21 };
+  const ctxAm = { today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>(), ambang: am };
+  const st = (stok: number) => computeSku(skuDoi(stok), s, ctxAm).status;
+
+  assert.equal(st(7), 'CRITICAL', 'tepat di batas kritis');
+  assert.equal(st(8), 'LOW');
+  assert.equal(st(14), 'LOW', 'tepat di batas low → masuk Sugest PO');
+  assert.equal(st(15), 'HEALTHY');
+  assert.equal(st(21), 'HEALTHY', 'tepat di batas aman');
+  assert.equal(st(22), 'OVERSTOCK');
+});
+
+test('TANPA ambang area, perilaku lama (relatif lead time) TIDAK berubah', () => {
+  // Inilah jaminannya: memasang fitur ini tidak boleh menggeser status area
+  // yang ambangnya belum diisi. Lead time 7, safetyDays bawaan 3 → LOW ≤ 10.
+  const s = S;
+  const ctx = { today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>() };
+  assert.equal(computeSku(skuDoi(7), s, ctx).status, 'CRITICAL');
+  assert.equal(computeSku(skuDoi(10), s, ctx).status, 'LOW');
+  assert.equal(computeSku(skuDoi(11), s, ctx).status, 'HEALTHY');
+  assert.equal(computeSku(skuDoi(15), s, ctx).status, 'OVERSTOCK', 'targetDoiDays bawaan 14');
+});
+
+test('ambang Pusat 4/5/7 — pita low hanya SATU hari, dan itu sah', () => {
+  const s = S;
+  const ctxAm = {
+    today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>(),
+    ambang: { kritis: 4, min: 5, max: 7 },
+  };
+  const st = (stok: number) => computeSku(skuDoi(stok), s, ctxAm).status;
+  assert.equal(st(4), 'CRITICAL', 'kritis 0-4');
+  assert.equal(st(5), 'LOW', 'low hanya hari ke-5');
+  assert.equal(st(6), 'HEALTHY', 'aman mulai hari ke-6 — BUKAN low lagi');
+  assert.equal(st(7), 'HEALTHY', 'aman sampai hari ke-7');
+  assert.equal(st(8), 'OVERSTOCK');
+});
+
+test('saran qty diisi sampai batas ATAS pita aman area, bukan target global', () => {
+  const s = S;   // targetDoiDays 14
+  const makassar = { kritis: 14, min: 31, max: 45 };
+  const r = computeSku(skuDoi(10), s, {
+    today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>(), ambang: makassar,
+  });
+  // ADS 1/hari, posisi 10 → butuh 45 - 10 = 35, bukan 14 - 10 = 4.
+  assert.equal(r.suggested1, 35);
+});
+
+test('transit yang sudah menutupi titik pesan jadi WAITING, bukan LOW lagi', () => {
+  const s = S;
+  const am = { kritis: 7, min: 14, max: 21 };
+  // Stok 10 (di bawah min 14), transit 8 → posisi 18 = pita aman, tapi stok
+  // sendiri masih ≤ 14. Jangan disarankan PO lagi.
+  const r = computeSku(skuDoi(10, 8), s, {
+    today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>(), ambang: am,
+  });
+  assert.equal(r.status, 'WAITING');
+});

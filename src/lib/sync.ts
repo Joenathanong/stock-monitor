@@ -6,7 +6,8 @@
  */
 import { prisma } from './prisma';
 import { fetchProductPrices, fetchStock, fetchSalesForDate, fetchReceiveDocs, fetchReceiveLines, demandStatusCodes, ALL_STATUS_CODES, type OcsSalesRow } from './ocs';
-import { mapReceive, namaArea, type OcsReceiveLine } from './receive';
+import { mapReceive, type OcsReceiveLine } from './receive';
+import { petaArea, areaAktifDb } from './area-store';
 import { sapKey } from './phase-out';
 import { budget, defaultBudgetMs } from './budget';
 import { addDays, keyToUtcDate, toDateKeyUtc, todayKey, type DateKey } from './dates';
@@ -127,6 +128,15 @@ export type TransitSyncResult = SyncResult & {
    * melewatkan pembersihan dengan sengaja, jadi itu keberhasilan sebagian.
    */
   partial?: boolean;
+  /**
+   * Kode gudang di baris transit yang TIDAK terdaftar di Pengaturan → Area.
+   *
+   * Dibawa keluar supaya layar bisa menyebut kodenya, bukan cuma menghitungnya:
+   * kode asing berarti barisnya tidak bisa dipasangkan ke area mana pun, jadi
+   * stoknya hilang dari perhitungan DOI tanpa jejak kalau tidak ditampilkan.
+   * Sengaja TIDAK dipetakan diam-diam ke "Pusat" (lihat namaAreaDari).
+   */
+  kodeAsing?: { kode: string; baris: number; qty: number }[];
   totalDoQty?: number;
   totalBatchQty?: number;
 };
@@ -233,7 +243,9 @@ export async function syncTransit(
     if (k && !idx.has(k)) idx.set(k, { sku: r.sku, name: r.name ?? '' });
   }
 
-  const hasil = mapReceive(lines, idx);
+  // Kode gudang → area datang dari tabel `area`, bukan dari konstanta di kode.
+  // Kode yang belum terdaftar TIDAK lagi dihitung sebagai Pusat; dilaporkan.
+  const hasil = mapReceive(lines, idx, await petaArea());
   const now = new Date();
 
   if (hasil.transit.length) {
@@ -289,10 +301,16 @@ export async function syncTransit(
     docsKurang: kurang,
     areas,
     takCocok: hasil.takCocok.length,
+    kodeAsing: hasil.kodeAsing,
     totalDoQty: hasil.totalDoQty,
     totalBatchQty: hasil.totalBatchQty,
     cacheSiap,
-    message: (cacheSiap ? '' : 'Cache dokumen belum aktif — jalankan "npm run db:push" supaya penarikan berikutnya cepat. ')
+    message: (hasil.kodeAsing.length
+      ? `${hasil.kodeAsing.length} kode gudang belum terdaftar di Pengaturan → Area `
+        + `(${hasil.kodeAsing.slice(0, 4).map((k) => `${k.kode} ${k.qty} pcs`).join(', ')})`
+        + ' — qty-nya TIDAK ikut DOI area mana pun sampai didaftarkan. '
+      : '')
+      + (cacheSiap ? '' : 'Cache dokumen belum aktif — jalankan "npm run db:push" supaya penarikan berikutnya cepat. ')
       + (kurang
         ? `${dariOcs + dariCache} dari ${docs.length} dokumen terbaca (${dariCache} dari cache), ${kurang} belum — `
           + 'pembersihan dilewati supaya transit lama tidak hilang. Klik lagi untuk melanjutkan; dokumen yang sudah terbaca tidak ditarik ulang.'
@@ -508,14 +526,19 @@ export function gabungSales(semua: SalesRowInput[], konsumsi: SalesRowInput[]): 
  */
 export async function areaUntukTarik(s: DoiSettings): Promise<string[]> {
   if (s.salesPullAreas.length) return s.salesPullAreas;
+  // Tabel `area` menang atas deteksi dari stok: di situlah cabang baru
+  // didaftarkan, dan cabang yang BARU dibuka belum punya baris stok sama sekali.
+  const aktif = await areaAktifDb();
+  if (aktif.length) return aktif.map((a) => a.name);
   const rows = await prisma.$queryRawUnsafe<{ areaId: string }[]>(
     "SELECT DISTINCT areaId FROM stock_current WHERE areaId <> '' ORDER BY areaId",
   );
   const dariStok = rows.map((r) => r.areaId);
   if (dariStok.length) return dariStok;
   throw new Error(
-    'Daftar area kosong. Jalankan penarikan stok dulu (npm run sync:stock) supaya area terdeteksi, ' +
-    'atau isi Pengaturan sales_pull_areas secara manual. Penarikan tidak pernah memakai area=All.',
+    'Daftar area kosong. Daftarkan area di Pengaturan → Area (atau jalankan "npm run seed:area" ' +
+    'untuk mengisi dari data yang sudah ada), atau isi Pengaturan sales_pull_areas secara manual. ' +
+    'Penarikan tidak pernah memakai area=All.',
   );
 }
 

@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Empty, RefreshButton, opsi2Label, postJson, useApi, windowLabel } from '@/components/ui';
+import AreaMaster from '@/components/AreaMaster';
+import SkuLinkMaster from '@/components/SkuLinkMaster';
 
 type Resp = { ok: boolean; settings: Record<string, string>; defaults: Record<string, string | number> };
 type Exclusions = { ok: boolean; today: string; rows: { date: string; reason: string; manual: boolean }[] };
@@ -232,11 +234,15 @@ export default function SettingsPage() {
           </div>
         ))}
 
+        <AreaMaster />
+        <SkuLinkMaster />
+
         <div className="card card-pad lg:col-span-2">
-          <div className="card-title mb-1">Area yang terdeteksi</div>
+          <div className="card-title mb-1">Area yang terdeteksi di data</div>
           <div className="mb-3 text-[12px] text-label">
-            Diambil dari data yang sudah masuk, bukan daftar tetap. Penarikan mengambil SELURUH area dan menyimpannya terpisah per area,
-            jadi tabel ini sekaligus bukti pemisahannya jalan. Baris bertanda adalah area yang sedang dihitung.
+            Ini bukan daftar pendaftaran — ini apa yang BENAR-BENAR ada di data. Daftar cabangnya ada di kartu
+            &quot;Cabang / Area&quot; di atas. Membandingkan keduanya memperlihatkan area yang sudah didaftarkan tapi
+            datanya belum masuk, dan sebaliknya.
           </div>
           {ar.data?.batal && form.sales_include_cancel === '1' && ar.data.batal.hariTanpaBatal > 3 ? (
             <Alert tone="warn">

@@ -9,6 +9,7 @@
  * memasukkannya menyeret rata-rata turun sepanjang pagi lalu naik lagi malam.
  */
 import { addDays, diffDays, type DateKey } from './dates';
+import { pitaDoi, type AmbangDoi } from './area-master';
 import type { DoiSettings } from './settings';
 
 export type ProductStatus =
@@ -77,6 +78,21 @@ export type DoiContext = {
   exclusionDates: Set<DateKey>;
   /** Tanggal paling awal yang ada di database penjualan — untuk menandai "≥ awal data". */
   earliestDataDate?: DateKey | null;
+  /**
+   * Ambang DOI area ini — tiga batas MUTLAK dalam hari (Pengaturan → Cabang).
+   *
+   * KOSONG = pakai perilaku lama yang relatif terhadap lead time
+   * (`CRITICAL: DOI <= leadTime`, `LOW: DOI <= leadTime + safetyDays`,
+   * `OVERSTOCK: DOI > targetDoiDays`). Dibiarkan begitu dengan sengaja: area
+   * yang belum diisi ambangnya TIDAK boleh berubah statusnya hanya karena
+   * fitur ini dipasang.
+   *
+   * TERISI = batas mutlak yang menang, dan lead time tidak lagi menentukan
+   * status. Itu memang yang diminta: tiap kota punya ambang sendiri yang tidak
+   * bisa diturunkan dari satu angka cadangan global (Pusat 4/5/7 vs Makassar
+   * 14/31/45).
+   */
+  ambang?: AmbangDoi | null;
 };
 
 export type WindowStat = {
@@ -245,17 +261,30 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
     const dT = refDoiTransit!;
     const dS = refDoi!;
     const lt = leadTimeDays;
-    if (dT <= lt) status = 'CRITICAL';
-    else if (dT <= lt + s.safetyDays) status = 'LOW';
-    else if (dS <= lt + s.safetyDays) status = 'WAITING';
-    else if (dT > s.targetDoiDays) status = 'OVERSTOCK';
-    else status = 'HEALTHY';
+    const am = ctx.ambang ?? null;
+    if (am) {
+      // Ambang per area: tiga batas mutlak. Urutan pitanya ditulis SATU kali di
+      // `pitaDoi` (area-master.ts) supaya layar, perhitungan, dan Sugest PO
+      // tidak bisa memakai batas yang berbeda.
+      const pita = pitaDoi(dT, am);
+      // WAITING dipertahankan: stok sendiri sudah di titik pesan, tapi transit
+      // sudah menutupinya — jangan disarankan PO lagi.
+      status = (pita === 'HEALTHY' && dS <= am.min) ? 'WAITING' : pita;
+    } else {
+      if (dT <= lt) status = 'CRITICAL';
+      else if (dT <= lt + s.safetyDays) status = 'LOW';
+      else if (dS <= lt + s.safetyDays) status = 'WAITING';
+      else if (dT > s.targetDoiDays) status = 'OVERSTOCK';
+      else status = 'HEALTHY';
+    }
   }
 
   // --- Saran qty: cukup untuk mencapai target DOI, dikurangi stok + transit ---
   const suggest = (ads: number) =>
     ads > 0 && status !== 'DEAD_STOCK' && status !== 'NO_SALES' && status !== 'EXCLUDED' && status !== 'NPL_WAIT' && status !== 'PHASE_OUT'
-      ? Math.max(0, Math.ceil(s.targetDoiDays * ads - position))
+      // Diisi sampai batas ATAS pita aman area ini; tanpa ambang per area, tetap
+      // memakai target global supaya angkanya tidak berubah diam-diam.
+      ? Math.max(0, Math.ceil((ctx.ambang?.max ?? s.targetDoiDays) * ads - position))
       : 0;
 
   const runOutDate = refDoi !== null ? addDays(today, Math.max(0, Math.floor(refDoi))) : null;

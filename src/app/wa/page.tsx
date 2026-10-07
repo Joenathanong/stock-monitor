@@ -62,18 +62,20 @@ function Rincian({ a, disp, onTutup }: { a: AreaWa; disp: DoiDisplay; onTutup: (
                 <span className="w-[52px] text-right text-[12px] font-semibold tabular-nums">{fmt(s.n)}</span>
               </div>
             ))}
-            {/* Enam status keterangan: bukan satu skala hari, jadi tanpa batang —
-                batang di sini mengundang perbandingan yang tidak ada artinya. */}
-            <div className="mt-3 border-t pt-2" style={{ borderColor: 'var(--border-subtle)' }}>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                {lain.map((s) => (
-                  <div key={s.key} className="flex items-center gap-2 text-[12px]">
-                    <span className="h-1.5 w-1.5 flex-none rounded-full" style={{ background: s.warna }} />
-                    <span className="flex-1 text-label">{s.label}</span>
-                    <span className="font-semibold tabular-nums">{fmt(s.n)}</span>
-                  </div>
-                ))}
-              </div>
+            {/* Enam keterangan: batang yang SAMA. Batangnya porsi dari total SKU,
+                dan setiap SKU punya tepat satu status — jadi kesepuluhnya potongan
+                dari satu keseluruhan yang sama. Dipisah garis, bukan dibedakan
+                bentuknya. (Di layar tidak ada batas tinggi seperti di poster.) */}
+            <div className="mt-2 border-t pt-2" style={{ borderColor: 'var(--border-subtle)' }}>
+              {lain.map((s) => (
+                <div key={s.key} className="mb-1.5 flex items-center gap-2">
+                  <span className="w-[76px] text-[12px]">{s.label}</span>
+                  <span className="h-2 flex-1 rounded-full" style={{ background: 'var(--border-subtle)' }}>
+                    <span className="block h-2 rounded-full" style={{ width: `${(s.n / total) * 100}%`, background: s.warna }} />
+                  </span>
+                  <span className="w-[52px] text-right text-[12px] font-semibold tabular-nums">{fmt(s.n)}</span>
+                </div>
+              ))}
             </div>
           </div>
 

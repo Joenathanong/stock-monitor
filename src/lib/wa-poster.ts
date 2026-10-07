@@ -217,47 +217,70 @@ export const BIAYA_BLOK = {
   /** Judul + jeda, di luar daftar SKU-nya. */
   poTetap: 16 + 6,
   poPerBaris: 30,
-  /** Jarak antar baris pita DOI (berbatang). */
-  pitchPita: 20,
-  /** Tinggi satu baris kelompok keterangan; 2 kolom, jadi 3 baris untuk 6 item. */
-  pitchLain: 16,
-  /** Garis pemisah antara pita DOI dan kelompok keterangan. */
+  /** Jarak antar baris status. Dipilih adaptif, lihat `tataLetakStatus`. */
+  pitchPilihan: [20, 18, 16, 14, 13] as const,
+  /** Garis pemisah antara 4 pita DOI dan 6 keterangan. */
   pemisah: 10,
 } as const;
 
 export type BlokPoster = { angka?: boolean; status?: boolean; tren?: boolean; po?: boolean };
 
 export function tinggiKartu(opsi: {
-  blok: BlokPoster; nPita?: number; nLain?: number; kritisMaks?: number;
+  blok: BlokPoster; nBaris?: number; pitch?: number; kritisMaks?: number;
 }): number {
   const b = opsi.blok;
-  const nPita = opsi.nPita ?? URUT_STATUS.length;
-  const nLain = opsi.nLain ?? URUT_LAIN.length;
+  const nBaris = opsi.nBaris ?? (URUT_STATUS.length + URUT_LAIN.length);
+  const pitch = opsi.pitch ?? BIAYA_BLOK.pitchPilihan[0];
   let t = BIAYA_BLOK.kepala;
   if (b.angka) t += BIAYA_BLOK.angka;
-  if (b.status) {
-    t += BIAYA_BLOK.statusTetap + nPita * BIAYA_BLOK.pitchPita;
-    // Kelompok keterangan disusun 2 kolom, jadi barisnya setengah (dibulatkan naik).
-    if (nLain > 0) t += BIAYA_BLOK.pemisah + Math.ceil(nLain / 2) * BIAYA_BLOK.pitchLain;
-  }
+  // SEMUA baris status berbatang, bukan hanya empat pita DOI.
+  //
+  // Sempat saya buat kelompok keterangan tanpa batang dengan alasan "bukan satu
+  // skala". Itu SALAH, dan user yang menunjukkannya: batangnya menggambar
+  // `n / total SKU` — porsi dari keseluruhan. Setiap SKU punya tepat satu
+  // status, jadi kesepuluhnya potongan dari satu keseluruhan yang sama dan
+  // porsinya sama-sama berarti. Yang sebenarnya menekan waktu itu ruang
+  // vertikal, dan saya mendandaninya sebagai prinsip.
+  if (b.status) t += BIAYA_BLOK.statusTetap + BIAYA_BLOK.pemisah + nBaris * pitch;
   if (b.tren) t += BIAYA_BLOK.tren;
   if (b.po && (opsi.kritisMaks ?? 0) > 0) t += BIAYA_BLOK.poTetap + (opsi.kritisMaks ?? 0) * BIAYA_BLOK.poPerBaris;
   return t;
 }
 
+export type TataLetakStatus = { pitch: number; poMuat: number };
+
 /**
- * Berapa SKU "paling mendesak" yang masih MUAT, bukan berapa yang diminta.
+ * Pilih jarak baris status DAN panjang daftar mendesak supaya kartu TIDAK meluber.
  *
- * Daftar itulah satu-satunya blok yang panjangnya bisa dipotong tanpa kehilangan
- * arti — sisanya tetap. Jadi kalau ruangnya kurang, yang dipendekkan daftar ini,
- * dan poster tetap utuh di dalam kartunya.
+ * Sepuluh baris berbatang tidak muat pada jarak 20px kalau semua blok aktif, dan
+ * jawabannya bukan menghapus batangnya. Jadi jarak barisnya mengalah lebih dulu
+ * — dari 20 turun sampai 13 — sampai daftar mendesak kebagian minimal satu baris.
+ * Kalau sampai jarak terkecil pun tidak kebagian, dipakai jarak terbesar yang
+ * masih memuat seluruh baris status, dan daftar mendesak ditampilkan sebagai satu
+ * baris ringkas oleh pemanggil (bukan dihilangkan diam-diam).
  */
-export function kritisYangMuat(opsi: {
-  tinggiKartu: number; blok: BlokPoster; diminta: number; nPita?: number; nLain?: number;
-}): number {
-  if (!opsi.blok.po || opsi.diminta <= 0) return 0;
-  const tanpaPo = tinggiKartu({ ...opsi, blok: { ...opsi.blok, po: false }, kritisMaks: 0 });
-  const sisa = opsi.tinggiKartu - tanpaPo - BIAYA_BLOK.poTetap;
-  if (sisa < BIAYA_BLOK.poPerBaris) return 0;
-  return Math.max(0, Math.min(opsi.diminta, Math.floor(sisa / BIAYA_BLOK.poPerBaris)));
+export function tataLetakStatus(opsi: {
+  tinggiKartu: number; blok: BlokPoster; nBaris: number; diminta: number;
+}): TataLetakStatus {
+  const muatPo = (pitch: number) => {
+    if (!opsi.blok.po || opsi.diminta <= 0) return 0;
+    const tanpaPo = tinggiKartu({ ...opsi, pitch, blok: { ...opsi.blok, po: false }, kritisMaks: 0 });
+    const sisa = opsi.tinggiKartu - tanpaPo - BIAYA_BLOK.poTetap;
+    if (sisa < BIAYA_BLOK.poPerBaris) return 0;
+    return Math.min(opsi.diminta, Math.floor(sisa / BIAYA_BLOK.poPerBaris));
+  };
+
+  // Jarak terbesar yang sudah memberi daftar mendesak minimal satu baris.
+  for (const pitch of BIAYA_BLOK.pitchPilihan) {
+    const po = muatPo(pitch);
+    if (po >= 1) return { pitch, poMuat: po };
+  }
+  // Tidak ada yang cukup untuk daftar PO. Ambil jarak terbesar yang setidaknya
+  // membuat blok status sendiri muat.
+  for (const pitch of BIAYA_BLOK.pitchPilihan) {
+    if (tinggiKartu({ ...opsi, pitch, blok: { ...opsi.blok, po: false }, kritisMaks: 0 }) <= opsi.tinggiKartu) {
+      return { pitch, poMuat: 0 };
+    }
+  }
+  return { pitch: BIAYA_BLOK.pitchPilihan[BIAYA_BLOK.pitchPilihan.length - 1], poMuat: 0 };
 }

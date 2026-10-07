@@ -6,7 +6,7 @@
 // yang bisa berbeda.
 import {
   FONT, FONT_MONO, KANVAS, WARNA, adsTeks, angkaRingkas, deretTren, hari, jalurSpark, labelDoi, lebarKartu,
-  rupiahRingkas, segmenStatus, tampil1, tampil2,
+  rupiahRingkas, segmenStatus, segmenLain, kritisYangMuat, BIAYA_BLOK, tampil1, tampil2,
 } from '@/lib/wa-poster';
 import type { DataWa, AreaWa } from './types';
 
@@ -56,7 +56,11 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, onKlik }: {
   let cy = y;
 
   const seg = segmenStatus(a.byStatus);
-  const totalSeg = seg.reduce((t, s) => t + s.n, 0) || 1;
+  const lain = segmenLain(a.byStatus);
+  // Batang dibandingkan terhadap total SELURUH SKU, bukan hanya empat pita:
+  // kalau pembaginya hanya pita, "Aman 180 dari 281" terlihat seperti 100%
+  // padahal masih ada 35 SKU di kelompok keterangan.
+  const totalSeg = [...seg, ...lain].reduce((t, s) => t + s.n, 0) || 1;
   const spark = jalurSpark(deretTren(a.tren, disp), isi, 56);
   const nKritis = a.byStatus?.CRITICAL ?? 0;
 
@@ -134,9 +138,10 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, onKlik }: {
     cy += 16;
     bagian.push(<Teks key="st" x={x + pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel}>{`SEBARAN STATUS · ${angkaRingkas(a.sku)} SKU`}</Teks>);
     cy += 8;
+    // --- empat pita DOI: satu skala hari yang sama, jadi diberi batang ---
     const barW = isi - 96;
     seg.forEach((s, i) => {
-      const by = cy + i * 20;
+      const by = cy + i * BIAYA_BLOK.pitchPita;
       bagian.push(<Teks key={`sl${i}`} x={x + pad} y={by + 10} size={11}>{s.label}</Teks>);
       bagian.push(<rect key={`sbg${i}`} x={x + pad + 62} y={by + 2} width={barW} height={8} rx={4} fill={WARNA.garisHalus} />);
       {/* Batang tipis, ujung membulat, ditambatkan ke garis dasar kiri. */}
@@ -145,7 +150,32 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, onKlik }: {
       )}
       bagian.push(<Teks key={`sn${i}`} x={x + w - pad} y={by + 10} size={11} weight={700} anchor="end" mono>{s.n}</Teks>);
     });
-    cy += seg.length * 20 + 8;
+    cy += seg.length * BIAYA_BLOK.pitchPita;
+
+    // --- enam keterangan: BUKAN satu skala, jadi TIDAK diberi batang ---
+    //
+    // Batang di sini akan mengundang perbandingan yang tidak ada artinya ("Dead
+    // Stock lebih panjang dari Phase Out" tidak berarti apa pun). Dua kolom,
+    // label + angka saja, dengan titik berwarna kecil sebagai penanda — bukan
+    // sebagai pembawa makna, karena labelnya sudah ada.
+    if (lain.length) {
+      cy += BIAYA_BLOK.pemisah;
+      bagian.push(<line key="lnx" x1={x + pad} y1={cy - 5} x2={x + w - pad} y2={cy - 5} stroke={WARNA.garisHalus} strokeWidth={1} />);
+      const kolW = isi / 2;
+      lain.forEach((s, i) => {
+        const kol = i % 2;
+        const brs = Math.floor(i / 2);
+        const lx = x + pad + kol * kolW;
+        const ly = cy + brs * BIAYA_BLOK.pitchLain + 9;
+        bagian.push(<circle key={`lc${i}`} cx={lx + 3} cy={ly - 3.5} r={3} fill={s.warna} />);
+        bagian.push(<Teks key={`ll${i}`} x={lx + 11} y={ly} size={10} fill={WARNA.tintaLabel}>{s.label}</Teks>);
+        bagian.push(
+          <Teks key={`ln${i}`} x={lx + kolW - 8} y={ly} size={10} weight={700} anchor="end" mono>{s.n}</Teks>,
+        );
+      });
+      cy += Math.ceil(lain.length / 2) * BIAYA_BLOK.pitchLain;
+    }
+    cy += 8;
   }
 
   // --- tren DOI ---
@@ -169,12 +199,18 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, onKlik }: {
   }
 
   // --- SKU paling mendesak ---
-  if (blok.po && kritisMaks > 0) {
+  // Berapa SKU yang MUAT, bukan berapa yang diminta. Daftar ini satu-satunya
+  // blok yang boleh dipendekkan tanpa kehilangan arti, jadi kalau ruangnya
+  // kurang, inilah yang mengalah — bukan kartunya yang meluber.
+  const poMuat = kritisYangMuat({
+    tinggiKartu: h, blok, diminta: kritisMaks, nLain: lain.length,
+  });
+  if (blok.po && poMuat > 0) {
     cy += 16;
     bagian.push(<Teks key="kr" x={x + pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel}>PALING MENDESAK</Teks>);
     cy += 6;
     if (a.kritis.length) {
-      a.kritis.slice(0, kritisMaks).forEach((r, i) => {
+      a.kritis.slice(0, poMuat).forEach((r, i) => {
         const ky = cy + i * 30;
         const w0 = r.status === 'CRITICAL';
         bagian.push(<rect key={`kd${i}`} x={x + pad} y={ky} width={3} height={22} rx={1.5} fill={w0 ? WARNA.kritisSolid : WARNA.lowSolid} />);
@@ -191,6 +227,16 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, onKlik }: {
       });
     } else {
       bagian.push(<Teks key="kr0" x={x + pad} y={cy + 16} size={11} fill={WARNA.amanFg}>Tidak ada SKU kritis</Teks>);
+    }
+    // Dipotong karena ruang TIDAK boleh terjadi tanpa diberitahu: pembaca harus
+    // tahu daftarnya tidak lengkap, kalau tidak ia menyangka sisanya tidak ada.
+    const sisa = a.kritis.length - poMuat;
+    if (sisa > 0) {
+      bagian.push(
+        <Teks key="krs" x={x + pad} y={cy + poMuat * 30 + 10} size={10} fill={WARNA.tintaLabel}>
+          {`+${sisa} SKU lagi — buka dashboard`}
+        </Teks>,
+      );
     }
   }
 

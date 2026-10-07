@@ -137,6 +137,16 @@ export type TransitSyncResult = SyncResult & {
    * Sengaja TIDAK dipetakan diam-diam ke "Pusat" (lihat namaAreaDari).
    */
   kodeAsing?: { kode: string; baris: number; qty: number }[];
+  /**
+   * ItemCode yang tidak ketemu SKU-nya, PER AREA dan dengan qty-nya.
+   *
+   * Dulu hanya jumlahnya (`takCocok`) yang dibawa keluar, dan skrip malah
+   * mencetak contoh baris yang BERHASIL dicocokkan. Saat satu area tidak
+   * menghasilkan transit sama sekali, itu justru menyembunyikan jawabannya:
+   * yang perlu dilihat adalah kode yang GAGAL, bukan yang berhasil (kena 6 Okt
+   * 2026 saat Pusat/GBJD nol dan penyebabnya tidak bisa ditunjuk).
+   */
+  takCocokRinci?: { sapCode: string; name: string; areaId: string; qty: number }[];
   totalDoQty?: number;
   totalBatchQty?: number;
 };
@@ -301,6 +311,9 @@ export async function syncTransit(
     docsKurang: kurang,
     areas,
     takCocok: hasil.takCocok.length,
+    // Dibatasi 50 teratas menurut qty: cukup untuk menunjuk penyebab tanpa
+    // membuat respons API membengkak.
+    takCocokRinci: hasil.takCocok.slice(0, 50),
     kodeAsing: hasil.kodeAsing,
     totalDoQty: hasil.totalDoQty,
     totalBatchQty: hasil.totalBatchQty,

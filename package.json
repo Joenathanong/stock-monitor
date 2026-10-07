@@ -22,6 +22,7 @@
     "check:ocs": "tsx scripts/check-ocs.ts",
     "check:areas": "tsx scripts/check-areas.ts",
     "check:transit": "tsx scripts/check-transit-area.ts",
+    "rinci:transit": "tsx scripts/rinci-transit.ts",
     "check:receive": "tsx scripts/check-receive-codes.ts",
     "seed:area": "tsx scripts/seed-area.ts",
     "seed:ambang": "tsx scripts/seed-ambang.ts",

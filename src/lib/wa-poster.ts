@@ -37,32 +37,68 @@ export const FONT = "Arial, Helvetica, 'Liberation Sans', sans-serif";
 export const FONT_MONO = "'DejaVu Sans Mono', Menlo, Consolas, monospace";
 
 /**
- * Sebaran status yang ditampilkan.
+ * Sebaran status, DUA kelompok yang digambar berbeda.
  *
- * Empat status yang bisa ditindaklanjuti disebut satu per satu; sisanya
- * (NPL, phase out, dead stock, belum terjual, dikecualikan) dilipat jadi "Lain".
- * Warna status adalah warna CADANGAN — tidak pernah dipakai untuk hal lain — dan
- * selalu ditemani label + angka, tidak pernah warna saja.
+ * PERUBAHAN 7 Okt 2026 atas permintaan user: dulu enam status non-DOI dilipat
+ * jadi satu baris "Lain", dan itu menyembunyikan hal yang perlu dilihat —
+ * terutama Dead Stock (uang mengendap) dan SIT (barang sudah jalan).
+ *
+ *   PITA DOI (4)  : posisi stok pada skala hari yang SAMA, jadi layak
+ *                   dibandingkan satu sama lain -> digambar sebagai batang.
+ *   KETERANGAN (6): bukan tingkat keparahan dan bukan satu skala, jadi TIDAK
+ *                   diberi batang — batang akan mengundang perbandingan yang
+ *                   tidak ada artinya. Cukup label + angka.
+ *
+ * Warna status adalah warna CADANGAN dan selalu ditemani label + angka, tidak
+ * pernah warna saja. Kelompok keterangan sengaja memakai nada netral yang
+ * berulang: yang membedakannya adalah labelnya, bukan warnanya, dan memberi
+ * enam warna baru di sana akan terbaca seolah ada urutan keparahan.
  */
 export const URUT_STATUS = ['CRITICAL', 'LOW', 'HEALTHY', 'OVERSTOCK'] as const;
-export type StatusPoster = (typeof URUT_STATUS)[number] | 'LAIN';
+
+/** Status non-DOI, urut dari yang paling perlu dilihat. */
+export const URUT_LAIN = ['WAITING', 'DEAD_STOCK', 'NO_SALES', 'NPL_WAIT', 'PHASE_OUT', 'EXCLUDED'] as const;
+
+export type StatusPoster = (typeof URUT_STATUS)[number] | (typeof URUT_LAIN)[number] | 'LAIN';
 
 export const STATUS_POSTER: Record<StatusPoster, { label: string; warna: string }> = {
   CRITICAL: { label: 'Kritis', warna: WARNA.kritisSolid },
   LOW: { label: 'Low', warna: WARNA.lowSolid },
   HEALTHY: { label: 'Aman', warna: WARNA.amanSolid },
   OVERSTOCK: { label: 'Overstock', warna: WARNA.violet },
-  LAIN: { label: 'Lain', warna: WARNA.netralSolid },
+  // "SIT", bukan "Tunggu Kiriman" — istilah yang dipakai user sehari-hari.
+  WAITING: { label: 'SIT', warna: WARNA.infoSolid },
+  DEAD_STOCK: { label: 'Dead Stock', warna: WARNA.netralFg },
+  NO_SALES: { label: 'Belum Terjual', warna: WARNA.netralSolid },
+  NPL_WAIT: { label: 'NPL', warna: WARNA.netralSolid },
+  PHASE_OUT: { label: 'Phase Out', warna: WARNA.netralFg },
+  EXCLUDED: { label: 'Dikecualikan', warna: WARNA.netralSolid },
+  // Jaring pengaman: status yang belum dikenal tidak boleh hilang tanpa jejak.
+  LAIN: { label: 'Lain-lain', warna: WARNA.netralSolid },
 };
 
 export type Segmen = { key: StatusPoster; label: string; warna: string; n: number };
 
+/** Empat pita DOI — inilah yang diberi batang. */
 export function segmenStatus(byStatus: Record<string, number> | null | undefined): Segmen[] {
   const b = byStatus ?? {};
-  const inti = URUT_STATUS.map((k) => ({ key: k as StatusPoster, ...STATUS_POSTER[k], n: Number(b[k] ?? 0) }));
-  const dipakai = new Set<string>(URUT_STATUS);
-  const lain = Object.entries(b).reduce((t, [k, v]) => (dipakai.has(k) ? t : t + Number(v || 0)), 0);
-  return lain > 0 ? [...inti, { key: 'LAIN' as StatusPoster, ...STATUS_POSTER.LAIN, n: lain }] : inti;
+  return URUT_STATUS.map((k) => ({ key: k as StatusPoster, ...STATUS_POSTER[k], n: Number(b[k] ?? 0) }));
+}
+
+/**
+ * Enam status keterangan, dirinci satu per satu.
+ *
+ * Yang bernilai 0 TETAP ditampilkan: tinggi kartu harus sama di semua area,
+ * dan "Dead Stock 0" adalah informasi, bukan ruang kosong. Status di luar
+ * sepuluh yang dikenal dijumlahkan jadi "Lain-lain" dan hanya muncul kalau > 0 —
+ * supaya penambahan status baru di `doi.ts` tidak lenyap dari poster.
+ */
+export function segmenLain(byStatus: Record<string, number> | null | undefined): Segmen[] {
+  const b = byStatus ?? {};
+  const inti = URUT_LAIN.map((k) => ({ key: k as StatusPoster, ...STATUS_POSTER[k], n: Number(b[k] ?? 0) }));
+  const dikenal = new Set<string>([...URUT_STATUS, ...URUT_LAIN]);
+  const sisa = Object.entries(b).reduce((t, [k, v]) => (dikenal.has(k) ? t : t + Number(v || 0)), 0);
+  return sisa > 0 ? [...inti, { key: 'LAIN' as StatusPoster, ...STATUS_POSTER.LAIN, n: sisa }] : inti;
 }
 
 /** Rupiah diringkas — "Rp 52,4 M" muat di kartu selebar 294px, "Rp 52.431.882.100" tidak. */
@@ -160,4 +196,68 @@ export const deretTren = (
 export function lebarKartu(jumlah: number, total = KANVAS.w, margin = 32, jarak = 16): number {
   if (jumlah <= 0) return 0;
   return (total - 2 * margin - (jumlah - 1) * jarak) / jumlah;
+}
+
+/**
+ * Tinggi kartu area yang DIBUTUHKAN, dalam px — supaya luberan jadi tes yang
+ * gagal, bukan cacat yang tak kelihatan.
+ *
+ * Kenapa ini ada: 7 Okt 2026 ternyata poster SUDAH meluber. Dengan semua blok
+ * aktif dan kritisMaks 6, isinya butuh 700px di kartu 628px. SVG tanpa
+ * `clipPath` tidak memotong apa pun, jadi kelebihannya tergambar menimpa kaki
+ * poster — dan tidak ada yang gagal, tidak ada yang memperingatkan. Angka-angka
+ * di sini HARUS sama dengan kenaikan `cy` di `poster.tsx`; tesnya mengunci itu.
+ */
+export const BIAYA_BLOK = {
+  kepala: 30 + 12,
+  angka: 26 + 34 + 26 + (3 * 46 - 6 + 8),
+  /** Judul + jeda + penutup, di luar barisnya sendiri. */
+  statusTetap: 16 + 8 + 8,
+  tren: 16 + 6 + 56 + 20,
+  /** Judul + jeda, di luar daftar SKU-nya. */
+  poTetap: 16 + 6,
+  poPerBaris: 30,
+  /** Jarak antar baris pita DOI (berbatang). */
+  pitchPita: 20,
+  /** Tinggi satu baris kelompok keterangan; 2 kolom, jadi 3 baris untuk 6 item. */
+  pitchLain: 16,
+  /** Garis pemisah antara pita DOI dan kelompok keterangan. */
+  pemisah: 10,
+} as const;
+
+export type BlokPoster = { angka?: boolean; status?: boolean; tren?: boolean; po?: boolean };
+
+export function tinggiKartu(opsi: {
+  blok: BlokPoster; nPita?: number; nLain?: number; kritisMaks?: number;
+}): number {
+  const b = opsi.blok;
+  const nPita = opsi.nPita ?? URUT_STATUS.length;
+  const nLain = opsi.nLain ?? URUT_LAIN.length;
+  let t = BIAYA_BLOK.kepala;
+  if (b.angka) t += BIAYA_BLOK.angka;
+  if (b.status) {
+    t += BIAYA_BLOK.statusTetap + nPita * BIAYA_BLOK.pitchPita;
+    // Kelompok keterangan disusun 2 kolom, jadi barisnya setengah (dibulatkan naik).
+    if (nLain > 0) t += BIAYA_BLOK.pemisah + Math.ceil(nLain / 2) * BIAYA_BLOK.pitchLain;
+  }
+  if (b.tren) t += BIAYA_BLOK.tren;
+  if (b.po && (opsi.kritisMaks ?? 0) > 0) t += BIAYA_BLOK.poTetap + (opsi.kritisMaks ?? 0) * BIAYA_BLOK.poPerBaris;
+  return t;
+}
+
+/**
+ * Berapa SKU "paling mendesak" yang masih MUAT, bukan berapa yang diminta.
+ *
+ * Daftar itulah satu-satunya blok yang panjangnya bisa dipotong tanpa kehilangan
+ * arti — sisanya tetap. Jadi kalau ruangnya kurang, yang dipendekkan daftar ini,
+ * dan poster tetap utuh di dalam kartunya.
+ */
+export function kritisYangMuat(opsi: {
+  tinggiKartu: number; blok: BlokPoster; diminta: number; nPita?: number; nLain?: number;
+}): number {
+  if (!opsi.blok.po || opsi.diminta <= 0) return 0;
+  const tanpaPo = tinggiKartu({ ...opsi, blok: { ...opsi.blok, po: false }, kritisMaks: 0 });
+  const sisa = opsi.tinggiKartu - tanpaPo - BIAYA_BLOK.poTetap;
+  if (sisa < BIAYA_BLOK.poPerBaris) return 0;
+  return Math.max(0, Math.min(opsi.diminta, Math.floor(sisa / BIAYA_BLOK.poPerBaris)));
 }

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Poster } from './poster';
 import type { AreaWa, DataWa } from './types';
-import { KANVAS, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
+import { KANVAS, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, segmenLain, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
 
 /**
  * Halaman poster WhatsApp.
@@ -18,7 +18,10 @@ const fmt = (n: number) => n.toLocaleString('id-ID');
 
 function Rincian({ a, disp, onTutup }: { a: AreaWa; disp: DoiDisplay; onTutup: () => void }) {
   const seg = segmenStatus(a.byStatus);
-  const total = seg.reduce((t, s) => t + s.n, 0) || 1;
+  const lain = segmenLain(a.byStatus);
+  // Pembaginya SELURUH SKU, bukan hanya empat pita — kalau tidak, "Aman"
+  // terlihat hampir 100% padahal masih ada SKU di kelompok keterangan.
+  const total = [...seg, ...lain].reduce((t, s) => t + s.n, 0) || 1;
 
   // ESC menutup — dialog tanpa ini memerangkap orang yang memakai papan ketik.
   useEffect(() => {
@@ -59,6 +62,19 @@ function Rincian({ a, disp, onTutup }: { a: AreaWa; disp: DoiDisplay; onTutup: (
                 <span className="w-[52px] text-right text-[12px] font-semibold tabular-nums">{fmt(s.n)}</span>
               </div>
             ))}
+            {/* Enam status keterangan: bukan satu skala hari, jadi tanpa batang —
+                batang di sini mengundang perbandingan yang tidak ada artinya. */}
+            <div className="mt-3 border-t pt-2" style={{ borderColor: 'var(--border-subtle)' }}>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                {lain.map((s) => (
+                  <div key={s.key} className="flex items-center gap-2 text-[12px]">
+                    <span className="h-1.5 w-1.5 flex-none rounded-full" style={{ background: s.warna }} />
+                    <span className="flex-1 text-label">{s.label}</span>
+                    <span className="font-semibold tabular-nums">{fmt(s.n)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
 
           <div className="card card-pad">

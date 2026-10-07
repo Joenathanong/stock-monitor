@@ -21,12 +21,33 @@ syncTransit(15 * 60_000, 3, force)
       console.table(Object.entries(r.areas).map(([area, qty]) => ({ area, qty })));
       console.log(`  total DoQty ${r.totalDoQty?.toLocaleString('id-ID')} · BatchQuantity ${r.totalBatchQty?.toLocaleString('id-ID')}`);
     }
-    if (r.takCocok) {
-      const rows = await prisma.$queryRawUnsafe<{ sku: string; areaId: string; qty: number }[]>(
-        "SELECT sku, areaId, qty FROM transit_stock WHERE source = 'ocs' ORDER BY qty DESC LIMIT 5",
-      );
-      console.log(`\n  ${r.takCocok} kode SAP tidak ketemu SKU-nya — cek di halaman Stok Dalam Perjalanan.`);
-      console.log('  Contoh baris yang BERHASIL dicocokkan:', rows.map((x) => `${x.sku}/${x.areaId}`).join(', '));
+    // Area yang dokumennya ADA tapi tidak menghasilkan satu baris transit pun.
+    // Inilah keadaan yang paling membingungkan di layar ("kok SIT-nya nol?"),
+    // jadi disebut lebih dulu dan dengan namanya.
+    const takCocok = r.takCocokRinci ?? [];
+    if (takCocok.length) {
+      const perArea = new Map<string, { qty: number; kode: string[] }>();
+      for (const t of takCocok) {
+        const a = perArea.get(t.areaId) ?? { qty: 0, kode: [] };
+        a.qty += t.qty;
+        if (a.kode.length < 6) a.kode.push(`${t.sapCode} (${t.qty})`);
+        perArea.set(t.areaId, a);
+      }
+      console.log(`\n${r.takCocok} kode SAP TIDAK ketemu SKU-nya — qty-nya TIDAK masuk DOI.`);
+      console.log('Penyebab biasanya: kodenya belum ada di stock_current area itu,');
+      console.log('atau 6 digit terakhirnya tidak cocok dengan SKU mana pun.\n');
+      for (const [area, v] of [...perArea.entries()].sort((a, b) => b[1].qty - a[1].qty)) {
+        const nolTransit = !(r.areas && r.areas[area]);
+        console.log(
+          `  ${area.padEnd(12)} ${String(v.qty).padStart(8)} pcs terbuang`
+          + `${nolTransit ? '   <-- area ini TIDAK punya transit sama sekali' : ''}`,
+        );
+        console.log(`    kode: ${v.kode.join(', ')}`);
+      }
+    }
+    if (r.kodeAsing?.length) {
+      console.log('\nKode gudang BELUM terdaftar di Pengaturan -> Cabang / Area:');
+      for (const k of r.kodeAsing) console.log(`  ${k.kode} — ${k.baris} baris, ${k.qty} pcs (tidak masuk area mana pun)`);
     }
     if (r.message && !r.skipped) console.log(`\n  ${r.message}`);
   })

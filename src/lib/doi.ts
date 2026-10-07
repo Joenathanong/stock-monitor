@@ -279,9 +279,30 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
     }
   }
 
-  // --- Saran qty: cukup untuk mencapai target DOI, dikurangi stok + transit ---
+  // --- Saran qty ---
+  //
+  // HANYA saat stok sudah MENYENTUH titik pesan (status CRITICAL atau LOW).
+  //
+  // BUG YANG DIBETULKAN 7 Okt 2026, ditemukan user. Sebelumnya syaratnya "status
+  // bukan salah satu dari lima status mati", sehingga SKU berstatus AMAN dan SIT
+  // pun ikut disarankan PO — karena AMAN berarti DOI ada DI ANTARA min dan max,
+  // jadi `max*ads - position` selalu positif. Akibatnya di poster:
+  //
+  //   Medan: perluPo 121 = Kritis 58 + Low 14 + Aman 48 + SIT 1
+  //          padahal yang benar 72 = Kritis 58 + Low 14
+  //
+  // Itu melebih-lebihkan beban PO 68% dan menyuruh orang memesan barang yang
+  // belum perlu dipesan. Terbukti sama di kelima area, jadi bukan kebetulan.
+  //
+  // Dua status yang sengaja TIDAK dapat saran, dan alasannya beda:
+  //   AMAN  -> memang belum waktunya. Ini inti (s,S): pesan saat menyentuh min,
+  //            isi sampai max. Mengisi ulang setiap SKU yang sekadar di bawah
+  //            max membatalkan gunanya punya min.
+  //   SIT   -> stoknya memang tipis, TAPI kiriman yang sedang jalan sudah
+  //            menutupinya. Memesan lagi berarti pesan dua kali.
+  const perluPesan = status === 'CRITICAL' || status === 'LOW';
   const suggest = (ads: number) =>
-    ads > 0 && status !== 'DEAD_STOCK' && status !== 'NO_SALES' && status !== 'EXCLUDED' && status !== 'NPL_WAIT' && status !== 'PHASE_OUT'
+    perluPesan && ads > 0
       // Diisi sampai batas ATAS pita aman area ini; tanpa ambang per area, tetap
       // memakai target global supaya angkanya tidak berubah diam-diam.
       ? Math.max(0, Math.ceil((ctx.ambang?.max ?? s.targetDoiDays) * ads - position))

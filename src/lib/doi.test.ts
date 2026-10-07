@@ -364,3 +364,61 @@ test('transit yang sudah menutupi titik pesan jadi WAITING, bukan LOW lagi', () 
   });
   assert.equal(r.status, 'WAITING');
 });
+
+// ---------------------------------------------------------------------------
+// Saran PO hanya saat menyentuh titik pesan. Bug ditemukan user 7 Okt 2026:
+// poster Medan menampilkan "Perlu open PO 121" padahal yang benar 72.
+// ---------------------------------------------------------------------------
+
+test('AMAN tidak dapat saran PO — belum menyentuh titik pesan', () => {
+  const s = S;
+  const am = { kritis: 7, min: 14, max: 21 };   // Surabaya
+  const ctx = { today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>(), ambang: am };
+  // ADS 1/hari, stok 18 -> DOI 18, di antara min 14 dan max 21 = AMAN.
+  const r = computeSku(skuDoi(18), s, ctx);
+  assert.equal(r.status, 'HEALTHY');
+  assert.equal(r.suggested1, 0, 'dulu ini 21-18=3 dan membuat SKU aman masuk Perlu open PO');
+  assert.equal(r.suggested2, 0);
+});
+
+test('SIT tidak dapat saran PO — kiriman yang jalan sudah menutupinya', () => {
+  const s = S;
+  const am = { kritis: 7, min: 14, max: 21 };
+  const ctx = { today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>(), ambang: am };
+  // Stok 10 (di bawah min), transit 8 -> posisi 18, statusnya WAITING.
+  const r = computeSku(skuDoi(10, 8), s, ctx);
+  assert.equal(r.status, 'WAITING');
+  assert.equal(r.suggested1, 0, 'memesan lagi berarti pesan dua kali');
+});
+
+test('KRITIS dan LOW tetap dapat saran, diisi sampai batas aman', () => {
+  const s = S;
+  const am = { kritis: 7, min: 14, max: 21 };
+  const ctx = { today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>(), ambang: am };
+  const kritis = computeSku(skuDoi(5), s, ctx);
+  assert.equal(kritis.status, 'CRITICAL');
+  assert.equal(kritis.suggested1, 16, '21 - 5');
+  const low = computeSku(skuDoi(12), s, ctx);
+  assert.equal(low.status, 'LOW');
+  assert.equal(low.suggested1, 9, '21 - 12');
+});
+
+test('OVERSTOCK tetap 0 — dan sekarang karena ATURAN, bukan karena kebetulan', () => {
+  const s = S;
+  const am = { kritis: 7, min: 14, max: 21 };
+  const ctx = { today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>(), ambang: am };
+  const r = computeSku(skuDoi(40), s, ctx);
+  assert.equal(r.status, 'OVERSTOCK');
+  assert.equal(r.suggested1, 0);
+});
+
+test('angka Medan yang benar: 72, bukan 121', () => {
+  // Rekonstruksi aritmetikanya dari byStatus nyata 7 Okt 2026. Yang dihitung
+  // "Perlu open PO" adalah SKU dengan suggested > 0, dan setelah perbaikan itu
+  // HANYA Kritis + Low.
+  const byStatus = { CRITICAL: 58, LOW: 14, HEALTHY: 48, WAITING: 1, OVERSTOCK: 140, PHASE_OUT: 62, NO_SALES: 6, NPL_WAIT: 1 };
+  const dulu = byStatus.CRITICAL + byStatus.LOW + byStatus.HEALTHY + byStatus.WAITING;
+  const benar = byStatus.CRITICAL + byStatus.LOW;
+  assert.equal(dulu, 121, 'inilah angka yang muncul di poster');
+  assert.equal(benar, 72);
+});

@@ -79,26 +79,80 @@ export const STATUS_POSTER: Record<StatusPoster, { label: string; warna: string 
 
 export type Segmen = { key: StatusPoster; label: string; warna: string; n: number };
 
-/** Empat pita DOI — inilah yang diberi batang. */
-export function segmenStatus(byStatus: Record<string, number> | null | undefined): Segmen[] {
+/**
+ * Status mana yang ditampilkan, diputuskan SEKALI untuk SELURUH area.
+ *
+ * Aturan user 7 Okt 2026: baris yang nilainya 0 di SEMUA area tidak perlu
+ * ditampilkan; begitu satu area saja terisi, barisnya muncul di semua kartu.
+ *
+ * Kenapa lintas area dan bukan per area: kalau tiap kartu menyembunyikan baris
+ * nolnya sendiri, tinggi kartu jadi berbeda-beda dan barisnya tidak sejajar
+ * antar kolom — mata tidak bisa lagi membandingkan "Dead Stock" Medan dengan
+ * Makassar karena posisinya bergeser. Jadi keputusannya satu untuk semuanya.
+ *
+ * Kalau SEMUA nol (umumnya berarti belum ada data), empat pita DOI tetap
+ * ditampilkan: blok kosong tanpa penjelasan lebih membingungkan daripada empat
+ * baris bernilai 0.
+ */
+export function kunciTampil(
+  semuaByStatus: (Record<string, number> | null | undefined)[],
+): Set<StatusPoster> {
+  const total = new Map<string, number>();
+  for (const b of semuaByStatus) {
+    for (const [k, v] of Object.entries(b ?? {})) total.set(k, (total.get(k) ?? 0) + (Number(v) || 0));
+  }
+  const dikenal = new Set<string>([...URUT_STATUS, ...URUT_LAIN]);
+  const out = new Set<StatusPoster>();
+  for (const k of [...URUT_STATUS, ...URUT_LAIN]) {
+    if ((total.get(k) ?? 0) > 0) out.add(k as StatusPoster);
+  }
+  // Status yang belum dikenal dijumlahkan jadi satu baris "Lain-lain".
+  let asing = 0;
+  for (const [k, v] of total) if (!dikenal.has(k)) asing += v;
+  if (asing > 0) out.add('LAIN');
+
+  if (!out.size) for (const k of URUT_STATUS) out.add(k as StatusPoster);
+  return out;
+}
+
+/**
+ * Empat pita DOI — diberi batang.
+ *
+ * `tampil` dari `kunciTampil`; tanpa itu keempatnya ditampilkan apa adanya.
+ */
+export function segmenStatus(
+  byStatus: Record<string, number> | null | undefined,
+  tampil?: ReadonlySet<StatusPoster>,
+): Segmen[] {
   const b = byStatus ?? {};
-  return URUT_STATUS.map((k) => ({ key: k as StatusPoster, ...STATUS_POSTER[k], n: Number(b[k] ?? 0) }));
+  return URUT_STATUS
+    .filter((k) => !tampil || tampil.has(k as StatusPoster))
+    .map((k) => ({ key: k as StatusPoster, ...STATUS_POSTER[k], n: Number(b[k] ?? 0) }));
 }
 
 /**
  * Enam status keterangan, dirinci satu per satu.
  *
- * Yang bernilai 0 TETAP ditampilkan: tinggi kartu harus sama di semua area,
- * dan "Dead Stock 0" adalah informasi, bukan ruang kosong. Status di luar
- * sepuluh yang dikenal dijumlahkan jadi "Lain-lain" dan hanya muncul kalau > 0 —
- * supaya penambahan status baru di `doi.ts` tidak lenyap dari poster.
+ * Yang bernilai 0 di area INI tetap ditampilkan kalau area LAIN punya isinya
+ * (lihat `kunciTampil`): tinggi kartu harus sama supaya barisnya sejajar antar
+ * kolom. Yang 0 di SEMUA area disembunyikan. Status di luar sepuluh yang dikenal
+ * dijumlahkan jadi "Lain-lain" supaya penambahan status baru di `doi.ts` tidak
+ * lenyap dari poster.
  */
-export function segmenLain(byStatus: Record<string, number> | null | undefined): Segmen[] {
+export function segmenLain(
+  byStatus: Record<string, number> | null | undefined,
+  tampil?: ReadonlySet<StatusPoster>,
+): Segmen[] {
   const b = byStatus ?? {};
-  const inti = URUT_LAIN.map((k) => ({ key: k as StatusPoster, ...STATUS_POSTER[k], n: Number(b[k] ?? 0) }));
+  const inti = URUT_LAIN
+    .filter((k) => !tampil || tampil.has(k as StatusPoster))
+    .map((k) => ({ key: k as StatusPoster, ...STATUS_POSTER[k], n: Number(b[k] ?? 0) }));
   const dikenal = new Set<string>([...URUT_STATUS, ...URUT_LAIN]);
   const sisa = Object.entries(b).reduce((t, [k, v]) => (dikenal.has(k) ? t : t + Number(v || 0)), 0);
-  return sisa > 0 ? [...inti, { key: 'LAIN' as StatusPoster, ...STATUS_POSTER.LAIN, n: sisa }] : inti;
+  // Baris "Lain-lain" muncul kalau area INI punya sisa, atau kalau area LAIN
+  // punya (lewat `tampil`) — supaya barisnya sejajar di semua kartu.
+  const perlu = tampil ? tampil.has('LAIN') : sisa > 0;
+  return perlu ? [...inti, { key: 'LAIN' as StatusPoster, ...STATUS_POSTER.LAIN, n: sisa }] : inti;
 }
 
 /** Rupiah diringkas — "Rp 52,4 M" muat di kartu selebar 294px, "Rp 52.431.882.100" tidak. */
@@ -283,4 +337,48 @@ export function tataLetakStatus(opsi: {
     }
   }
   return { pitch: BIAYA_BLOK.pitchPilihan[BIAYA_BLOK.pitchPilihan.length - 1], poMuat: 0 };
+}
+
+/**
+ * Perkiraan lebar teks dalam px — untuk mencegah teks menabrak tetangganya.
+ *
+ * SVG tidak punya `text-overflow: ellipsis` dan tidak membungkus teks: kalau
+ * terlalu panjang, ia menimpa apa pun di sebelahnya tanpa ada yang gagal. Jadi
+ * lebarnya harus diperkirakan SEBELUM menggambar.
+ *
+ * 0,56em adalah rata-rata konservatif untuk Arial/Helvetica campuran huruf besar
+ * dan kecil; 0,62em untuk mono yang lebih lebar. Sengaja perkiraan yang
+ * CENDERUNG melebihkan — kelebihan ruang hanya membuat batang sedikit lebih
+ * pendek, sedangkan kekurangan ruang membuat teks bertumpuk.
+ */
+export function lebarTeksKira(teks: string, size: number, mono = false): number {
+  return String(teks ?? '').length * (mono ? 0.62 : 0.56) * size;
+}
+
+/** Jeda minimal antara label dan batang. Kelipatan 8 → 8px (ISO 9241-125 §5). */
+export const JEDA_LABEL = 8;
+
+/**
+ * Lebar kolom label, dihitung dari label yang BENAR-BENAR ditampilkan.
+ *
+ * Dulu dipatok 62px. Saat label "Belum Terjual" (±80px) dan "Dikecualikan"
+ * (±74px) ditambahkan 7 Okt 2026, keduanya menabrak batang — dan tidak ada tes
+ * yang bisa melihatnya. Sekarang gutter mengikuti isinya, jadi menambah label
+ * baru tidak bisa lagi merusak tata letak tanpa sepengetahuan siapa pun.
+ *
+ * Dibatasi `maks` supaya label yang keterlaluan panjang tidak menghabiskan
+ * batangnya; di atas itu label dipotong oleh `potongTeks`.
+ */
+export function gutterLabel(label: string[], size: number, maks = 110): number {
+  const lebar = label.reduce((m, t) => Math.max(m, lebarTeksKira(t, size)), 0);
+  return Math.min(maks, Math.ceil(lebar) + JEDA_LABEL);
+}
+
+/** Potong teks agar muat dalam `maksPx`, dengan elipsis. SVG tidak melakukannya sendiri. */
+export function potongTeks(teks: string, maksPx: number, size: number, mono = false): string {
+  const t = String(teks ?? '');
+  if (lebarTeksKira(t, size, mono) <= maksPx) return t;
+  const perKarakter = (mono ? 0.62 : 0.56) * size;
+  const muat = Math.max(1, Math.floor(maksPx / perKarakter) - 1);
+  return `${t.slice(0, muat)}…`;
 }

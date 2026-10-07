@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, rupiahRingkas, segmenStatus, segmenLain, tinggiKartu, tataLetakStatus, tampil1, tampil2 } from './wa-poster';
+import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tinggiKartu, tataLetakStatus, tampil1, tampil2 } from './wa-poster';
 
 test('rupiah diringkas per satuan', () => {
   assert.equal(rupiahRingkas(52_431_882_100), 'Rp 52,4 M');
@@ -190,4 +190,137 @@ test('kartu mustahil kecil: poMuat 0, dan tetap tidak melempar', () => {
   const t = tataLetakStatus({ tinggiKartu: 100, blok: { angka: true, status: true, tren: true, po: true }, nBaris: 10, diminta: 6 });
   assert.equal(t.poMuat, 0);
   assert.ok(t.pitch >= 13);
+});
+
+// ---------------------------------------------------------------------------
+// Baris nol disembunyikan — tapi LINTAS AREA (aturan user 7 Okt 2026).
+// ---------------------------------------------------------------------------
+
+test('baris yang 0 di SEMUA area disembunyikan', () => {
+  const tampil = kunciTampil([
+    { CRITICAL: 5, HEALTHY: 100, WAITING: 2 },
+    { CRITICAL: 1, HEALTHY: 90, WAITING: 0 },
+  ]);
+  assert.ok(!tampil.has('EXCLUDED'), 'Dikecualikan 0 di semua area -> hilang');
+  assert.ok(!tampil.has('DEAD_STOCK'));
+  assert.ok(!tampil.has('LOW'), 'aturan berlaku untuk pita DOI juga');
+  assert.ok(tampil.has('CRITICAL') && tampil.has('HEALTHY') && tampil.has('WAITING'));
+});
+
+test('terisi di SATU area saja sudah cukup — barisnya muncul di SEMUA kartu', () => {
+  const byStatus: Record<string, number>[] = [
+    { HEALTHY: 100 },                    // Pusat: tidak ada dead stock
+    { HEALTHY: 90, DEAD_STOCK: 3 },      // Medan: ada 3
+  ];
+  const tampil = kunciTampil(byStatus);
+  assert.ok(tampil.has('DEAD_STOCK'));
+  // Dan di kartu Pusat barisnya TETAP ada dengan nilai 0, supaya sejajar.
+  const pusat = segmenLain(byStatus[0], tampil);
+  const dead = pusat.find((x) => x.key === 'DEAD_STOCK');
+  assert.equal(dead?.n, 0, 'tetap tampil sebagai 0, bukan hilang');
+  // Jumlah baris harus SAMA di kedua kartu — kalau tidak, kolomnya tidak sejajar.
+  assert.equal(segmenLain(byStatus[1], tampil).length, pusat.length);
+  assert.equal(segmenStatus(byStatus[1], tampil).length, segmenStatus(byStatus[0], tampil).length);
+});
+
+test('semua nol: empat pita DOI tetap tampil, bukan blok kosong', () => {
+  const tampil = kunciTampil([{}, null, undefined]);
+  assert.deepEqual([...tampil].sort(), ['CRITICAL', 'HEALTHY', 'LOW', 'OVERSTOCK']);
+  assert.equal(segmenLain({}, tampil).length, 0, 'kelompok keterangan kosong seluruhnya');
+});
+
+test('status tak dikenal ikut aturan yang sama', () => {
+  const adaAsing = kunciTampil([{ HEALTHY: 5 }, { STATUS_BARU: 2 }]);
+  assert.ok(adaAsing.has('LAIN'));
+  // Dan muncul di kartu yang TIDAK punya status itu, bernilai 0.
+  const tanpa = segmenLain({ HEALTHY: 5 }, adaAsing);
+  assert.equal(tanpa.find((x) => x.key === 'LAIN')?.n, 0);
+  assert.ok(!kunciTampil([{ HEALTHY: 5 }]).has('LAIN'), 'tanpa status asing, tidak ada baris itu');
+});
+
+test('jumlah baris menyusut, jadi jarak baris bisa melonggar', () => {
+  const KARTU_H = 628;
+  const semua = { angka: true, status: true, tren: true, po: true };
+  const sepuluh = tataLetakStatus({ tinggiKartu: KARTU_H, blok: semua, nBaris: 10, diminta: 6 });
+  const enam = tataLetakStatus({ tinggiKartu: KARTU_H, blok: semua, nBaris: 6, diminta: 6 });
+  assert.ok(
+    enam.pitch >= sepuluh.pitch && (enam.pitch > sepuluh.pitch || enam.poMuat > sepuluh.poMuat),
+    `6 baris: ${enam.pitch}/${enam.poMuat} vs 10 baris: ${sepuluh.pitch}/${sepuluh.poMuat}`,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Tata letak: tidak ada teks yang boleh keluar dari kartunya.
+// Dilaporkan user 7 Okt 2026. SVG tidak membungkus & tidak punya ellipsis, jadi
+// teks yang terlalu panjang MENIMPA tetangganya tanpa ada yang gagal — maka
+// aturannya ditegakkan dengan assertion (ISO 9241-112 legibility, §6 skill).
+// ---------------------------------------------------------------------------
+
+const KARTU_W = lebarKartu(5, 1600, 32, 16);   // 294,4px — 5 area
+const ISI = KARTU_W - 2 * 16;
+
+test('lebar kartu 5 area seperti yang diasumsikan tes tata letak', () => {
+  assert.ok(Math.abs(KARTU_W - 294.4) < 0.1, `${KARTU_W}`);
+});
+
+test('SETIAP label status muat di kolom labelnya — termasuk yang terpanjang', () => {
+  const label = [...URUT_STATUS, ...URUT_LAIN, 'LAIN' as const].map((k) => STATUS_POSTER[k].label);
+  for (const fs of [10, 11]) {
+    const g = gutterLabel(label, fs);
+    for (const t of label) {
+      assert.ok(
+        lebarTeksKira(t, fs) <= g - JEDA_LABEL + 0.01,
+        `"${t}" ${lebarTeksKira(t, fs).toFixed(0)}px tidak muat di gutter ${g}px (fs ${fs})`,
+      );
+    }
+  }
+});
+
+test('gutter 62px yang LAMA memang tidak cukup — ini bug yang dilaporkan user', () => {
+  // Rekaman fakta: dengan gutter dipatok 62px, dua label baru menabrak batang.
+  assert.ok(lebarTeksKira('Belum Terjual', 11) > 62);
+  assert.ok(lebarTeksKira('Dikecualikan', 11) > 62);
+  // Dan dengan gutter terhitung, keduanya aman.
+  const g = gutterLabel(['Belum Terjual', 'Dikecualikan'], 11);
+  assert.ok(lebarTeksKira('Belum Terjual', 11) <= g - JEDA_LABEL);
+});
+
+test('label + batang + angka selalu muat dalam isi kartu', () => {
+  const label = [...URUT_STATUS, ...URUT_LAIN].map((k) => STATUS_POSTER[k].label);
+  for (const fs of [10, 11]) {
+    const gLabel = gutterLabel(label, fs);
+    // Angka terburuk yang realistis: 4 digit (ribuan SKU).
+    const gAngka = Math.ceil(lebarTeksKira('9999', fs, true)) + 8;
+    const barW = Math.max(24, ISI - gLabel - gAngka);
+    assert.ok(gLabel + barW + gAngka <= ISI + 0.01, `fs ${fs}: ${gLabel}+${barW}+${gAngka} > ${ISI}`);
+    assert.ok(barW >= 60, `batang ${barW}px terlalu pendek untuk dibaca sebagai porsi`);
+  }
+});
+
+test('potongTeks memangkas yang kepanjangan, membiarkan yang muat', () => {
+  assert.equal(potongTeks('Low', 60, 11), 'Low');
+  const p = potongTeks('Belum Terjual Sekali Pun', 50, 11);
+  assert.ok(p.endsWith('…') && p.length < 'Belum Terjual Sekali Pun'.length);
+  assert.ok(lebarTeksKira(p, 11) <= 50 + 11 * 0.56, 'hasil potongan muat (toleransi 1 karakter elipsis)');
+});
+
+test('nama area dan lencana kritis muat di kepala kartu', () => {
+  // Kepala: nama area 19px di kiri, lencana "NNN kritis" 74px di kanan.
+  for (const nama of ['Pusat', 'Medan', 'Makassar', 'Surabaya', 'Yogyakarta']) {
+    assert.ok(
+      lebarTeksKira(nama, 19) + 74 + 8 <= ISI,
+      `"${nama}" ${lebarTeksKira(nama, 19).toFixed(0)}px + lencana tidak muat di ${ISI}px`,
+    );
+  }
+});
+
+test('strip ringkasan atas: label terpanjang muat di kolomnya', () => {
+  // 9 kolom saat kedua opsi DOI tampil; label 12px, angka rFs 20px.
+  const kolom = (1600 - 2 * 32) / 9;
+  for (const l of ['SKU dihitung', 'Dalam perjalanan', 'Nilai + SIT', 'Kritis + Low', 'DOI Opsi 1', 'ADS']) {
+    assert.ok(lebarTeksKira(l, 12) <= kolom, `label "${l}" tidak muat di kolom ${kolom.toFixed(0)}px`);
+  }
+  for (const v of ['Rp 52,4 M', '56.115/hari', '1,1 jt pcs', '20,4 hari', '157 SKU']) {
+    assert.ok(lebarTeksKira(v, 20) <= kolom, `angka "${v}" tidak muat di kolom ${kolom.toFixed(0)}px`);
+  }
 });

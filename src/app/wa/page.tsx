@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Poster } from './poster';
 import type { AreaWa, DataWa } from './types';
-import { KANVAS, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, segmenLain, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
+import { KANVAS, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
 
 /**
  * Halaman poster WhatsApp.
@@ -16,9 +16,14 @@ import { KANVAS, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, se
  */
 const fmt = (n: number) => n.toLocaleString('id-ID');
 
-function Rincian({ a, disp, onTutup }: { a: AreaWa; disp: DoiDisplay; onTutup: () => void }) {
-  const seg = segmenStatus(a.byStatus);
-  const lain = segmenLain(a.byStatus);
+function Rincian({ a, disp, tampil, onTutup }: {
+  a: AreaWa; disp: DoiDisplay;
+  /** Status yang ditampilkan — dihitung lintas area, sama dengan posternya. */
+  tampil: ReturnType<typeof kunciTampil>;
+  onTutup: () => void;
+}) {
+  const seg = segmenStatus(a.byStatus, tampil);
+  const lain = segmenLain(a.byStatus, tampil);
   // Pembaginya SELURUH SKU, bukan hanya empat pita — kalau tidak, "Aman"
   // terlihat hampir 100% padahal masih ada SKU di kelompok keterangan.
   const total = [...seg, ...lain].reduce((t, s) => t + s.n, 0) || 1;
@@ -66,7 +71,10 @@ function Rincian({ a, disp, onTutup }: { a: AreaWa; disp: DoiDisplay; onTutup: (
                 dan setiap SKU punya tepat satu status — jadi kesepuluhnya potongan
                 dari satu keseluruhan yang sama. Dipisah garis, bukan dibedakan
                 bentuknya. (Di layar tidak ada batas tinggi seperti di poster.) */}
-            <div className="mt-2 border-t pt-2" style={{ borderColor: 'var(--border-subtle)' }}>
+            <div
+              className={lain.length && seg.length ? 'mt-2 border-t pt-2' : ''}
+              style={lain.length && seg.length ? { borderColor: 'var(--border-subtle)' } : undefined}
+            >
               {lain.map((s) => (
                 <div key={s.key} className="mb-1.5 flex items-center gap-2">
                   <span className="w-[76px] text-[12px]">{s.label}</span>
@@ -218,7 +226,14 @@ export default function WaPage() {
           {unduh === 'proses' ? 'Menyiapkan…' : unduh === 'gagal' ? 'Gagal — coba lagi' : 'Unduh JPG'}
         </button>
       </div>
-      {areaTerpilih ? <Rincian a={areaTerpilih} disp={data.doiDisplay ?? 'BOTH'} onTutup={() => setPilih(null)} /> : null}
+      {areaTerpilih ? (
+        <Rincian
+          a={areaTerpilih}
+          disp={data.doiDisplay ?? 'BOTH'}
+          tampil={kunciTampil(data.areas.map((x) => x.byStatus))}
+          onTutup={() => setPilih(null)}
+        />
+      ) : null}
     </div>
   );
 }

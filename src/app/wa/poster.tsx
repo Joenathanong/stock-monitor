@@ -6,7 +6,7 @@
 // yang bisa berbeda.
 import {
   FONT, FONT_MONO, KANVAS, WARNA, adsTeks, angkaRingkas, deretTren, hari, jalurSpark, labelDoi, lebarKartu,
-  rupiahRingkas, segmenStatus, segmenLain, tataLetakStatus, BIAYA_BLOK, tampil1, tampil2,
+  rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, gutterLabel, lebarTeksKira, potongTeks, JEDA_LABEL, tampil1, tampil2,
 } from '@/lib/wa-poster';
 import type { DataWa, AreaWa } from './types';
 
@@ -45,9 +45,12 @@ const Teks = ({
   </text>
 );
 
-function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, onKlik }: {
+function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
   a: AreaWa; x: number; y: number; w: number; h: number;
-  blok: DataWa['blok']; disp: DataWa['doiDisplay']; kritisMaks: number; onKlik?: () => void;
+  blok: DataWa['blok']; disp: DataWa['doiDisplay']; kritisMaks: number;
+  /** Status yang ditampilkan — SAMA untuk semua kartu, lihat `kunciTampil`. */
+  tampil: ReturnType<typeof kunciTampil>;
+  onKlik?: () => void;
 }) {
   const pad = 16;
   const isi = w - 2 * pad;
@@ -55,8 +58,8 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, onKlik }: {
   // jatuh ke blok berikutnya.
   let cy = y;
 
-  const seg = segmenStatus(a.byStatus);
-  const lain = segmenLain(a.byStatus);
+  const seg = segmenStatus(a.byStatus, tampil);
+  const lain = segmenLain(a.byStatus, tampil);
   // Batang dibandingkan terhadap total SELURUH SKU, bukan hanya empat pita:
   // kalau pembaginya hanya pita, "Aman 180 dari 281" terlihat seperti 100%
   // padahal masih ada 35 SKU di kelompok keterangan.
@@ -157,12 +160,21 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, onKlik }: {
     //
     // Garis pemisah setelah baris ke-4 tetap ada supaya dua kelompok itu masih
     // terbaca terpisah — tanpa mencabut batangnya.
-    const barW = isi - 96;
+    // Kolom label dihitung dari label yang BENAR-BENAR tampil, bukan dipatok.
+    // Angka di kanan dipesan selebar angka terpanjang + jeda, supaya batang
+    // tidak pernah menabrak keduanya (SVG tidak punya ellipsis maupun wrap).
     const fs = tata.pitch <= 14 ? 10 : 11;
     const bh = tata.pitch <= 14 ? 6 : 8;
+    const gLabel = gutterLabel(semuaSeg.map((x) => x.label), fs);
+    const gAngka = Math.ceil(
+      semuaSeg.reduce((m, x) => Math.max(m, lebarTeksKira(String(x.n), fs, true)), 0),
+    ) + 8;
+    const barW = Math.max(24, isi - gLabel - gAngka);
     let sy = cy;
     semuaSeg.forEach((s, i) => {
-      if (i === seg.length) {
+      // Pemisah hanya kalau KEDUA kelompok ada isinya — kalau salah satunya
+      // tersembunyi seluruhnya, garis menggantung tanpa memisahkan apa pun.
+      if (i === seg.length && seg.length > 0 && lain.length > 0) {
         bagian.push(
           <line
             key="lnx" x1={x + pad} y1={sy + BIAYA_BLOK.pemisah / 2} x2={x + w - pad} y2={sy + BIAYA_BLOK.pemisah / 2}
@@ -172,12 +184,17 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, onKlik }: {
         sy += BIAYA_BLOK.pemisah;
       }
       const ytop = sy + (tata.pitch - bh) / 2;
-      bagian.push(<Teks key={`sl${i}`} x={x + pad} y={sy + fs} size={fs}>{s.label}</Teks>);
-      bagian.push(<rect key={`sbg${i}`} x={x + pad + 62} y={ytop} width={barW} height={bh} rx={bh / 2} fill={WARNA.garisHalus} />);
+      const bx = x + pad + gLabel;
+      bagian.push(
+        <Teks key={`sl${i}`} x={x + pad} y={sy + fs} size={fs}>
+          {potongTeks(s.label, gLabel - JEDA_LABEL, fs)}
+        </Teks>,
+      );
+      bagian.push(<rect key={`sbg${i}`} x={bx} y={ytop} width={barW} height={bh} rx={bh / 2} fill={WARNA.garisHalus} />);
       {/* Batang tipis, ujung membulat, ditambatkan ke garis dasar kiri. */}
       {s.n > 0 && bagian.push(
         <rect
-          key={`sb${i}`} x={x + pad + 62} y={ytop}
+          key={`sb${i}`} x={bx} y={ytop}
           width={Math.max(4, (s.n / totalSeg) * barW)} height={bh} rx={bh / 2} fill={s.warna}
         />,
       )}
@@ -264,6 +281,9 @@ export function Poster({ data, onPilihArea }: Props) {
   const t = data.total;
 
   const disp = data.doiDisplay ?? 'BOTH';
+  // Satu keputusan untuk seluruh poster: baris yang 0 di SEMUA area dibuang,
+  // sisanya tampil di setiap kartu supaya barisnya sejajar antar kolom.
+  const tampil = kunciTampil(area.map((a) => a.byStatus));
   const ringkas = [
     { l: 'SKU dihitung', v: t ? angkaRingkas(t.sku) : '—' },
     ...(tampil1(disp) ? [{ l: labelDoi(1, disp), v: t ? `${hari(t.doi1)} hari` : '—' }] : []),
@@ -324,6 +344,7 @@ export function Poster({ data, onPilihArea }: Props) {
           blok={data.blok}
           disp={disp}
           kritisMaks={6}
+          tampil={tampil}
           onKlik={onPilihArea ? () => onPilihArea(a.area) : undefined}
         />
       ))}

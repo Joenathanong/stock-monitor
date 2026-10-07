@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Poster } from './poster';
 import type { AreaWa, DataWa } from './types';
-import { KANVAS, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
+import { KANVAS, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
 
 /**
  * Halaman poster WhatsApp.
@@ -53,14 +53,14 @@ function Rincian({ a, disp, tampil, onTutup }: {
             <div className="card card-pad"><div className="kpi-label">{`ADS ${tampil1(disp) ? 'Opsi 1' : 'Opsi 2'}`}</div><div className="kpi-value">{adsTeks(tampil1(disp) ? a.ads1 : a.ads2).replace('/hari', '')}<span className="ml-1 text-[13px] font-medium text-label">/hari</span></div></div>
             <div className="card card-pad"><div className="kpi-label">Dalam perjalanan</div><div className="kpi-value">{angkaRingkas(a.transit)}</div><div className="kpi-hint">tidak menambah DOI total</div></div>
             <div className="card card-pad"><div className="kpi-label">Nilai stok</div><div className="kpi-value">{rupiahRingkas(a.value)}</div><div className="kpi-hint">stok di tangan saja{a.noPrice ? ` · ${a.noPrice} SKU belum ada harganya` : ''}</div></div>
-            <div className="card card-pad"><div className="kpi-label">Nilai + SIT</div><div className="kpi-value">{rupiahRingkas(a.value + a.valueTransit)}</div><div className="kpi-hint">termasuk {rupiahRingkas(a.valueTransit)} dalam perjalanan</div></div>
+            <div className="card card-pad"><div className="kpi-label">Nilai + Nilai SIT</div><div className="kpi-value">{rupiahRingkas(a.value + a.valueTransit)}</div><div className="kpi-hint">termasuk {rupiahRingkas(a.valueTransit)} dalam perjalanan</div></div>
           </div>
 
           <div className="card card-pad">
             <div className="card-title mb-2">Sebaran status</div>
             {seg.map((s) => (
               <div key={s.key} className="mb-1.5 flex items-center gap-2">
-                <span className="w-[76px] text-[12px]">{s.label}</span>
+                <span className="w-[96px] text-[12px]" title={s.label}>{labelPita(s.key, a.ambang)}</span>
                 <span className="h-2 flex-1 rounded-full" style={{ background: 'var(--border-subtle)' }}>
                   <span className="block h-2 rounded-full" style={{ width: `${(s.n / total) * 100}%`, background: s.warna }} />
                 </span>

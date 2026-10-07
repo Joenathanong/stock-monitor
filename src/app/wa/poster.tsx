@@ -6,7 +6,7 @@
 // yang bisa berbeda.
 import {
   FONT, FONT_MONO, KANVAS, WARNA, adsTeks, angkaRingkas, deretTren, hari, jalurSpark, labelDoi, lebarKartu,
-  rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, gutterLabel, lebarTeksKira, potongTeks, JEDA_LABEL, tampil1, tampil2,
+  rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, gutterLabel, lebarTeksKira, potongTeks, JEDA_LABEL, labelPita, tampil1, tampil2,
 } from '@/lib/wa-poster';
 import type { DataWa, AreaWa } from './types';
 
@@ -120,12 +120,12 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
 
     cy += 26;
     // Berpasangan menurut satuannya: rupiah dengan rupiah, pcs dengan pcs.
-    // "Nilai stok" HANYA barang di tangan; "Nilai + SIT" menambahkan barang
+    // "Nilai stok" HANYA barang di tangan; "Nilai + Nilai SIT" menambahkan barang
     // dalam perjalanan — dua angka itu sengaja bersebelahan supaya selisihnya
     // langsung terbaca, bukan harus dihitung sendiri.
     const kotak = [
       { l: 'Nilai stok', v: rupiahRingkas(a.value) },
-      { l: 'Nilai + SIT', v: rupiahRingkas(a.value + a.valueTransit) },
+      { l: 'Nilai + Nilai SIT', v: rupiahRingkas(a.value + a.valueTransit) },
       { l: 'Stok', v: `${angkaRingkas(a.stock)} pcs` },
       { l: 'Dalam perjalanan', v: `${angkaRingkas(a.transit)} pcs` },
       { l: `ADS ${labelDoi(tampil1(disp) ? 1 : 2, disp) === 'DOI' ? '' : `Opsi ${tampil1(disp) ? 1 : 2}`}`.trim(), v: adsTeks(tampil1(disp) ? a.ads1 : a.ads2) },
@@ -165,7 +165,11 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
     // tidak pernah menabrak keduanya (SVG tidak punya ellipsis maupun wrap).
     const fs = tata.pitch <= 14 ? 10 : 11;
     const bh = tata.pitch <= 14 ? 6 : 8;
-    const gLabel = gutterLabel(semuaSeg.map((x) => x.label), fs);
+    // Label pita DOI memuat ambang harinya ("Kritis ≤4D") — ambangnya BEDA per
+    // kota, jadi tanpa itu "Kritis 34" di dua kartu sebelahan mengukur hal yang
+    // berbeda tanpa ada yang menyebutkannya.
+    const labelSeg = semuaSeg.map((x) => labelPita(x.key, a.ambang));
+    const gLabel = gutterLabel(labelSeg, fs);
     const gAngka = Math.ceil(
       semuaSeg.reduce((m, x) => Math.max(m, lebarTeksKira(String(x.n), fs, true)), 0),
     ) + 8;
@@ -187,7 +191,7 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
       const bx = x + pad + gLabel;
       bagian.push(
         <Teks key={`sl${i}`} x={x + pad} y={sy + fs} size={fs}>
-          {potongTeks(s.label, gLabel - JEDA_LABEL, fs)}
+          {potongTeks(labelSeg[i], gLabel - JEDA_LABEL, fs)}
         </Teks>,
       );
       bagian.push(<rect key={`sbg${i}`} x={bx} y={ytop} width={barW} height={bh} rx={bh / 2} fill={WARNA.garisHalus} />);
@@ -292,7 +296,7 @@ export function Poster({ data, onPilihArea }: Props) {
     { l: 'Total stok', v: t ? `${angkaRingkas(t.stock)} pcs` : '—' },
     { l: 'Dalam perjalanan', v: t ? `${angkaRingkas(t.transit)} pcs` : '—' },
     { l: 'Nilai stok', v: t ? rupiahRingkas(t.value) : '—' },
-    { l: 'Nilai + SIT', v: t ? rupiahRingkas(t.value + t.valueTransit) : '—' },
+    { l: 'Nilai + Nilai SIT', v: t ? rupiahRingkas(t.value + t.valueTransit) : '—' },
     { l: 'Kritis + Low', v: t ? `${t.kritis + t.low} SKU` : '—', tone: t && t.kritis > 0 ? WARNA.kritisFg : undefined },
   ] as { l: string; v: string; tone?: string }[];
   const rw = (KANVAS.w - 2 * M) / ringkas.length;

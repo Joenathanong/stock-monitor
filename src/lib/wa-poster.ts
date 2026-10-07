@@ -1,3 +1,4 @@
+import type { AmbangDoi } from './area-master';
 /**
  * Poster WhatsApp — bagian yang murni hitungan, terpisah dari komponennya.
  *
@@ -381,4 +382,35 @@ export function potongTeks(teks: string, maksPx: number, size: number, mono = fa
   const perKarakter = (mono ? 0.62 : 0.56) * size;
   const muat = Math.max(1, Math.floor(maksPx / perKarakter) - 1);
   return `${t.slice(0, muat)}…`;
+}
+
+/**
+ * Label pita DOI dengan ambang harinya — "Kritis ≤4D", "Over >7D".
+ *
+ * Diminta user 7 Okt 2026 supaya pembaca poster tahu batas yang dipakai area
+ * itu tanpa membuka Pengaturan. Penting karena ambangnya BEDA per kota: Pusat
+ * ≤4/≤5/≤7 sedangkan Makassar ≤14/≤31/≤45, jadi "Kritis 34" di dua kartu
+ * sebelahan sebenarnya mengukur hal yang berbeda.
+ *
+ * NOTASI: tiga pita pertama memakai ≤ (batas atasnya INKLUSIF), dan Over
+ * memakai ">" — BUKAN "≥". Untuk Pusat dengan max 7, hari ke-7 masih AMAN dan
+ * overstock baru mulai hari ke-8. Menulis "≥7D" akan menyatakan hari ke-7 itu
+ * overstock, bertentangan dengan `pitaDoi`.
+ *
+ * "Over", bukan "Overstock": lebih pendek, dan kolom label di kartu 294px sudah
+ * harus memuat "Belum Terjual".
+ */
+export function labelPita(
+  key: StatusPoster,
+  ambang: AmbangDoi | null | undefined,
+): string {
+  const dasar = STATUS_POSTER[key]?.label ?? String(key);
+  if (!ambang) return key === 'OVERSTOCK' ? 'Over' : dasar;
+  switch (key) {
+    case 'CRITICAL': return `Kritis ≤${ambang.kritis}D`;
+    case 'LOW': return `Low ≤${ambang.min}D`;
+    case 'HEALTHY': return `Aman ≤${ambang.max}D`;
+    case 'OVERSTOCK': return `Over >${ambang.max}D`;
+    default: return dasar;
+  }
 }

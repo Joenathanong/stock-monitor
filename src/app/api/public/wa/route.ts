@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma';
 import { latestSnapshot, summaryHistory } from '@/lib/query';
 import { getSettingsMap } from '@/lib/compute';
 import { AREA_GABUNGAN } from '@/lib/areas';
+import { ambangDoi } from '@/lib/area-master';
+import { muatArea } from '@/lib/area-store';
 import { toDateKeyUtc } from '@/lib/dates';
 
 export const dynamic = 'force-dynamic';
@@ -57,6 +59,20 @@ export async function GET(req: Request) {
     )
   ).map((r) => r.areaId);
 
+  // Ambang DOI per area, untuk ditulis di label sebaran ("Kritis ≤4D").
+  // Dicocokkan lewat NAMA, karena itulah kunci yang dipakai doi_snapshot.
+  // Bawaannya disusun sama dengan perilaku lama di doi.ts, supaya area yang
+  // ambangnya belum diisi tetap menampilkan angka yang BENAR-BENAR dipakai.
+  const bawaanAmbang = {
+    kritis: Number(raw.default_lead_time_days ?? 7),
+    min: Number(raw.default_lead_time_days ?? 7) + Number(raw.safety_days ?? 3),
+    max: Number(raw.target_doi_days ?? 14),
+  };
+  const barisArea = await muatArea().catch(() => []);
+  const ambangPerNama = new Map(
+    barisArea.map((a) => [a.name, ambangDoi(a, bawaanAmbang)]),
+  );
+
   const perArea = await Promise.all(
     kota.map(async (area) => {
       const snap = await latestSnapshot(area);
@@ -90,6 +106,7 @@ export async function GET(req: Request) {
         valueTransit: nilaiTransit(snap.rows),
         noPrice: s?.total.noPrice ?? 0,
         byStatus: s?.byStatus ?? null,
+        ambang: ambangPerNama.get(area) ?? bawaanAmbang,
         perluPo: blok.po ? snap.rows.filter((r) => Math.max(r.suggested1, r.suggested2) > 0).length : 0,
         tren: tren.map((t) => ({ date: t.date, doi1: t.doi1, doi2: t.doi2 })),
         kritis,

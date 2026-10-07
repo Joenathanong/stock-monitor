@@ -17,6 +17,14 @@ export type AreaWa = {
   valueTransit: number;
   noPrice: number;
   byStatus: StatusMap | null;
+  /**
+   * Ambang DOI area ini (hari) — dipakai menulis "Kritis ≤4D" di label sebaran.
+   *
+   * Dikirim dari server, BUKAN dihitung ulang di komponen: kalau layar menghitung
+   * sendiri, labelnya bisa menyebut ambang yang berbeda dari yang benar-benar
+   * dipakai menentukan statusnya.
+   */
+  ambang?: { kritis: number; min: number; max: number };
   perluPo: number;
   tren: { date: string; doi1: number | null; doi2: number | null }[];
   kritis: KritisWa[];

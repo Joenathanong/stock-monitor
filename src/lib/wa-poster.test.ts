@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tinggiKartu, tataLetakStatus, tampil1, tampil2 } from './wa-poster';
+import { pitaDoi } from './area-master';
+import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2 } from './wa-poster';
 
 test('rupiah diringkas per satuan', () => {
   assert.equal(rupiahRingkas(52_431_882_100), 'Rp 52,4 M');
@@ -317,10 +318,59 @@ test('nama area dan lencana kritis muat di kepala kartu', () => {
 test('strip ringkasan atas: label terpanjang muat di kolomnya', () => {
   // 9 kolom saat kedua opsi DOI tampil; label 12px, angka rFs 20px.
   const kolom = (1600 - 2 * 32) / 9;
-  for (const l of ['SKU dihitung', 'Dalam perjalanan', 'Nilai + SIT', 'Kritis + Low', 'DOI Opsi 1', 'ADS']) {
+  for (const l of ['SKU dihitung', 'Dalam perjalanan', 'Nilai + Nilai SIT', 'Kritis + Low', 'DOI Opsi 1', 'ADS']) {
     assert.ok(lebarTeksKira(l, 12) <= kolom, `label "${l}" tidak muat di kolom ${kolom.toFixed(0)}px`);
   }
   for (const v of ['Rp 52,4 M', '56.115/hari', '1,1 jt pcs', '20,4 hari', '157 SKU']) {
     assert.ok(lebarTeksKira(v, 20) <= kolom, `angka "${v}" tidak muat di kolom ${kolom.toFixed(0)}px`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Label pita dengan ambang hari (permintaan user 7 Okt 2026).
+// ---------------------------------------------------------------------------
+
+test('label pita memuat ambang hari area itu', () => {
+  const pusat = { kritis: 4, min: 5, max: 7 };
+  assert.equal(labelPita('CRITICAL', pusat), 'Kritis ≤4D');
+  assert.equal(labelPita('LOW', pusat), 'Low ≤5D');
+  assert.equal(labelPita('HEALTHY', pusat), 'Aman ≤7D');
+  assert.equal(labelPita('OVERSTOCK', pusat), 'Over >7D');
+});
+
+test('Over memakai ">" BUKAN "≥" — hari ke-max masih Aman', () => {
+  const pusat = { kritis: 4, min: 5, max: 7 };
+  const l = labelPita('OVERSTOCK', pusat);
+  assert.ok(!l.includes('≥'), `"${l}" tidak boleh memakai ≥: hari ke-7 itu AMAN, bukan overstock`);
+  // Dan harus konsisten dengan pitaDoi, bukan hanya enak dibaca.
+  assert.equal(pitaDoi(7, pusat), 'HEALTHY');
+  assert.equal(pitaDoi(8, pusat), 'OVERSTOCK');
+});
+
+test('ambang beda per kota -> label beda', () => {
+  assert.equal(labelPita('CRITICAL', { kritis: 14, min: 31, max: 45 }), 'Kritis ≤14D');
+  assert.equal(labelPita('OVERSTOCK', { kritis: 14, min: 31, max: 45 }), 'Over >45D');
+});
+
+test('tanpa ambang, label tetap terbaca (Over tanpa angka)', () => {
+  assert.equal(labelPita('OVERSTOCK', null), 'Over');
+  assert.equal(labelPita('CRITICAL', undefined), 'Kritis');
+  assert.equal(labelPita('DEAD_STOCK', null), 'Dead Stock', 'kelompok keterangan tidak punya ambang hari');
+  assert.equal(labelPita('WAITING', { kritis: 4, min: 5, max: 7 }), 'SIT');
+});
+
+test('label berambang TETAP muat di kolom label kartu 294px', () => {
+  // Inilah yang mudah terlewat: menambah "≤45D" membuat label lebih panjang.
+  for (const ambang of [{ kritis: 4, min: 5, max: 7 }, { kritis: 14, min: 31, max: 45 }]) {
+    const semua = [...URUT_STATUS, ...URUT_LAIN].map((k) => labelPita(k, ambang));
+    for (const fs of [10, 11]) {
+      const g = gutterLabel(semua, fs);
+      const gAngka = Math.ceil(lebarTeksKira('9999', fs, true)) + 8;
+      const barW = Math.max(24, ISI - g - gAngka);
+      for (const t of semua) {
+        assert.ok(lebarTeksKira(t, fs) <= g - JEDA_LABEL + 0.01, `"${t}" tidak muat di gutter ${g}px (fs ${fs})`);
+      }
+      assert.ok(barW >= 60, `batang ${barW.toFixed(0)}px terlalu pendek (gutter ${g}px, fs ${fs})`);
+    }
   }
 });

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { KATEGORI_ATP, kelayakan, brandDariKode, lengkapiDariKode, petaBrand } from './atp';
+import { KATEGORI_ATP, kelayakan, brandDariKode, lengkapiDariKode, petaBrand, lingkupBorongan } from './atp';
 
 /**
  * Penjaga: kode ATP TIDAK boleh menyaring `category = 'Sku'` sendiri.
@@ -181,4 +181,47 @@ test('kode TIDAK menang kalau brandnya bukan kandidat bentrokan', () => {
   ]);
   assert.equal(peta.brand.get('BDL-EOMMA-0000000001'), 'Hanasui');
   assert.equal(peta.bentrok[0].dariKode, false);
+});
+
+// ---------------------------------------------------------------------------
+// Lingkup isi borongan — bagian yang bisa merusak paling banyak.
+// ---------------------------------------------------------------------------
+
+const brs = (sku: string, ...areas: string[]) =>
+  ({ sku, area: Object.fromEntries(areas.map((a) => [a, {}])) });
+
+test('tanpa centang: lingkupnya seluruh baris yang lolos filter', () => {
+  const baris = [brs('A', 'Medan', 'Pusat'), brs('B', 'Medan')];
+  const r = lingkupBorongan(baris, new Set(), ['Medan', 'Pusat']);
+  assert.equal(r.pakaiPilihan, false);
+  assert.equal(r.target.length, 2);
+  assert.equal(r.nKeputusan, 3, 'A punya 2 area, B punya 1');
+});
+
+test('PILIHAN DIPOTONG DENGAN FILTER — tidak pernah mengubah baris di luar layar', () => {
+  // Inti keamanannya: user mencentang A dan Z, lalu memfilter sehingga Z hilang
+  // dari daftar. Z TIDAK boleh ikut berubah.
+  const baris = [brs('A', 'Medan'), brs('B', 'Medan')];
+  const r = lingkupBorongan(baris, new Set(['A', 'Z']), ['Medan']);
+  assert.deepEqual(r.target.map((x) => x.sku), ['A']);
+  assert.equal(r.nKeputusan, 1);
+});
+
+test('baris yang tidak punya area yang dituju tidak ikut dihitung', () => {
+  // Kalau ikut, jumlah di layar lebih besar dari yang benar-benar berubah —
+  // dan user menyetujui angka yang salah.
+  const baris = [brs('A', 'Medan'), brs('B', 'Pusat')];
+  const r = lingkupBorongan(baris, new Set(), ['Medan']);
+  assert.deepEqual(r.target.map((x) => x.sku), ['A']);
+  assert.equal(r.nKeputusan, 1);
+});
+
+test('semua cabang: jumlah keputusan jauh lebih besar dari jumlah SKU', () => {
+  // 20 SKU x 5 cabang = 100 keputusan. Angka inilah yang harus disebut sebelum
+  // user menekan OK, bukan "20".
+  const areas = ['Makassar', 'Medan', 'Pusat', 'Surabaya', 'Yogyakarta'];
+  const baris = Array.from({ length: 20 }, (_, i) => brs(`S${i}`, ...areas));
+  const r = lingkupBorongan(baris, new Set(), areas);
+  assert.equal(r.target.length, 20);
+  assert.equal(r.nKeputusan, 100);
 });

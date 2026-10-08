@@ -1,6 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
-import { Alert, Kpi, RefreshButton, postJson, useApi, fmt } from '@/components/ui';
+import { Alert, Kpi, RefreshButton, postForm, postJson, useApi, fmt } from '@/components/ui';
+import { lingkupBorongan } from '@/lib/atp';
 import { DataGrid, type Column } from '@/components/DataGrid';
 
 type Putusan = boolean | null;
@@ -29,6 +30,15 @@ type Resp = {
   ambang: number; siap: boolean; tanpaBrand: string[]; pesan: string;
   saring: Saring;
   cacah: { aktif: number; nonaktif: number; semua: number };
+};
+
+type Pratinjau = {
+  barisDibaca: number;
+  ringkas: { jadiYa: number; jadiTidak: number; dikosongkan: number; takBerubah: number };
+  masalah: { baris: number; sku: string; areaId?: string; pesan: string }[];
+  masalahTotal: number;
+  kolomAsing: string[];
+  pesan: string;
 };
 
 const LABEL_SARING: Record<Saring, string> = {
@@ -75,6 +85,10 @@ export default function AtpPage() {
 
   const [brand, setBrand] = useState('ALL');
   const [kategori, setKategori] = useState('ALL');
+  // Baris yang dicentang untuk diubah massal. Kuncinya SKU, bukan sku+area:
+  // satu baris tabel adalah satu SKU, dan kolom cabang yang dipilih ditentukan
+  // belakangan lewat tombolnya.
+  const [sel, setSel] = useState<Set<string>>(new Set());
   const [cari, setCari] = useState('');
   const [hanyaBelum, setHanyaBelum] = useState(false);
   // Perubahan ditahan dulu, baru disimpan sekali. 375 SKU x 6 cabang = 2.250
@@ -85,6 +99,9 @@ export default function AtpPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: 'ok' | 'error' | 'warn'; text: string } | null>(null);
   const [editBrand, setEditBrand] = useState<{ sku: string; brand: string } | null>(null);
+  const [berkas, setBerkas] = useState<File | null>(null);
+  const [abaikanKosong, setAbaikanKosong] = useState(true);
+  const [pratinjau, setPratinjau] = useState<Pratinjau | null>(null);
 
   const areas = data?.areas ?? [];
   const daftarBrand = useMemo(() => {
@@ -137,17 +154,52 @@ export default function AtpPage() {
    * bohong begitu user memakai filter kolom. Jumlahnya ditulis di tombol supaya
    * yang akan terjadi terlihat sebelum diklik.
    */
-  function borongan(a: string, ke: Putusan) {
-    const target = baris.filter((r) => r.area[a]);
-    const kata = ke === null ? 'DIKOSONGKAN (kembali belum diputuskan)' : ke ? 'DISEBAR' : 'TIDAK disebar';
+  /**
+   * Baris yang akan kena borongan.
+   *
+   * Pilihan DIPOTONG dengan filter yang sedang berlaku — bukan dipakai mentah.
+   * Kalau tidak, mencentang 20 SKU lalu mengganti filter brand akan mengubah
+   * baris yang sudah tidak terlihat lagi di layar. Jumlah efektifnya selalu
+   * ditulis di tombol, jadi pemotongan itu terlihat, bukan diam-diam.
+   */
+  // Jumlah yang ditampilkan di panel memakai SELURUH cabang sebagai acuan —
+  // tombolnya sendiri menghitung ulang dengan cabang yang benar saat diklik.
+  const lingkup = useMemo(
+    () => lingkupBorongan(baris, sel, areas).target,
+    [baris, sel, areas],
+  );
+  const pakaiPilihan = sel.size > 0;
+
+  const togglePilih = (sku: string, on: boolean) => setSel((prev) => {
+    const n = new Set(prev);
+    if (on) n.add(sku); else n.delete(sku);
+    return n;
+  });
+
+  /** `a === null` berarti SEMUA cabang sekaligus. */
+  function borongan(a: string | null, ke: Putusan) {
+    const areaKena = a === null ? areas : [a];
+    const { target, nKeputusan } = lingkupBorongan(baris, sel, areaKena);
     if (!target.length) return;
-    if (!confirm(`Tandai ${target.length} SKU di ${a} sebagai ${kata}?`)) return;
+
+    const kata = ke === null ? 'DIKOSONGKAN (kembali belum diputuskan)' : ke ? 'DISEBAR' : 'TIDAK disebar';
+    const diMana = a === null ? `SEMUA ${areas.length} cabang` : a;
+    const dari = pakaiPilihan ? 'yang Anda centang' : 'yang lolos filter';
+    // Jumlah SKU dan jumlah KEPUTUSAN disebut terpisah — lihat lingkupBorongan().
+    if (!confirm(
+      `Tandai ${target.length} SKU ${dari} di ${diMana} sebagai ${kata}?\n\n`
+      + `${nKeputusan} keputusan akan berubah. Belum tersimpan sampai tombol Simpan ditekan.`,
+    )) return;
+
     setUbah((prev) => {
       const n = new Map(prev);
       for (const r of target) {
-        const k = kunci(r.sku, a);
-        const asal = r.area[a]?.dibagikan ?? null;
-        if (ke === asal) n.delete(k); else n.set(k, ke);
+        for (const x of areaKena) {
+          if (!r.area[x]) continue;
+          const k = kunci(r.sku, x);
+          const asal = r.area[x]?.dibagikan ?? null;
+          if (ke === asal) n.delete(k); else n.set(k, ke);
+        }
       }
       return n;
     });
@@ -164,9 +216,35 @@ export default function AtpPage() {
       const r = await postJson(`/api/atp?ambang=${ambang}`, { putusan });
       setMsg({ tone: r.gagal?.length ? 'warn' : 'ok', text: r.pesan });
       setUbah(new Map());
+      // Centangnya ikut dikosongkan: borongan itu sudah tersimpan, dan pilihan
+      // lama yang tertinggal adalah jebakan untuk borongan BERIKUTNYA — orang
+      // menekan "Semua tidak" sambil mengira lingkupnya baris yang sedang ia
+      // lihat, padahal masih 500 SKU dari pekerjaan sebelumnya.
+      setSel(new Set());
       reload();
     } catch (e) {
       setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) });
+    } finally { setBusy(false); }
+  }
+
+  async function unggah(terap: boolean) {
+    if (!berkas) return;
+    setBusy(true);
+    try {
+      const form = new FormData();
+      form.append('file', berkas);
+      const q = `?${terap ? 'terap=1&' : ''}abaikanKosong=${abaikanKosong ? 1 : 0}`;
+      const r = await postForm(`/api/atp/import${q}`, form);
+      if (terap) {
+        setMsg({ tone: r.gagal?.length ? 'warn' : 'ok', text: r.pesan });
+        setPratinjau(null); setBerkas(null); setUbah(new Map()); setSel(new Set());
+        reload();
+      } else {
+        setPratinjau(r as Pratinjau);
+      }
+    } catch (e) {
+      setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) });
+      setPratinjau(null);
     } finally { setBusy(false); }
   }
 
@@ -183,6 +261,18 @@ export default function AtpPage() {
     + `&q=${encodeURIComponent(cari.trim())}&saring=${saring}&kategori=${encodeURIComponent(kategori)}`;
 
   const columns = useMemo<Column<BarisSku>[]>(() => [
+    {
+      key: 'sel', label: '', get: () => null, noSort: true, noFilter: true, width: 40,
+      render: (r) => (
+        <label className="check justify-center" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox" aria-label={`Pilih ${r.sku}`}
+            checked={sel.has(r.sku)}
+            onChange={(e) => togglePilih(r.sku, e.target.checked)}
+          />
+        </label>
+      ),
+    },
     { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 240, sticky: true, isTitle: true },
     {
       key: 'name', label: 'Nama', get: (r) => r.name, width: 280, prio: 'p2',
@@ -248,7 +338,7 @@ export default function AtpPage() {
         );
       },
     })),
-  ], [areas, ubah, editBrand, ambang]); // eslint-disable-line react-hooks/exhaustive-deps
+  ], [areas, ubah, editBrand, ambang, sel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const k = data?.keseluruhan;
   const belumTotal = (data?.hasil ?? []).reduce((t, h) => t + h.belumDiputus, 0);
@@ -370,12 +460,130 @@ export default function AtpPage() {
         </div>
 
         <div className="mt-3 border-t border-[var(--line)] pt-3">
+          <div className="card-title mb-1">Ubah lewat Excel</div>
           <div className="text-[12px] text-label">
-            Isi borongan ke <b>{baris.length} SKU</b> yang lolos filter di atas (filter kolom di
-            dalam tabel tidak ikut dihitung). Perubahannya ditahan dulu — belum tersimpan sampai
-            tombol <b>Simpan</b> ditekan.
+            Unduh dulu lewat tombol di atas, atur kolom cabang di lembar <b>Sebaran</b>
+            (<b>Ya</b> / <b>Tidak</b> / kosong), lalu unggah kembali berkasnya di sini.
+          </div>
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <div className="flex-1 min-w-[220px]">
+              <label className="label">Berkas XLSX hasil unduhan yang sudah diedit</label>
+              <input
+                type="file" accept=".xlsx" className="input h-auto py-1"
+                onChange={(e) => { setBerkas(e.target.files?.[0] ?? null); setPratinjau(null); }}
+              />
+            </div>
+            <label className="check" title="Matikan kalau Anda memang ingin mengosongkan keputusan lewat sel kosong">
+              <input
+                type="checkbox" checked={abaikanKosong}
+                onChange={(e) => { setAbaikanKosong(e.target.checked); setPratinjau(null); }}
+              />
+              Abaikan sel kosong
+            </label>
+            <button className="btn" onClick={() => unggah(false)} disabled={!berkas || busy}>
+              Periksa dulu
+            </button>
+          </div>
+
+          {/* Peringatan muncul HANYA saat pengamannya dimatikan. Kalau selalu
+              tampil, orang berhenti membacanya tepat saat ia paling perlu. */}
+          {!abaikanKosong ? (
+            <div className="mt-2">
+              <Alert tone="warn">
+                <b>Sel kosong akan MENGOSONGKAN keputusan.</b> Itu yang membuat berkas unduhan
+                bisa dipakai bolak-balik dengan setia — tapi berkas yang hanya diisi sebagian
+                akan menghapus keputusan di semua baris lainnya. Periksa angka
+                &quot;dikosongkan&quot; sebelum menerapkan.
+              </Alert>
+            </div>
+          ) : null}
+
+          {pratinjau ? (
+            <div className="mt-2 rounded border border-[var(--line)] p-2">
+              <div className="text-[12px] text-label">
+                {fmt(pratinjau.barisDibaca)} baris dibaca. {pratinjau.pesan}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2 text-[13px]">
+                <span className="chip chip-ok">Jadi disebar: <b>{fmt(pratinjau.ringkas.jadiYa)}</b></span>
+                <span className="chip">Jadi tidak: <b>{fmt(pratinjau.ringkas.jadiTidak)}</b></span>
+                <span className={`chip ${pratinjau.ringkas.dikosongkan ? 'chip-bad' : ''}`}>
+                  Dikosongkan: <b>{fmt(pratinjau.ringkas.dikosongkan)}</b>
+                </span>
+                <span className="chip">Tidak berubah: <b>{fmt(pratinjau.ringkas.takBerubah)}</b></span>
+              </div>
+
+              {pratinjau.kolomAsing.length ? (
+                <div className="mt-2 text-[12px] text-label">
+                  Kolom yang bukan nama cabang dan diabaikan: <b>{pratinjau.kolomAsing.join(', ')}</b>
+                </div>
+              ) : null}
+
+              {pratinjau.masalahTotal ? (
+                <div className="mt-2">
+                  <Alert tone="warn">
+                    {fmt(pratinjau.masalahTotal)} baris bermasalah dan akan dilewati:
+                    <ul className="mt-1 list-disc pl-4">
+                      {pratinjau.masalah.slice(0, 8).map((m, i) => (
+                        <li key={i}>
+                          Baris {m.baris} · {m.sku}{m.areaId ? ` · ${m.areaId}` : ''} — {m.pesan}
+                        </li>
+                      ))}
+                    </ul>
+                  </Alert>
+                </div>
+              ) : null}
+
+              <div className="mt-2 flex gap-2">
+                <button
+                  className="btn btn-primary"
+                  onClick={() => unggah(true)}
+                  disabled={busy || (pratinjau.ringkas.jadiYa + pratinjau.ringkas.jadiTidak + pratinjau.ringkas.dikosongkan) === 0}
+                >
+                  {busy ? 'Menerapkan…' : 'Terapkan ke database'}
+                </button>
+                <button className="btn" onClick={() => setPratinjau(null)} disabled={busy}>Batal</button>
+              </div>
+              <div className="mt-1 text-[12px] text-muted">
+                Terapkan menulis LANGSUNG ke database — berbeda dari centang manual di tabel,
+                yang masih ditahan sampai tombol Simpan.
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-3 border-t border-[var(--line)] pt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[12px]">
+              Berlaku ke{' '}
+              <b>{pakaiPilihan ? `${fmt(lingkup.length)} SKU yang Anda centang` : `${fmt(baris.length)} SKU yang lolos filter`}</b>
+              {pakaiPilihan && lingkup.length < sel.size ? (
+                <span className="text-muted">
+                  {' '}({fmt(sel.size - lingkup.length)} dari pilihan Anda tidak lolos filter sekarang, jadi tidak ikut berubah)
+                </span>
+              ) : null}
+            </span>
+            <button className="btn btn-sm" onClick={() => setSel(new Set(baris.map((r) => r.sku)))}>
+              Centang semua yang lolos filter ({fmt(baris.length)})
+            </button>
+            <button className="btn btn-sm" onClick={() => setSel(new Set())} disabled={!sel.size}>
+              Batalkan centang
+            </button>
+          </div>
+          <div className="mt-1 text-[12px] text-label">
+            Centang baris di tabel untuk memilih sendiri. Tanpa centang sama sekali, tombol di bawah
+            berlaku ke semua yang lolos filter di atas (filter kolom di dalam tabel tidak ikut
+            dihitung). Perubahannya ditahan dulu — belum tersimpan sampai tombol <b>Simpan</b> ditekan.
           </div>
           <div className="mt-2 space-y-1">
+            {/* Baris "semua cabang" didahulukan: untuk SKU terpilih, itu yang
+                paling sering dipakai — satu klik, bukan lima. */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="w-24 text-[12px] font-bold">Semua cabang</span>
+              <button className="btn btn-sm" onClick={() => borongan(null, true)}>Semua disebar</button>
+              <button className="btn btn-sm" onClick={() => borongan(null, false)}>Semua tidak</button>
+              <button className="btn btn-sm" onClick={() => borongan(null, null)}>Kosongkan</button>
+            </div>
+            <div className="h-px bg-[var(--line)]" />
             {areas.map((a) => (
               <div key={a} className="flex flex-wrap items-center gap-2">
                 <span className="w-24 text-[12px] font-medium">{a}</span>
@@ -410,7 +618,12 @@ export default function AtpPage() {
         rowKey={(r) => r.sku}
         loading={!data}
         emptyText="Tidak ada SKU. Jalankan Refresh dulu agar stok dari OCS terisi."
-        toolbarExtra={<span className="text-[12px] text-label">{baris.length} SKU · {areas.length} cabang</span>}
+        toolbarExtra={(
+          <span className="text-[12px] text-label">
+            {fmt(baris.length)} SKU · {areas.length} cabang
+            {sel.size ? <> · <b>{fmt(sel.size)} dicentang</b></> : null}
+          </span>
+        )}
       />
     </div>
   );

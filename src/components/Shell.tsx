@@ -9,13 +9,26 @@ import { getTheme, setTheme, type Theme } from '@/lib/theme';
  * sidebar satu komponen tiga mode — Drawer (<768) · Rail (768–1279) · Expanded (≥1280,
  * boleh diciutkan & disimpan) — tombol tema Morning/Evening di topbar.
  */
-type Item = { href: string; label: string; module: string; icon: keyof typeof ICONS; admin?: boolean; group: string; hidden?: boolean };
+type Item = {
+  href: string; label: string; module: string; icon: keyof typeof ICONS;
+  admin?: boolean; group: string; hidden?: boolean;
+  /**
+   * Buka di tab baru.
+   *
+   * Dipakai `/wa`: halaman itu SENGAJA dirender tanpa shell (lihat `bare` di
+   * bawah) supaya bot bisa menangkap layar bersih tanpa sidebar ikut terfoto.
+   * Kalau dibuka di tab yang sama, orang yang mengkliknya kehilangan menu dan
+   * hanya bisa kembali lewat tombol Back peramban.
+   */
+  blank?: boolean;
+};
 const LINKS: Item[] = [
   { href: '/', label: 'Dashboard', module: 'Ringkasan', icon: 'home', group: 'Monitoring' },
   { href: '/monitoring', label: 'Tabel DOI', module: 'Perhitungan', icon: 'table', group: 'Monitoring' },
   { href: '/stockout', label: 'Analisis Stok Kosong', module: 'Perhitungan', icon: 'empty', group: 'Monitoring' },
   { href: '/simulasi', label: 'Simulasi Target DOI', module: 'Perhitungan', icon: 'target', group: 'Monitoring' },
   { href: '/atp', label: 'ATP Monitoring', module: 'Perhitungan', icon: 'check', group: 'Monitoring' },
+  { href: '/wa', label: 'Poster WhatsApp', module: 'Laporan', icon: 'poster', group: 'Monitoring', blank: true },
   { href: '/transit', label: 'Stok Dalam Perjalanan', module: 'Master Data', icon: 'truck', group: 'Master data' },
   { href: '/sku-master', label: 'Lead Time & SKU', module: 'Master Data', icon: 'clock', group: 'Master data' },
   { href: '/phase-out', label: 'Phase Out', module: 'Master Data', icon: 'sunset', group: 'Master data' },
@@ -41,6 +54,7 @@ const ICONS = {
   empty: 'M3 7h18v13H3zM3 12h18M12 3v2M8.5 16h7',
   target: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 13.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z',
   check: 'M9 11l3 3 8-8M21 12v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10',
+  poster: 'M4 4h16v13H4zM4 9h16M8 20h8M12 17v3M7 12.5h3M7 14.5h5',
 };
 const Icon = ({ d }: { d: string }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
@@ -144,9 +158,18 @@ export function Shell({ children }: { children: React.ReactNode }) {
               {gi > 0 ? <span className="side-sep" aria-hidden="true" /> : null}
               <div className="side-group">{g}</div>
               {visible.filter((l) => l.group === g).map((l) => {
-                const active = l.href === '/' ? path === '/' : path.startsWith(l.href);
+                // Tautan tab-baru tidak pernah "aktif": halamannya tidak pernah
+                // jadi halaman sekarang di tab ini.
+                const active = l.blank ? false : (l.href === '/' ? path === '/' : path.startsWith(l.href));
                 return (
                   <Link key={l.href} href={l.href} className={`nav-item ${active ? 'is-active' : ''}`}
+                    target={l.blank ? '_blank' : undefined}
+                    // `noreferrer` ikut: tanpa `noopener`, tab baru bisa
+                    // mengubah `window.opener` tab ini. Next menambahkan
+                    // noopener sendiri untuk target=_blank, tapi menuliskannya
+                    // membuat niatnya terbaca dan tidak bergantung versi.
+                    rel={l.blank ? 'noopener noreferrer' : undefined}
+                    aria-label={l.blank ? `${l.label} (buka di tab baru)` : undefined}
                     aria-current={active ? 'page' : undefined}
                     title={mode === 'rail' ? l.label : undefined}
                     onMouseEnter={(e) => showFly(e.currentTarget, l.label)}

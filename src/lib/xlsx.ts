@@ -10,20 +10,72 @@ export type SheetRow = Record<string, unknown>;
  * "SKU", "Sku", "sku " dan "seller_sku" semuanya cocok. Pengguna menyusun
  * berkasnya sendiri; memaksa satu ejaan persis hanya menghasilkan keluhan.
  */
-export async function readSheet(buffer: ArrayBuffer | Buffer): Promise<SheetRow[]> {
+export async function readSheet(
+  buffer: ArrayBuffer | Buffer,
+  opsi?: Parameters<typeof readSheetRinci>[1],
+): Promise<SheetRow[]> {
+  return (await readSheetRinci(buffer, opsi)).rows;
+}
+
+/**
+ * Sama seperti `readSheet`, tapi IKUT mengembalikan nomor baris header.
+ *
+ * Perlu karena pelapor masalah harus menyebut nomor baris yang BENAR-BENAR
+ * dilihat user di Excel. Lembar yang kita ekspor sendiri punya baris catatan di
+ * atas header, jadi "baris ke-3 dari data" bukan "baris 4 di Excel" — kena 8 Okt
+ * 2026: SKU bermasalah di baris 7 dilaporkan sebagai baris 4, dan user yang
+ * membuka berkasnya akan memeriksa baris yang salah.
+ */
+export async function readSheetRinci(
+  buffer: ArrayBuffer | Buffer,
+  opsi?: {
+    /**
+     * Cari baris header, jangan anggap baris 1.
+     *
+     * Perlu karena lembar yang KITA ekspor sendiri menaruh baris catatan di
+     * atas header (filter yang berlaku, tanggal). Tanpa ini, berkas hasil unduh
+     * tidak bisa diunggah kembali — baris 1 terbaca sebagai nama kolom dan
+     * seluruh isinya jadi omong kosong, tanpa galat.
+     *
+     * Isinya nama kolom yang pasti ada, mis. 'SKU'.
+     */
+    cariKolom?: string;
+    /** Nama lembar yang dibaca. Tanpa ini: lembar pertama. */
+    namaLembar?: string;
+  },
+): Promise<{ rows: SheetRow[]; barisHeader: number }> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as ArrayBuffer);
-  const ws = wb.worksheets[0];
+  const ws = opsi?.namaLembar
+    ? (wb.getWorksheet(opsi.namaLembar) ?? wb.worksheets[0])
+    : wb.worksheets[0];
   if (!ws) throw new Error('Berkas tidak memiliki lembar kerja');
 
+  // Baris header: baris 1, atau baris pertama yang memuat `cariKolom`.
+  let barisHeader = 1;
+  if (opsi?.cariKolom) {
+    const cari = normalizeKey(opsi.cariKolom);
+    let ketemu = 0;
+    ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (ketemu) return;
+      let ada = false;
+      row.eachCell({ includeEmpty: true }, (cell) => {
+        if (normalizeKey(cellText(cell.value)) === cari) ada = true;
+      });
+      if (ada) ketemu = rowNumber;
+    });
+    if (!ketemu) throw new Error(`Kolom "${opsi.cariKolom}" tidak ditemukan di berkas`);
+    barisHeader = ketemu;
+  }
+
   const headers: string[] = [];
-  ws.getRow(1).eachCell({ includeEmpty: true }, (cell, col) => {
+  ws.getRow(barisHeader).eachCell({ includeEmpty: true }, (cell, col) => {
     headers[col] = normalizeKey(cellText(cell.value));
   });
 
   const rows: SheetRow[] = [];
   ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber === 1) return;
+    if (rowNumber <= barisHeader) return;
     const obj: SheetRow = {};
     let hasValue = false;
     row.eachCell({ includeEmpty: true }, (cell, col) => {
@@ -35,7 +87,7 @@ export async function readSheet(buffer: ArrayBuffer | Buffer): Promise<SheetRow[
     });
     if (hasValue) rows.push(obj);
   });
-  return rows;
+  return { rows, barisHeader };
 }
 
 function normalizeKey(s: string): string {

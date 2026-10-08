@@ -6,6 +6,7 @@ import { AREA_GABUNGAN } from '@/lib/areas';
 import { ambangDoi } from '@/lib/area-master';
 import { muatArea } from '@/lib/area-store';
 import { toDateKeyUtc } from '@/lib/dates';
+import { tolakAksesPoster } from '@/lib/wa-akses';
 import { persenAtpPerArea } from '@/lib/atp-store';
 import { AMBANG_ATP_BAWAAN } from '@/lib/atp';
 import { doiPlusSit } from '@/lib/wa-poster';
@@ -28,15 +29,12 @@ const nilaiTransit = (rows: { transitQty: number; unitPrice: number }[]) =>
   rows.reduce((t, r) => t + r.transitQty * r.unitPrice, 0);
 
 export async function GET(req: Request) {
-  const token = process.env.WA_PAGE_TOKEN;
-  const k = new URL(req.url).searchParams.get('k');
-  if (!token) {
-    return NextResponse.json(
-      { ok: false, error: 'WA_PAGE_TOKEN belum diset di environment. Poster WhatsApp dimatikan sampai token diisi.' },
-      { status: 503 },
-    );
+  // Token (bot) ATAU sesi login (orang) — aturannya satu tempat, lihat wa-akses.ts.
+  const tolak = await tolakAksesPoster(req);
+  if (tolak) {
+    const status = tolak.startsWith('WA_PAGE_TOKEN') ? 503 : 401;
+    return NextResponse.json({ ok: false, error: tolak }, { status });
   }
-  if (k !== token) return NextResponse.json({ ok: false, error: 'Kunci salah' }, { status: 401 });
 
   const raw = await getSettingsMap();
   const blok = {

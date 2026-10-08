@@ -145,7 +145,11 @@ export default function WaPage() {
 
   useEffect(() => {
     let alive = true;
-    fetch(`/api/public/wa?k=${encodeURIComponent(kunci)}`)
+    // `?k=` hanya disertakan kalau memang ADA di URL. Pengguna yang membuka
+    // lewat menu sidebar tidak punya token — sesinya yang dipakai, dan
+    // mengirim `k=` kosong hanya membuat log server penuh "kunci salah" untuk
+    // permintaan yang sebenarnya sah.
+    fetch(kunci ? `/api/public/wa?k=${encodeURIComponent(kunci)}` : '/api/public/wa')
       .then(async (r) => {
         const j = await r.json();
         if (!alive) return;

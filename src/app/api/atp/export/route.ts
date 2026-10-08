@@ -4,7 +4,10 @@ import { persenTeks, AMBANG_ATP_BAWAAN, type SebabTolak } from '@/lib/atp';
 import { toDateKeyUtc } from '@/lib/dates';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120;
+// Vercel Hobby membunuh satu fungsi di detik ke-60. Menulis angka lebih besar
+// TIDAK menaikkannya — prosesnya tetap dibunuh, dan menuliskan 120 hanya membuat
+// kita mengira punya waktu yang tidak kita punya.
+export const maxDuration = 60;
 
 /**
  * Unduh ATP sebagai XLSX — tiga lembar.

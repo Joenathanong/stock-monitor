@@ -559,3 +559,132 @@ keluaran** — user wajar mengira macet, dan memang melaporkannya.
 Sekarang `INSERT … ON DUPLICATE KEY UPDATE` per 400 baris: **7 bolak-balik, bukan
 2.607**, dengan kemajuan dicetak per kelompok. Ukuran kelompoknya sama dengan
 `BATCH` di sync.ts.
+
+## 15. Poster masuk sidebar — TANPA token di kode (8 Okt 2026)
+
+User meminta poster WhatsApp jadi menu sidebar, dan menempelkan URL lengkapnya
+berikut `?k=<WA_PAGE_TOKEN>`. URL itu **tidak** dipasang apa adanya.
+
+**Kenapa.** Menu sidebar dirender di klien. Menuliskan URL ber-token di
+`Shell.tsx` menyalin tokennya ke bundel JavaScript yang diunduh SETIAP pengguna
+— termasuk peran "Lihat saja" — dan siapa pun yang membuka source bisa
+membacanya lalu memakainya dari luar tanpa login. Token yang ada di dalam bundel
+klien bukan token lagi. Ia juga jadi sulit dirotasi: mengganti token berarti
+deploy ulang, bukan mengubah environment variable.
+
+**Yang dipakai.** `src/lib/wa-akses.ts` — dua jalan masuk, aturannya satu tempat:
+
+1. `?k=<WA_PAGE_TOKEN>` untuk **bot** (berjalan di server lain, tidak punya sesi)
+2. **sesi login yang sah** untuk **orang** (ia sudah melihat angka yang sama di
+   Dashboard, jadi tidak ada data baru yang terbuka)
+
+Dipakai `/api/public/wa` dan `/api/public/wa/svg`. Menu sidebar cukup menunjuk
+`/wa` tanpa parameter apa pun; tokennya tetap hanya dipegang bot.
+
+Jebakan yang ikut diperbaiki: `/api/public/wa/svg` memanggil `/api/public/wa` di
+dalam dirinya. Tanpa meneruskan **cookie** pemanggil, pengguna yang masuk lewat
+menu akan lolos di pemeriksaan luar lalu ditolak 401 oleh panggilan dalam — gagal
+di tempat yang tidak ada hubungannya dengan sebabnya.
+
+**Dibuka di tab baru.** `/wa` sengaja dirender tanpa shell (`bare` di Shell.tsx)
+supaya bot menangkap layar bersih tanpa sidebar ikut terfoto. Kalau menunya
+membuka di tab yang sama, orang yang mengkliknya kehilangan menu dan hanya bisa
+kembali lewat tombol Back. Jadi `Item.blank` ditambahkan: `target="_blank"` +
+`rel="noopener noreferrer"`, dan tautan tab-baru tidak pernah ditandai "aktif".
+
+**Penjaga.** `src/lib/rahasia.test.ts` menggagalkan `npm test` kalau ada
+`?k=<nilai>` tertulis mati, URL database bersandi, atau `Bearer <token>` di
+`src/` maupun `scripts/`. Perakitan dari variabel (`?k=${kunci}`) tetap lolos.
+Penjaganya punya tes sendiri yang membuktikan ia menangkap bentuk terlarang —
+tanpa itu, regex yang salah akan lolos diam-diam dan penjaganya jadi hiasan.
+
+## 16. Ubah massal: pilihan baris + bolak-balik Excel (8 Okt 2026)
+
+### Pilih baris lalu ubah massal
+
+Kolom centang di tabel `/atp`. Tombol borongan berlaku ke baris yang dicentang;
+tanpa centang sama sekali, berlaku ke semua yang lolos filter (perilaku lama).
+Ditambah baris **Semua cabang** supaya 20 SKU x 5 cabang jadi satu klik.
+
+Aturan keamanannya ada di `lingkupBorongan()` — MURNI dan diuji, karena inilah
+bagian yang bisa merusak paling banyak:
+
+- **Pilihan dipotong dengan filter.** Mencentang 20 SKU lalu mengganti filter
+  brand hanya mengubah yang masih lolos filter. Tanpa ini, borongan mengubah
+  baris yang sudah tidak terlihat di layar — cara kerusakan senyap terjadi.
+  Selisihnya ditulis di panel ("3 dari pilihan Anda tidak lolos filter sekarang").
+- **Jumlah KEPUTUSAN disebut terpisah dari jumlah SKU.** Untuk "semua cabang"
+  keduanya berbeda jauh (20 SKU = 100 keputusan), dan angka besar itulah yang
+  sebenarnya tersimpan — jadi itu yang muncul di konfirmasi.
+- Centang dikosongkan setelah Simpan: pilihan lama yang tertinggal adalah jebakan
+  untuk borongan berikutnya.
+
+### Bolak-balik Excel
+
+Unduh → atur di Excel → unggah. `POST /api/atp/import` (pratinjau) lalu
+`?terap=1` (menulis). **Pratinjau tidak bisa dilewati tanpa sengaja**, dan itu
+disengaja: di lembar unduhan sel kosong berarti "belum diputuskan", jadi supaya
+bolak-baliknya setia, sel kosong saat diunggah berarti "kosongkan keputusannya"
+— satu berkas keliru bisa menghapus ribuan keputusan sekaligus.
+
+Pengamannya dua lapis: `abaikanKosong` (menyala secara bawaan) untuk berkas yang
+memang diisi sebagian, dan ringkasan wajib dibaca sebelum menulis, dengan angka
+"Dikosongkan" diberi warna bahaya kalau bukan nol.
+
+Yang dilaporkan, bukan ditelan: SKU tidak dikenal, isi sel yang tidak dikenali
+("mungkin", "cek dulu" — BUKAN dianggap kosong), dan kolom yang bukan nama
+cabang. Baris yang sudah sama dengan keadaan sekarang tidak ditulis ulang —
+mengunggah berkas yang baru diunduh tanpa diedit menghasilkan "tidak ada yang
+berubah", bukan 8.000 baris tertulis.
+
+### Dua bug yang hanya ketahuan dari uji bolak-balik NYATA
+
+Tes unit memakai baris sintetis dengan header di baris 1, jadi keduanya lolos:
+
+1. **Berkas hasil unduhan tidak bisa dibaca kembali.** `readSheet` menganggap
+   baris 1 sebagai header, padahal lembar ekspor kita menaruh catatan di atasnya
+   — baris catatan terbaca sebagai nama kolom dan seluruh isinya jadi omong
+   kosong tanpa satu pun galat. Diperbaiki dengan `cariKolom: 'SKU'`.
+2. **Nomor baris di laporan masalah salah.** Dengan 3 baris catatan, SKU
+   bermasalah di baris 7 dilaporkan "baris 4" — user memeriksa baris yang salah
+   lalu menyimpulkan laporannya ngawur. `readSheetRinci()` sekarang
+   mengembalikan nomor baris header, dan `susunImpor` menerima `barisPertama`.
+
+Pelajarannya sama dengan jebakan `category` di §5: menulis komentar "harus
+menunjuk baris yang user lihat" tidak membuatnya benar. Yang membuktikannya cuma
+menjalankan alurnya dari ujung ke ujung dengan berkas sungguhan.
+
+## 17. Pemeriksaan sebelum go-live (8 Okt 2026)
+
+### Penghalang yang ditemukan dan diperbaiki
+
+**`simpanSebaran` menulis satu per satu.** Baik-baik saja untuk beberapa klik
+manual, MEMATIKAN untuk dua jalur yang baru dibuat: impor Excel dan borongan
+"semua cabang" sama-sama bisa mengirim 1.658 SKU x 5 cabang = **±8.290
+keputusan** sekaligus. Pada ±100 md per bolak-balik itu ±14 menit, sementara
+fungsi Vercel dibunuh di detik ke-60 — penulisan separuh jalan, tanpa laporan,
+dan tidak ada yang tahu bagian mana yang sudah masuk.
+
+Sekarang berkelompok 400: **21 pernyataan, bukan 8.290**. INSERT … ON DUPLICATE
+KEY UPDATE untuk yang ditulis, `DELETE … WHERE (sku, areaId) IN (…)` untuk yang
+dikosongkan. Satu kelompok gagal tidak menggagalkan sisanya, dan seluruh isinya
+dilaporkan.
+
+Ini kesalahan yang SAMA dengan `sync:brand` beberapa jam sebelumnya, di tempat
+berbeda. Pelajarannya: setiap kali sebuah jalur baru bisa mengirim ribuan baris,
+periksa penulisnya — bukan hanya pembacanya.
+
+**`maxDuration = 120` bohong.** Tiga route ATP menuliskannya; Hobby tetap
+membunuh di detik ke-60. Diturunkan ke 60 dengan komentar, supaya tidak ada yang
+mengira punya waktu yang tidak ada.
+
+`dihapus` sekarang menghitung baris yang BENAR-BENAR terhapus (hasil DELETE),
+bukan yang diminta: mengosongkan keputusan yang memang belum ada tidak mengubah
+apa pun, dan melaporkannya sebagai "dikosongkan" membuat angkanya mengarang.
+
+### Yang TIDAK bisa saya buktikan sendiri
+
+- `npm run build` / `npm run typecheck` — tidak bisa dijalankan dari sini.
+  Seluruh perubahan halaman (`/atp` +239 baris) belum pernah dikompilasi.
+- Tampilan `/atp` dan `/wa` belum pernah dibuka di peramban.
+- Impor Excel belum pernah dijalankan melawan database sungguhan.

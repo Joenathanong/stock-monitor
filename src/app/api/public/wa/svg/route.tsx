@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { Poster } from '@/app/wa/poster';
 import type { DataWa } from '@/app/wa/types';
+import { tolakAksesPoster } from '@/lib/wa-akses';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -17,15 +18,26 @@ export const runtime = 'nodejs';
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const k = url.searchParams.get('k');
-  const token = process.env.WA_PAGE_TOKEN;
-  if (!token) {
-    return NextResponse.json({ ok: false, error: 'WA_PAGE_TOKEN belum diset' }, { status: 503 });
+  const tolak = await tolakAksesPoster(req);
+  if (tolak) {
+    const status = tolak.startsWith('WA_PAGE_TOKEN') ? 503 : 401;
+    return NextResponse.json({ ok: false, error: tolak }, { status });
   }
-  if (k !== token) return NextResponse.json({ ok: false, error: 'Kunci salah' }, { status: 401 });
 
   // Ambil datanya lewat endpoint yang sama dengan yang dipakai halaman, supaya
   // bentuk datanya dijamin identik.
-  const res = await fetch(`${url.origin}/api/public/wa?k=${encodeURIComponent(k)}`, { cache: 'no-store' });
+  //
+  // Izin pemanggil DITERUSKAN apa adanya: `?k=` kalau ia bot, atau cookie
+  // sesinya kalau ia orang yang login. Tanpa meneruskan cookie, pengguna yang
+  // masuk lewat menu akan lolos di sini lalu ditolak 401 oleh panggilan dalam
+  // ini — gagal di tempat yang tidak ada hubungannya dengan sebabnya.
+  const dalam = new URL('/api/public/wa', url.origin);
+  if (k) dalam.searchParams.set('k', k);
+  const cookie = req.headers.get('cookie');
+  const res = await fetch(dalam, {
+    cache: 'no-store',
+    headers: cookie ? { cookie } : undefined,
+  });
   if (!res.ok) return NextResponse.json({ ok: false, error: 'Data tidak bisa diambil' }, { status: 502 });
   const data = (await res.json()) as DataWa;
 

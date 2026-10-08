@@ -420,3 +420,44 @@ export function lengkapiDariKode(
   }
   return { diisi, brand, asal };
 }
+
+/** Baris minimal yang dibutuhkan penentu lingkup borongan. */
+export type BarisBorongan = { sku: string; area: Record<string, unknown> };
+
+/**
+ * Tentukan baris dan jumlah keputusan yang akan diubah oleh isi borongan.
+ *
+ * MURNI dan diuji karena inilah bagian yang bisa merusak paling banyak: satu
+ * klik bisa menulis ulang ribuan keputusan sebaran, dan kalau lingkupnya salah
+ * tidak ada yang akan menyadarinya sampai ATP% bergerak tanpa sebab.
+ *
+ * Dua aturan yang dikunci di sini:
+ *
+ * 1. PILIHAN DIPOTONG DENGAN FILTER. Kalau user mencentang 20 SKU lalu
+ *    mengganti filter brand, yang kena hanya yang masih lolos filter. Tanpa
+ *    pemotongan ini, borongan mengubah baris yang sudah tidak terlihat di layar
+ *    — persis cara kerusakan senyap terjadi.
+ * 2. TANPA CENTANG SAMA SEKALI, lingkupnya seluruh baris yang lolos filter.
+ *    Itu perilaku lama dan sengaja dipertahankan.
+ *
+ * `nKeputusan` dihitung terpisah dari jumlah SKU: untuk "semua cabang" keduanya
+ * jauh berbeda (20 SKU x 5 cabang = 100 keputusan), dan angka yang lebih besar
+ * itulah yang sebenarnya akan tersimpan — jadi itu yang harus disebut sebelum
+ * user menekan OK.
+ */
+export function lingkupBorongan<T extends BarisBorongan>(
+  baris: T[],
+  terpilih: Set<string>,
+  areaKena: string[],
+): { target: T[]; nKeputusan: number; pakaiPilihan: boolean } {
+  const pakaiPilihan = terpilih.size > 0;
+  const dalamLingkup = pakaiPilihan ? baris.filter((r) => terpilih.has(r.sku)) : baris;
+  // Baris yang tidak punya SATU pun area yang kena tidak ikut: mencantumkannya
+  // membuat jumlah di layar lebih besar dari yang benar-benar berubah.
+  const target = dalamLingkup.filter((r) => areaKena.some((a) => r.area[a] !== undefined));
+  const nKeputusan = target.reduce(
+    (t, r) => t + areaKena.filter((a) => r.area[a] !== undefined).length,
+    0,
+  );
+  return { target, nKeputusan, pakaiPilihan };
+}

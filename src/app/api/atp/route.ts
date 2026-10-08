@@ -5,7 +5,10 @@ import { muatAtp, simpanSebaran, simpanBrandManual, rekamAtpHarian, type SatuPut
 import { AMBANG_ATP_BAWAAN, type SaringAktif } from '@/lib/atp';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120;
+// Vercel Hobby membunuh satu fungsi di detik ke-60. Menulis angka lebih besar
+// TIDAK menaikkannya — prosesnya tetap dibunuh, dan menuliskan 120 hanya membuat
+// kita mengira punya waktu yang tidak kita punya.
+export const maxDuration = 60;
 
 /**
  * Saringan tampilan aktif/non-aktif dari URL. Bawaan `AKTIF`.

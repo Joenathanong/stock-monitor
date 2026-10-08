@@ -143,31 +143,73 @@ export async function simpanSebaran(
   let tersimpan = 0; let dihapus = 0;
   const gagal: { sku: string; areaId: string; pesan: string }[] = [];
 
+  // --- pisahkan dulu, baru tulis BERKELOMPOK ---
+  //
+  // Dulu satu `upsert`/`deleteMany` per keputusan. Itu baik-baik saja untuk
+  // beberapa klik manual, tapi MEMATIKAN untuk dua jalur yang baru dibuat:
+  // impor Excel dan borongan "semua cabang" sama-sama bisa mengirim
+  // 1.658 SKU x 5 cabang = ±8.290 keputusan sekaligus. Pada ±100 md per
+  // bolak-balik itu ±14 menit, sementara fungsi Vercel dibunuh di detik ke-60 —
+  // hasilnya penulisan separuh jalan, tanpa laporan, dan tidak ada yang tahu
+  // bagian mana yang sudah masuk.
+  //
+  // Dengan kelompok 400: ±21 pernyataan, hitungan detik.
+  const KELOMPOK = 400;
+  const tulis: { sku: string; areaId: string; dibagikan: boolean; note: string | null }[] = [];
+  const hapus: { sku: string; areaId: string }[] = [];
+
   for (const p of putusan) {
     const sku = String(p.sku ?? '').trim();
     const areaId = String(p.areaId ?? '').trim();
     if (!sku || !areaId) { gagal.push({ sku, areaId, pesan: 'sku dan areaId wajib' }); continue; }
+    if (p.dibagikan === null) { hapus.push({ sku, areaId }); continue; }
+    const note = p.note === null || p.note === undefined ? null : String(p.note).slice(0, 300) || null;
+    tulis.push({ sku: sku.slice(0, 120), areaId: areaId.slice(0, 60), dibagikan: p.dibagikan, note });
+  }
 
+  const now = new Date();
+
+  for (let i = 0; i < tulis.length; i += KELOMPOK) {
+    const chunk = tulis.slice(i, i + KELOMPOK);
     try {
-      if (p.dibagikan === null) {
-        await prisma.atpShare.deleteMany({ where: { sku, areaId } });
-        dihapus++;
-        continue;
-      }
-      const note = p.note === null || p.note === undefined ? null : String(p.note).slice(0, 300) || null;
-      await prisma.atpShare.upsert({
-        // `sku_areaId`: nama bawaan Prisma untuk `@@id([sku, areaId])`. Tidak
-        // diberi `name:` di schema, jadi JANGAN tulis nama karangan di sini —
-        // kesalahan seperti itu hanya muncul saat dijalankan, bukan saat tsc.
-        where: { sku_areaId: { sku, areaId } },
-        create: { sku, areaId, dibagikan: p.dibagikan, note, updatedBy: oleh },
-        update: { dibagikan: p.dibagikan, note, updatedBy: oleh },
-      });
-      tersimpan++;
+      const ph = chunk.map(() => '(?,?,?,?,?,?)').join(',');
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO atp_share (\`sku\`, \`areaId\`, \`dibagikan\`, \`note\`, \`updatedBy\`, \`updatedAt\`) VALUES ${ph}
+         ON DUPLICATE KEY UPDATE
+           \`dibagikan\`=VALUES(\`dibagikan\`), \`note\`=VALUES(\`note\`),
+           \`updatedBy\`=VALUES(\`updatedBy\`), \`updatedAt\`=VALUES(\`updatedAt\`)`,
+        ...chunk.flatMap((r) => [r.sku, r.areaId, r.dibagikan ? 1 : 0, r.note, oleh.slice(0, 120), now]),
+      );
+      tersimpan += chunk.length;
     } catch (e) {
-      gagal.push({ sku, areaId, pesan: e instanceof Error ? e.message : String(e) });
+      // Satu kelompok gagal TIDAK menggagalkan sisanya, dan seluruh isinya
+      // dilaporkan — lebih baik tahu 400 baris mana yang tidak masuk daripada
+      // mendapat satu pesan galat tanpa daftar.
+      const pesan = e instanceof Error ? e.message : String(e);
+      for (const r of chunk) gagal.push({ sku: r.sku, areaId: r.areaId, pesan });
     }
   }
+
+  for (let i = 0; i < hapus.length; i += KELOMPOK) {
+    const chunk = hapus.slice(i, i + KELOMPOK);
+    try {
+      // Pasangan (sku, areaId) dibandingkan sekaligus. Menghapus per baris akan
+      // mengulang masalah yang sama dengan penulisan di atas.
+      const ph = chunk.map(() => '(?,?)').join(',');
+      const n = await prisma.$executeRawUnsafe(
+        `DELETE FROM atp_share WHERE (\`sku\`, \`areaId\`) IN (${ph})`,
+        ...chunk.flatMap((r) => [r.sku, r.areaId]),
+      );
+      // Yang dihitung baris yang BENAR-BENAR terhapus, bukan yang diminta:
+      // mengosongkan keputusan yang memang belum ada tidak mengubah apa pun,
+      // dan melaporkannya sebagai "dikosongkan" membuat angkanya mengarang.
+      dihapus += Number(n) || 0;
+    } catch (e) {
+      const pesan = e instanceof Error ? e.message : String(e);
+      for (const r of chunk) gagal.push({ sku: r.sku, areaId: r.areaId, pesan });
+    }
+  }
+
   return { tersimpan, dihapus, gagal };
 }
 

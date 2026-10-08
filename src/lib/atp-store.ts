@@ -237,6 +237,15 @@ export type MuatAtp = {
     brandManual: boolean;
     /** 'Sku' | 'Bundle' | 'Gimmick' — Bundle 73% dari barisnya, jadi perlu bisa disaring. */
     kategori: string;
+    /**
+     * Area yang punya baris TAPI tersaring keluar oleh filter status.
+     *
+     * Ada supaya sel kosong bisa menjelaskan DIRINYA. Tanpa ini layar cuma
+     * menulis "—", dan user bertanya kenapa — persis yang terjadi 8 Okt 2026.
+     * Garis itu ternyata berarti "nonaktif di cabang ini", bukan "belum diisi",
+     * dan dua hal itu butuh tindakan yang sama sekali berbeda.
+     */
+    lain: Record<string, 'AKTIF' | 'NONAKTIF'>;
     /** Per area: keadaan SKU ini di sana. */
     area: Record<string, {
       /** true/false = sudah diputuskan; null = belum. */
@@ -305,7 +314,7 @@ export async function muatAtp(
     if (!b) {
       b = {
         sku: r.sku, name: r.name, brand: r.brand, brandManual: r.brandManual,
-        kategori: String(r.category ?? ''), area: {},
+        kategori: String(r.category ?? ''), area: {}, lain: {},
       };
       perSku.set(r.sku, b);
     }
@@ -323,6 +332,14 @@ export async function muatAtp(
       tolak: k.layak ? null : k.sebab!,
       note: catatan.get(kunciSebaran(r.sku, r.areaId))?.note ?? '',
     };
+  }
+
+  // Tandai area yang BARISNYA ADA tapi tersaring keluar. Dibaca dari `rows`
+  // (belum tersaring), bukan `barisTampil` — itu memang inti gunanya.
+  for (const r of rows) {
+    const b = perSku.get(r.sku);
+    if (!b || b.area[r.areaId]) continue;
+    b.lain[r.areaId] = r.isActive ? 'AKTIF' : 'NONAKTIF';
   }
 
   const sku = [...perSku.values()].sort((a, b) => a.sku.localeCompare(b.sku));

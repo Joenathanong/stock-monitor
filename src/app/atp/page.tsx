@@ -17,6 +17,8 @@ type BarisSku = {
   sku: string; name: string; brand: string; brandManual: boolean;
   kategori: string;
   area: Record<string, SelArea>;
+  /** Area yang barisnya ada tapi tersaring keluar oleh filter status. */
+  lain?: Record<string, 'AKTIF' | 'NONAKTIF'>;
 };
 type Saring = 'AKTIF' | 'NONAKTIF' | 'SEMUA';
 type HasilArea = {
@@ -314,7 +316,27 @@ export default function AtpPage() {
       width: 112,
       render: (r) => {
         const sel = r.area[a];
-        if (!sel) return <span className="empty">—</span>;
+        if (!sel) {
+          // Sel kosong HARUS menjelaskan dirinya. "—" polos membuat orang
+          // mengira keputusannya belum diisi, padahal artinya SKU ini memang
+          // tidak dijual di cabang itu — dua hal yang butuh tindakan berbeda.
+          const lain = r.lain?.[a];
+          return (
+            <span
+              className="empty"
+              title={
+                lain === 'NONAKTIF'
+                  ? `${r.sku} NONAKTIF di ${a} menurut OCS, jadi tidak bisa dijanjikan di sana.\n`
+                    + 'Ganti filter "Status di OCS" ke "Aktif + non-aktif" untuk melihat barisnya.'
+                  : lain === 'AKTIF'
+                    ? `${r.sku} aktif di ${a}, tapi tersaring oleh filter status yang sedang dipakai.`
+                    : `${r.sku} tidak terdaftar sama sekali di ${a} pada data stok OCS.`
+              }
+            >
+              {lain === 'NONAKTIF' ? 'nonaktif' : lain === 'AKTIF' ? 'tersaring' : '—'}
+            </span>
+          );
+        }
         const v = nilai(r, a);
         const berubah = ubah.has(kunci(r.sku, a));
         const label = v === null ? 'Belum' : v ? 'Ya' : 'Tidak';

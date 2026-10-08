@@ -688,3 +688,32 @@ apa pun, dan melaporkannya sebagai "dikosongkan" membuat angkanya mengarang.
   Seluruh perubahan halaman (`/atp` +239 baris) belum pernah dikompilasi.
 - Tampilan `/atp` dan `/wa` belum pernah dibuka di peramban.
 - Impor Excel belum pernah dijalankan melawan database sungguhan.
+
+## 18. Sel "—" di halaman ATP — bukan bug, tapi UI-nya kurang (8 Okt 2026)
+
+User bertanya kenapa banyak sel area bergaris. Jawabannya: **SKU itu NONAKTIF di
+cabang tersebut menurut OCS**, dan halaman sedang disaring "Aktif saja".
+Dibuktikan dari dua sisi:
+
+| SKU | Pusat | 4 cabang |
+|---|---|---|
+| `ACNE-DAY-CREAM` | aktif | NONAKTIF |
+| `BDL-EOMMA-0000000001` | aktif | NONAKTIF |
+| `GIMMICK-TAS-GENTLE-WOMEN` | NONAKTIF | aktif |
+
+**98 SKU** bergaris di keempat cabang (19 Sku + 52 Bundle + 27 Gimmick), dan
+himpunannya IDENTIK di keempat cabang — konsisten dengan temuan §1 bahwa keempat
+cabang punya daftar SKU aktif yang sama persis. Satu SKU bergaris di Pusat.
+
+Jadi barisnya ADA di OCS, hanya `IsActive = false`. Mengganti filter ke
+"Aktif + non-aktif" membuatnya muncul.
+
+**Yang diperbaiki:** sel kosong sekarang menjelaskan dirinya sendiri. `MuatAtp`
+mengisi `sku[].lain` — area yang barisnya ada tapi tersaring keluar, berikut
+statusnya — sehingga sel menulis **"nonaktif"** (bukan "—") dengan tooltip yang
+menyebut cabangnya dan cara melihatnya.
+
+Pelajaran: "—" polos membuat orang mengira keputusannya belum diisi, padahal
+artinya SKU itu memang tidak dijual di cabang itu. Dua hal yang butuh tindakan
+sama sekali berbeda, ditulis dengan lambang yang sama. Pertanyaan user adalah
+buktinya — kalau layar harus dijelaskan lewat percakapan, layarnya yang kurang.

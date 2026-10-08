@@ -407,8 +407,20 @@ export async function persenAtpPerArea(
   hasil: HasilArea[];
   keseluruhan: ReturnType<typeof atpKeseluruhan>;
   siap: boolean;
-  /** Ketersediaan per area di SELURUH kumpulan ATP, lepas dari checklist sebaran. */
-  stok: Map<string, { available: number; layak: number; kosong: number }>;
+  /**
+   * Ketersediaan per area, PEMBAGINYA = SKU yang dicentang disebar.
+   *
+   * Sampai 8 Okt 2026 pembaginya seluruh SKU layak, lepas dari checklist. Itu
+   * salah dan user yang menemukannya: Pusat menampilkan 1.158/1.663 = 69,6% di
+   * kotak Available sementara ATP di kartu yang sama menghitung 1.158/1.659 =
+   * 69,8%. Dua angka yang terlihat seharusnya sama, beda tipis, tanpa apa pun
+   * yang menjelaskan — bentuk kesalahan yang paling sulit dipercaya saat
+   * ketahuan.
+   *
+   * Sekarang diambil dari `hasil` yang sama dengan ATP%, jadi keduanya TIDAK
+   * BISA berbeda lagi.
+   */
+  stok: Map<string, { available: number; layak: number }>;
 }> {
   const [rows, { sebaran, siap }] = await Promise.all([muatStokAtp(), muatSebaran()]);
   // 'AKTIF' ditulis tegas, bukan dibiarkan bawaan: poster memuat angka yang
@@ -416,19 +428,8 @@ export async function persenAtpPerArea(
   // kalau bawaan `kelayakan()` suatu saat diganti.
   const hasil = hitungAtp(rows, sebaran, ambang, 'AKTIF');
 
-  // Pembagi kotak "Available" di poster: SELURUH SKU yang layak ATP di area itu
-  // — bukan hanya yang sudah dicentang sebarannya. Keputusan user 8 Okt 2026.
-  // Bedanya dengan ATP% memang itu: ATP% dibagi yang DISEBAR, Available dibagi
-  // yang LAYAK. Dua pertanyaan berbeda, dan checklist yang masih kosong membuat
-  // hanya yang kedua bisa dijawab hari ini.
-  const stok = new Map<string, { available: number; layak: number; kosong: number }>();
-  for (const r of rows) {
-    if (!kelayakan(r, 'AKTIF').layak) continue;
-    const e = stok.get(r.areaId) ?? { available: 0, layak: 0, kosong: 0 };
-    e.layak++;
-    if (r.availableQty > ambang) e.available++;
-    if (r.availableQty <= 0) e.kosong++;
-    stok.set(r.areaId, e);
-  }
+  // Diturunkan dari `hasil` — BUKAN dihitung ulang. Menghitungnya sendiri di
+  // sini persis cara dua angka yang mestinya sama jadi berbeda.
+  const stok = new Map(hasil.map((h) => [h.areaId, { available: h.siap, layak: h.dihitung }]));
   return { hasil, keseluruhan: atpKeseluruhan(hasil), siap, stok };
 }

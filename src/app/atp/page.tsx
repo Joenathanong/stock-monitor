@@ -178,6 +178,32 @@ export default function AtpPage() {
     return n;
   });
 
+  /**
+   * Centang / batalkan centang untuk satu cabang. `a === null` = semua cabang.
+   *
+   * Yang dicentang hanya SKU yang PUNYA baris di cabang itu — SKU yang nonaktif
+   * di sana tidak ikut, karena tidak ada keputusan yang bisa diubah untuknya dan
+   * mencentangnya hanya membuat angka "terpilih" lebih besar dari yang bisa
+   * berubah.
+   *
+   * Selalu dibatasi `baris` (yang lolos filter), sama seperti tombol borongan.
+   */
+  function centangCabang(a: string | null, on: boolean) {
+    const areaKena = a === null ? areas : [a];
+    const kena = baris.filter((r) => areaKena.some((x) => r.area[x])).map((r) => r.sku);
+    setSel((prev) => {
+      const n = new Set(prev);
+      for (const sku of kena) { if (on) n.add(sku); else n.delete(sku); }
+      return n;
+    });
+  }
+
+  /** Berapa SKU yang akan tercentang oleh tombol cabang ini — untuk labelnya. */
+  const cacahCabang = (a: string | null) => {
+    const areaKena = a === null ? areas : [a];
+    return baris.filter((r) => areaKena.some((x) => r.area[x])).length;
+  };
+
   /** `a === null` berarti SEMUA cabang sekaligus. */
   function borongan(a: string | null, ke: Putusan) {
     const areaKena = a === null ? areas : [a];
@@ -574,44 +600,43 @@ export default function AtpPage() {
         </div>
 
         <div className="mt-3 border-t border-[var(--line)] pt-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[12px]">
-              Berlaku ke{' '}
-              <b>{pakaiPilihan ? `${fmt(lingkup.length)} SKU yang Anda centang` : `${fmt(baris.length)} SKU yang lolos filter`}</b>
-              {pakaiPilihan && lingkup.length < sel.size ? (
-                <span className="text-muted">
-                  {' '}({fmt(sel.size - lingkup.length)} dari pilihan Anda tidak lolos filter sekarang, jadi tidak ikut berubah)
-                </span>
-              ) : null}
-            </span>
-            <button className="btn btn-sm" onClick={() => setSel(new Set(baris.map((r) => r.sku)))}>
-              Centang semua yang lolos filter ({fmt(baris.length)})
-            </button>
-            <button className="btn btn-sm" onClick={() => setSel(new Set())} disabled={!sel.size}>
-              Batalkan centang
-            </button>
+          <div className="text-[12px]">
+            Berlaku ke{' '}
+            <b>{pakaiPilihan ? `${fmt(lingkup.length)} SKU yang Anda centang` : `${fmt(baris.length)} SKU yang lolos filter`}</b>
+            {pakaiPilihan && lingkup.length < sel.size ? (
+              <span className="text-muted">
+                {' '}({fmt(sel.size - lingkup.length)} dari pilihan Anda tidak lolos filter sekarang, jadi tidak ikut berubah)
+              </span>
+            ) : null}
           </div>
           <div className="mt-1 text-[12px] text-label">
-            Centang baris di tabel untuk memilih sendiri. Tanpa centang sama sekali, tombol di bawah
-            berlaku ke semua yang lolos filter di atas (filter kolom di dalam tabel tidak ikut
-            dihitung). Perubahannya ditahan dulu — belum tersimpan sampai tombol <b>Simpan</b> ditekan.
+            Centang baris di tabel untuk memilih sendiri, atau pakai <b>Centang semua</b> di baris
+            cabang yang Anda mau. Tanpa centang sama sekali, tombol ubah berlaku ke semua yang lolos
+            filter di atas (filter kolom di dalam tabel tidak ikut dihitung). Perubahannya ditahan
+            dulu — belum tersimpan sampai tombol <b>Simpan</b> ditekan.
           </div>
           <div className="mt-2 space-y-1">
             {/* Baris "semua cabang" didahulukan: untuk SKU terpilih, itu yang
                 paling sering dipakai — satu klik, bukan lima. */}
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="w-24 text-[12px] font-bold">Semua cabang</span>
-              <button className="btn btn-sm" onClick={() => borongan(null, true)}>Semua disebar</button>
-              <button className="btn btn-sm" onClick={() => borongan(null, false)}>Semua tidak</button>
-              <button className="btn btn-sm" onClick={() => borongan(null, null)}>Kosongkan</button>
-            </div>
-            <div className="h-px bg-[var(--line)]" />
-            {areas.map((a) => (
-              <div key={a} className="flex flex-wrap items-center gap-2">
-                <span className="w-24 text-[12px] font-medium">{a}</span>
+            {/* Satu baris = satu cabang, dan SEMUA tombolnya ada di baris itu:
+                mencentang dan mengubah adalah dua langkah dari pekerjaan yang
+                sama, jadi tombolnya tidak dipisah ke dua tempat. */}
+            {([null, ...areas] as (string | null)[]).map((a) => (
+              <div key={a ?? 'SEMUA'} className="flex flex-wrap items-center gap-2">
+                <span className={`w-24 text-[12px] ${a === null ? 'font-bold' : 'font-medium'}`}>
+                  {a ?? 'Semua cabang'}
+                </span>
+                <button className="btn btn-sm" onClick={() => centangCabang(a, true)}>
+                  Centang semua ({fmt(cacahCabang(a))})
+                </button>
+                <button className="btn btn-sm" onClick={() => centangCabang(a, false)} disabled={!sel.size}>
+                  Batalkan centang
+                </button>
+                <span className="text-muted">·</span>
                 <button className="btn btn-sm" onClick={() => borongan(a, true)}>Semua disebar</button>
                 <button className="btn btn-sm" onClick={() => borongan(a, false)}>Semua tidak</button>
                 <button className="btn btn-sm" onClick={() => borongan(a, null)}>Kosongkan</button>
+                {a === null ? <span className="h-px w-full bg-[var(--line)]" /> : null}
               </div>
             ))}
           </div>

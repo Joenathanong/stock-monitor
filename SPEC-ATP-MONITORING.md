@@ -717,3 +717,39 @@ Pelajaran: "—" polos membuat orang mengira keputusannya belum diisi, padahal
 artinya SKU itu memang tidak dijual di cabang itu. Dua hal yang butuh tindakan
 sama sekali berbeda, ditulis dengan lambang yang sama. Pertanyaan user adalah
 buktinya — kalau layar harus dijelaskan lewat percakapan, layarnya yang kurang.
+
+## 19. Centang per cabang + pembagi Available diperbaiki (8 Okt 2026)
+
+### Tombol centang pindah ke baris cabang
+
+Setiap baris cabang kini memuat SELURUH tombolnya:
+
+```
+Semua cabang  [Centang semua (N)] [Batalkan centang] · [Semua disebar] [Semua tidak] [Kosongkan]
+Makassar      [Centang semua (N)] [Batalkan centang] · [Semua disebar] [Semua tidak] [Kosongkan]
+…
+```
+
+Mencentang dan mengubah adalah dua langkah dari pekerjaan yang sama, jadi
+tombolnya tidak dipisah ke dua tempat. `Centang semua` hanya mengambil SKU yang
+PUNYA baris di cabang itu — SKU yang nonaktif di sana tidak ikut, karena tidak
+ada keputusan yang bisa diubah untuknya dan mencentangnya hanya membuat angka
+"terpilih" lebih besar dari yang bisa berubah. Tetap dibatasi filter, sama
+seperti tombol borongan.
+
+### Pembagi "Available >5 pcs" = SKU yang dicentang
+
+Dulu pembaginya seluruh SKU layak ATP, lepas dari checklist. User menemukan
+akibatnya: Pusat menampilkan **1.158 / 1.663 = 69,6%** di kotak Available
+sementara ATP di kartu yang SAMA menghitung **1.158 / 1.659 = 69,8%**. Dua angka
+yang terlihat seharusnya cocok, beda tipis, tanpa apa pun yang menjelaskan.
+
+Sekarang `stok` diturunkan dari `hasil` yang sama dengan ATP% (`siap` /
+`dihitung`), jadi keduanya TIDAK BISA berbeda lagi. Kotak Available kini
+menampilkan angka mentah di balik persen ATP.
+
+Keadaan checklist saat ini (diukur 8 Okt 2026 dari API hidup): **Pusat sudah
+terisi** (dihitung 1.659, takDisebar 4, belum 0); empat cabang lain masih kosong
+(belum 1.566). Konsekuensi yang disengaja: cabang yang belum diisi menampilkan
+**0 / 0** dan **"—"**. Itu jujur — belum ada yang diputuskan, jadi belum ada yang
+bisa dijanjikan.

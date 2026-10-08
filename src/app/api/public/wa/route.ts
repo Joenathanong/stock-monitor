@@ -138,17 +138,20 @@ export async function GET(req: Request) {
         //
         // Jatuh balik ke kumpulan DOI kalau ATP tidak terbaca, supaya poster
         // tidak kehilangan kotaknya saat tabel ATP belum ada.
+        // Pembaginya SKU yang DICENTANG disebar — sama persis dengan pembagi
+        // ATP% di sebelahnya, jadi kedua angka tidak bisa berselisih.
+        //
+        // Jatuh balik ke kumpulan DOI kalau ATP tidak terbaca sama sekali,
+        // supaya poster tidak kehilangan kotaknya saat tabel ATP belum ada.
         stok: atpStok.has(area)
           ? {
               available: atpStok.get(area)!.available,
               dasar: atpStok.get(area)!.layak,
-              kosong: atpStok.get(area)!.kosong,
               ambang: AMBANG_ATP_BAWAAN,
             }
           : {
               available: snap.rows.filter((r) => r.availableQty > AMBANG_ATP_BAWAAN).length,
               dasar: snap.rows.length,
-              kosong: snap.rows.filter((r) => r.availableQty <= 0).length,
               ambang: AMBANG_ATP_BAWAAN,
             },
         // Dari ringkasan yang sama dengan doi1/doi2 di atas, jadi selisihnya

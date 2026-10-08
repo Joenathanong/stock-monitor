@@ -40,22 +40,26 @@ export type AreaWa = {
    */
   atp?: { persen: number | null; siap: number; dihitung: number };
   /**
-   * Ketersediaan stok di area ini, dihitung dari SKU YANG SAMA dengan `sku`
-   * (yaitu baris snapshot DOI, angka yang sudah tertulis di "SEBARAN STATUS").
+   * Ketersediaan stok di area ini — PEMBAGINYA SAMA DENGAN `atp.dihitung`,
+   * yaitu SKU yang dicentang disebar ke area itu di halaman /atp.
    *
-   * Sengaja TIDAK memakai `isActive` OCS (356 cabang / 375 Pusat). Poster sudah
-   * menyebut dua angka SKU — strip atas dan sebaran status — dan angka ketiga
-   * yang berbeda tanpa penjelasan hanya membuat orang bertanya mana yang benar.
-   * `available` dan `kosong` di sini selalu bisa dijumlahkan terhadap `sku`.
+   * Diturunkan dari hasil yang sama, bukan dihitung ulang. Sampai 8 Okt 2026
+   * pembaginya seluruh SKU layak, dan akibatnya Pusat menampilkan 1.158/1.663 =
+   * 69,6% di kotak ini sementara ATP di kartu yang SAMA menghitung 1.158/1.659 =
+   * 69,8%. Dua angka yang terlihat seharusnya cocok, beda tipis, tanpa apa pun
+   * yang menjelaskan.
+   *
+   * Konsekuensi yang disengaja: cabang yang checklist-nya belum diisi
+   * menampilkan 0 / 0 di sini dan "—" di ATP. Itu jujur — belum ada yang
+   * diputuskan, jadi belum ada yang bisa dijanjikan.
    *
    * `ambang` direkam, bukan diasumsikan: kalau nanti diubah dari 5, poster lama
    * tetap bisa dibaca dengan ambang yang memang berlaku saat itu.
    */
   stok?: {
     available: number;
-    /** Pembagi: SKU yang layak ATP di area ini (ketiga kategori, aktif). */
+    /** Pembagi: SKU yang DICENTANG disebar ke area ini — sama dengan pembagi ATP%. */
     dasar: number;
-    kosong: number;
     ambang: number;
   };
   /**

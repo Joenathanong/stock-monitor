@@ -190,28 +190,18 @@ test('kode TIDAK menang kalau brandnya bukan kandidat bentrokan', () => {
 const brs = (sku: string, ...areas: string[]) =>
   ({ sku, area: Object.fromEntries(areas.map((a) => [a, {}])) });
 
-test('tanpa centang: lingkupnya seluruh baris yang lolos filter', () => {
+test('lingkupnya SELALU baris yang lolos filter', () => {
   const baris = [brs('A', 'Medan', 'Pusat'), brs('B', 'Medan')];
-  const r = lingkupBorongan(baris, new Set(), ['Medan', 'Pusat']);
-  assert.equal(r.pakaiPilihan, false);
+  const r = lingkupBorongan(baris, ['Medan', 'Pusat']);
   assert.equal(r.target.length, 2);
   assert.equal(r.nKeputusan, 3, 'A punya 2 area, B punya 1');
-});
-
-test('PILIHAN DIPOTONG DENGAN FILTER — tidak pernah mengubah baris di luar layar', () => {
-  // Inti keamanannya: user mencentang A dan Z, lalu memfilter sehingga Z hilang
-  // dari daftar. Z TIDAK boleh ikut berubah.
-  const baris = [brs('A', 'Medan'), brs('B', 'Medan')];
-  const r = lingkupBorongan(baris, new Set(['A', 'Z']), ['Medan']);
-  assert.deepEqual(r.target.map((x) => x.sku), ['A']);
-  assert.equal(r.nKeputusan, 1);
 });
 
 test('baris yang tidak punya area yang dituju tidak ikut dihitung', () => {
   // Kalau ikut, jumlah di layar lebih besar dari yang benar-benar berubah —
   // dan user menyetujui angka yang salah.
   const baris = [brs('A', 'Medan'), brs('B', 'Pusat')];
-  const r = lingkupBorongan(baris, new Set(), ['Medan']);
+  const r = lingkupBorongan(baris, ['Medan']);
   assert.deepEqual(r.target.map((x) => x.sku), ['A']);
   assert.equal(r.nKeputusan, 1);
 });
@@ -221,7 +211,15 @@ test('semua cabang: jumlah keputusan jauh lebih besar dari jumlah SKU', () => {
   // user menekan OK, bukan "20".
   const areas = ['Makassar', 'Medan', 'Pusat', 'Surabaya', 'Yogyakarta'];
   const baris = Array.from({ length: 20 }, (_, i) => brs(`S${i}`, ...areas));
-  const r = lingkupBorongan(baris, new Set(), areas);
+  const r = lingkupBorongan(baris, areas);
   assert.equal(r.target.length, 20);
   assert.equal(r.nKeputusan, 100);
+});
+
+test('tidak ada jalan lain mempersempit lingkup selain filter', () => {
+  // Penjaga atas keputusan user 8 Okt 2026: kolom centang yang diam-diam
+  // menang atas filter DIBUANG. Fungsi ini hanya menerima baris yang sudah
+  // tersaring — kalau suatu saat ada yang menambahkan parameter "terpilih"
+  // lagi, tes ini yang pertama memberi tahu.
+  assert.equal(lingkupBorongan.length, 2, 'lingkupBorongan(baris, areaKena) — dua parameter, tidak lebih');
 });

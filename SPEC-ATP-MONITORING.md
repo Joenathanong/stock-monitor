@@ -720,22 +720,33 @@ buktinya — kalau layar harus dijelaskan lewat percakapan, layarnya yang kurang
 
 ## 19. Centang per cabang + pembagi Available diperbaiki (8 Okt 2026)
 
-### Tombol centang pindah ke baris cabang
-
-Setiap baris cabang kini memuat SELURUH tombolnya:
+### Ubah massal: SATU lingkup, yaitu filter yang aktif
 
 ```
-Semua cabang  [Centang semua (N)] [Batalkan centang] · [Semua disebar] [Semua tidak] [Kosongkan]
-Makassar      [Centang semua (N)] [Batalkan centang] · [Semua disebar] [Semua tidak] [Kosongkan]
+Semua cabang  [Semua disebar] [Semua tidak] [Kosongkan]
+Makassar      [Semua disebar] [Semua tidak] [Kosongkan]
 …
 ```
 
-Mencentang dan mengubah adalah dua langkah dari pekerjaan yang sama, jadi
-tombolnya tidak dipisah ke dua tempat. `Centang semua` hanya mengambil SKU yang
-PUNYA baris di cabang itu — SKU yang nonaktif di sana tidak ikut, karena tidak
-ada keputusan yang bisa diubah untuknya dan mencentangnya hanya membuat angka
-"terpilih" lebih besar dari yang bisa berubah. Tetap dibatasi filter, sama
-seperti tombol borongan.
+**Kolom centang DIBUANG.** Sempat ada, dan diam-diam MENANG atas filter kalau
+ada isinya. User menolaknya dan benar: tombol yang artinya berubah tergantung
+keadaan layar adalah tombol yang tidak bisa dipercaya — orang menekan
+"Semua tidak" sambil mengira lingkupnya yang ia lihat, padahal masih ada
+centang dari pekerjaan sebelumnya.
+
+Cara mengubah sebagian sekarang hanya satu: **persempit filternya** (brand,
+kategori, pencarian, status), lalu tekan tombolnya. Yang terlihat di layar
+itulah yang berubah.
+
+`lingkupBorongan(baris, areaKena)` tinggal dua parameter, dan satu tes mengunci
+jumlah parameternya — kalau suatu saat ada yang menambahkan "terpilih" lagi,
+tes itu yang pertama memberi tahu.
+
+Dua ronde salah baca sebelum ini mendarat: user menulis "centang semua /
+batalkan centang" yang saya kira tombol pemilih baris, padahal yang ia maksud
+adalah MENCENTANG SELURUH KOLOM CABANG — yaitu "Semua disebar" dan "Kosongkan"
+yang sudah ada. Pelajaran: kalau permintaan menyebut nama tombol yang sudah ada
+dengan kata lain, tanyakan dulu, jangan bangun yang baru.
 
 ### Pembagi "Available >5 pcs" = SKU yang dicentang
 

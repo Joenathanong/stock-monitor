@@ -431,14 +431,14 @@ export type BarisBorongan = { sku: string; area: Record<string, unknown> };
  * klik bisa menulis ulang ribuan keputusan sebaran, dan kalau lingkupnya salah
  * tidak ada yang akan menyadarinya sampai ATP% bergerak tanpa sebab.
  *
- * Dua aturan yang dikunci di sini:
+ * SATU aturan, tanpa pengecualian: lingkupnya adalah baris yang lolos FILTER
+ * yang sedang aktif. Titik.
  *
- * 1. PILIHAN DIPOTONG DENGAN FILTER. Kalau user mencentang 20 SKU lalu
- *    mengganti filter brand, yang kena hanya yang masih lolos filter. Tanpa
- *    pemotongan ini, borongan mengubah baris yang sudah tidak terlihat di layar
- *    — persis cara kerusakan senyap terjadi.
- * 2. TANPA CENTANG SAMA SEKALI, lingkupnya seluruh baris yang lolos filter.
- *    Itu perilaku lama dan sengaja dipertahankan.
+ * Sempat ada kolom centang yang diam-diam MENANG atas filter kalau ada isinya.
+ * User menolaknya 8 Okt 2026, dan benar: tombol yang artinya berubah tergantung
+ * keadaan layar adalah tombol yang tidak bisa dipercaya. Mau mengubah sebagian?
+ * Persempit filternya — brand, kategori, pencarian, status — lalu tekan tombolnya.
+ * Yang terlihat di layar itulah yang berubah.
  *
  * `nKeputusan` dihitung terpisah dari jumlah SKU: untuk "semua cabang" keduanya
  * jauh berbeda (20 SKU x 5 cabang = 100 keputusan), dan angka yang lebih besar
@@ -447,17 +447,14 @@ export type BarisBorongan = { sku: string; area: Record<string, unknown> };
  */
 export function lingkupBorongan<T extends BarisBorongan>(
   baris: T[],
-  terpilih: Set<string>,
   areaKena: string[],
-): { target: T[]; nKeputusan: number; pakaiPilihan: boolean } {
-  const pakaiPilihan = terpilih.size > 0;
-  const dalamLingkup = pakaiPilihan ? baris.filter((r) => terpilih.has(r.sku)) : baris;
+): { target: T[]; nKeputusan: number } {
   // Baris yang tidak punya SATU pun area yang kena tidak ikut: mencantumkannya
   // membuat jumlah di layar lebih besar dari yang benar-benar berubah.
-  const target = dalamLingkup.filter((r) => areaKena.some((a) => r.area[a] !== undefined));
+  const target = baris.filter((r) => areaKena.some((a) => r.area[a] !== undefined));
   const nKeputusan = target.reduce(
     (t, r) => t + areaKena.filter((a) => r.area[a] !== undefined).length,
     0,
   );
-  return { target, nKeputusan, pakaiPilihan };
+  return { target, nKeputusan };
 }

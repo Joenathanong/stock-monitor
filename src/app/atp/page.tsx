@@ -87,10 +87,6 @@ export default function AtpPage() {
 
   const [brand, setBrand] = useState('ALL');
   const [kategori, setKategori] = useState('ALL');
-  // Baris yang dicentang untuk diubah massal. Kuncinya SKU, bukan sku+area:
-  // satu baris tabel adalah satu SKU, dan kolom cabang yang dipilih ditentukan
-  // belakangan lewat tombolnya.
-  const [sel, setSel] = useState<Set<string>>(new Set());
   const [cari, setCari] = useState('');
   const [hanyaBelum, setHanyaBelum] = useState(false);
   // Perubahan ditahan dulu, baru disimpan sekali. 375 SKU x 6 cabang = 2.250
@@ -156,63 +152,16 @@ export default function AtpPage() {
    * bohong begitu user memakai filter kolom. Jumlahnya ditulis di tombol supaya
    * yang akan terjadi terlihat sebelum diklik.
    */
-  /**
-   * Baris yang akan kena borongan.
-   *
-   * Pilihan DIPOTONG dengan filter yang sedang berlaku — bukan dipakai mentah.
-   * Kalau tidak, mencentang 20 SKU lalu mengganti filter brand akan mengubah
-   * baris yang sudah tidak terlihat lagi di layar. Jumlah efektifnya selalu
-   * ditulis di tombol, jadi pemotongan itu terlihat, bukan diam-diam.
-   */
-  // Jumlah yang ditampilkan di panel memakai SELURUH cabang sebagai acuan —
-  // tombolnya sendiri menghitung ulang dengan cabang yang benar saat diklik.
-  const lingkup = useMemo(
-    () => lingkupBorongan(baris, sel, areas).target,
-    [baris, sel, areas],
-  );
-  const pakaiPilihan = sel.size > 0;
-
-  const togglePilih = (sku: string, on: boolean) => setSel((prev) => {
-    const n = new Set(prev);
-    if (on) n.add(sku); else n.delete(sku);
-    return n;
-  });
-
-  /**
-   * Centang / batalkan centang untuk satu cabang. `a === null` = semua cabang.
-   *
-   * Yang dicentang hanya SKU yang PUNYA baris di cabang itu — SKU yang nonaktif
-   * di sana tidak ikut, karena tidak ada keputusan yang bisa diubah untuknya dan
-   * mencentangnya hanya membuat angka "terpilih" lebih besar dari yang bisa
-   * berubah.
-   *
-   * Selalu dibatasi `baris` (yang lolos filter), sama seperti tombol borongan.
-   */
-  function centangCabang(a: string | null, on: boolean) {
-    const areaKena = a === null ? areas : [a];
-    const kena = baris.filter((r) => areaKena.some((x) => r.area[x])).map((r) => r.sku);
-    setSel((prev) => {
-      const n = new Set(prev);
-      for (const sku of kena) { if (on) n.add(sku); else n.delete(sku); }
-      return n;
-    });
-  }
-
-  /** Berapa SKU yang akan tercentang oleh tombol cabang ini — untuk labelnya. */
-  const cacahCabang = (a: string | null) => {
-    const areaKena = a === null ? areas : [a];
-    return baris.filter((r) => areaKena.some((x) => r.area[x])).length;
-  };
 
   /** `a === null` berarti SEMUA cabang sekaligus. */
   function borongan(a: string | null, ke: Putusan) {
     const areaKena = a === null ? areas : [a];
-    const { target, nKeputusan } = lingkupBorongan(baris, sel, areaKena);
+    const { target, nKeputusan } = lingkupBorongan(baris, areaKena);
     if (!target.length) return;
 
     const kata = ke === null ? 'DIKOSONGKAN (kembali belum diputuskan)' : ke ? 'DISEBAR' : 'TIDAK disebar';
     const diMana = a === null ? `SEMUA ${areas.length} cabang` : a;
-    const dari = pakaiPilihan ? 'yang Anda centang' : 'yang lolos filter';
+    const dari = 'yang lolos filter';
     // Jumlah SKU dan jumlah KEPUTUSAN disebut terpisah — lihat lingkupBorongan().
     if (!confirm(
       `Tandai ${target.length} SKU ${dari} di ${diMana} sebagai ${kata}?\n\n`
@@ -244,11 +193,6 @@ export default function AtpPage() {
       const r = await postJson(`/api/atp?ambang=${ambang}`, { putusan });
       setMsg({ tone: r.gagal?.length ? 'warn' : 'ok', text: r.pesan });
       setUbah(new Map());
-      // Centangnya ikut dikosongkan: borongan itu sudah tersimpan, dan pilihan
-      // lama yang tertinggal adalah jebakan untuk borongan BERIKUTNYA — orang
-      // menekan "Semua tidak" sambil mengira lingkupnya baris yang sedang ia
-      // lihat, padahal masih 500 SKU dari pekerjaan sebelumnya.
-      setSel(new Set());
       reload();
     } catch (e) {
       setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) });
@@ -265,7 +209,7 @@ export default function AtpPage() {
       const r = await postForm(`/api/atp/import${q}`, form);
       if (terap) {
         setMsg({ tone: r.gagal?.length ? 'warn' : 'ok', text: r.pesan });
-        setPratinjau(null); setBerkas(null); setUbah(new Map()); setSel(new Set());
+        setPratinjau(null); setBerkas(null); setUbah(new Map());
         reload();
       } else {
         setPratinjau(r as Pratinjau);
@@ -289,18 +233,6 @@ export default function AtpPage() {
     + `&q=${encodeURIComponent(cari.trim())}&saring=${saring}&kategori=${encodeURIComponent(kategori)}`;
 
   const columns = useMemo<Column<BarisSku>[]>(() => [
-    {
-      key: 'sel', label: '', get: () => null, noSort: true, noFilter: true, width: 40,
-      render: (r) => (
-        <label className="check justify-center" onClick={(e) => e.stopPropagation()}>
-          <input
-            type="checkbox" aria-label={`Pilih ${r.sku}`}
-            checked={sel.has(r.sku)}
-            onChange={(e) => togglePilih(r.sku, e.target.checked)}
-          />
-        </label>
-      ),
-    },
     { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 240, sticky: true, isTitle: true },
     {
       key: 'name', label: 'Nama', get: (r) => r.name, width: 280, prio: 'p2',
@@ -386,7 +318,7 @@ export default function AtpPage() {
         );
       },
     })),
-  ], [areas, ubah, editBrand, ambang, sel]); // eslint-disable-line react-hooks/exhaustive-deps
+  ], [areas, ubah, editBrand, ambang]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const k = data?.keseluruhan;
   const belumTotal = (data?.hasil ?? []).reduce((t, h) => t + h.belumDiputus, 0);
@@ -601,38 +533,22 @@ export default function AtpPage() {
 
         <div className="mt-3 border-t border-[var(--line)] pt-3">
           <div className="text-[12px]">
-            Berlaku ke{' '}
-            <b>{pakaiPilihan ? `${fmt(lingkup.length)} SKU yang Anda centang` : `${fmt(baris.length)} SKU yang lolos filter`}</b>
-            {pakaiPilihan && lingkup.length < sel.size ? (
-              <span className="text-muted">
-                {' '}({fmt(sel.size - lingkup.length)} dari pilihan Anda tidak lolos filter sekarang, jadi tidak ikut berubah)
-              </span>
-            ) : null}
+            Berlaku ke <b>{fmt(baris.length)} SKU yang lolos filter di atas</b>.
           </div>
           <div className="mt-1 text-[12px] text-label">
-            Centang baris di tabel untuk memilih sendiri, atau pakai <b>Centang semua</b> di baris
-            cabang yang Anda mau. Tanpa centang sama sekali, tombol ubah berlaku ke semua yang lolos
-            filter di atas (filter kolom di dalam tabel tidak ikut dihitung). Perubahannya ditahan
-            dulu — belum tersimpan sampai tombol <b>Simpan</b> ditekan.
+            Mau mengubah sebagian saja? <b>Persempit filternya</b> — brand, kategori, pencarian,
+            status — lalu tekan tombolnya. Yang terlihat di layar itulah yang berubah. (Filter kolom
+            di dalam tabel tidak ikut dihitung.) Perubahannya ditahan dulu — belum tersimpan sampai
+            tombol <b>Simpan</b> ditekan.
           </div>
           <div className="mt-2 space-y-1">
             {/* Baris "semua cabang" didahulukan: untuk SKU terpilih, itu yang
                 paling sering dipakai — satu klik, bukan lima. */}
-            {/* Satu baris = satu cabang, dan SEMUA tombolnya ada di baris itu:
-                mencentang dan mengubah adalah dua langkah dari pekerjaan yang
-                sama, jadi tombolnya tidak dipisah ke dua tempat. */}
             {([null, ...areas] as (string | null)[]).map((a) => (
               <div key={a ?? 'SEMUA'} className="flex flex-wrap items-center gap-2">
                 <span className={`w-24 text-[12px] ${a === null ? 'font-bold' : 'font-medium'}`}>
                   {a ?? 'Semua cabang'}
                 </span>
-                <button className="btn btn-sm" onClick={() => centangCabang(a, true)}>
-                  Centang semua ({fmt(cacahCabang(a))})
-                </button>
-                <button className="btn btn-sm" onClick={() => centangCabang(a, false)} disabled={!sel.size}>
-                  Batalkan centang
-                </button>
-                <span className="text-muted">·</span>
                 <button className="btn btn-sm" onClick={() => borongan(a, true)}>Semua disebar</button>
                 <button className="btn btn-sm" onClick={() => borongan(a, false)}>Semua tidak</button>
                 <button className="btn btn-sm" onClick={() => borongan(a, null)}>Kosongkan</button>
@@ -665,12 +581,7 @@ export default function AtpPage() {
         rowKey={(r) => r.sku}
         loading={!data}
         emptyText="Tidak ada SKU. Jalankan Refresh dulu agar stok dari OCS terisi."
-        toolbarExtra={(
-          <span className="text-[12px] text-label">
-            {fmt(baris.length)} SKU · {areas.length} cabang
-            {sel.size ? <> · <b>{fmt(sel.size)} dicentang</b></> : null}
-          </span>
-        )}
+        toolbarExtra={<span className="text-[12px] text-label">{fmt(baris.length)} SKU · {areas.length} cabang</span>}
       />
     </div>
   );

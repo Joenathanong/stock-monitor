@@ -39,6 +39,28 @@ export type AreaWa = {
    * seperti bencana stok.
    */
   atp?: { persen: number | null; siap: number; dihitung: number };
+  /**
+   * Ketersediaan stok di area ini, dihitung dari SKU YANG SAMA dengan `sku`
+   * (yaitu baris snapshot DOI, angka yang sudah tertulis di "SEBARAN STATUS").
+   *
+   * Sengaja TIDAK memakai `isActive` OCS (356 cabang / 375 Pusat). Poster sudah
+   * menyebut dua angka SKU — strip atas dan sebaran status — dan angka ketiga
+   * yang berbeda tanpa penjelasan hanya membuat orang bertanya mana yang benar.
+   * `available` dan `kosong` di sini selalu bisa dijumlahkan terhadap `sku`.
+   *
+   * `ambang` direkam, bukan diasumsikan: kalau nanti diubah dari 5, poster lama
+   * tetap bisa dibaca dengan ambang yang memang berlaku saat itu.
+   */
+  stok?: { available: number; kosong: number; ambang: number };
+  /**
+   * DOI kalau SIT ikut dihitung = (stok + SIT) ÷ ADS, per opsi.
+   *
+   * Dikirim dari server, BUKAN dihitung di komponen: pembilang dan penyebutnya
+   * harus persis sama dengan yang dipakai `doi1`/`doi2` (keduanya sudah
+   * mengeluarkan SKU EXCLUDED). Kalau layar menghitung sendiri dari `stock` dan
+   * `transit`, selisihnya bisa bukan murni SIT dan tidak ada yang akan sadar.
+   */
+  doiSit?: { doi1: number | null; doi2: number | null };
   tren: { date: string; doi1: number | null; doi2: number | null }[];
   kritis: KritisWa[];
 };

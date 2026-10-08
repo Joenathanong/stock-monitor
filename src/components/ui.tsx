@@ -133,7 +133,15 @@ export async function postForm(url: string, form: FormData) {
  * menyerah sendiri. Tanpa ini tombolnya menggantung tanpa batas dan terlihat
  * seperti aplikasi yang macet.
  */
-const REFRESH_TIMEOUT_MS = 70_000;
+/**
+ * Batas tunggu Refresh. Naik dari 70 dtk ke 140 dtk saat Refresh jadi DUA
+ * permintaan berurutan (transit lalu hitung), masing-masing boleh memakai
+ * hampir satu batas fungsi Vercel (50 dtk + 52 dtk + overhead jaringan).
+ *
+ * 70 dtk akan membatalkan permintaan KEDUA di tengah jalan — dan yang dibatalkan
+ * itu justru perhitungannya, jadi SIT-nya baru, snapshot-nya tidak.
+ */
+const REFRESH_TIMEOUT_MS = 140_000;
 
 export function RefreshButton({ onDone, withStock = true, label, className }: { onDone?: () => void; withStock?: boolean; label?: string; className?: string }) {
   const [busy, setBusy] = useState(false);
@@ -151,14 +159,49 @@ export function RefreshButton({ onDone, withStock = true, label, className }: { 
     const ac = new AbortController();
     const batas = setTimeout(() => ac.abort(), REFRESH_TIMEOUT_MS);
     try {
-      const r = await postJson('/api/compute', { withStock }, 'POST', ac.signal);
+      // --- Langkah 1: tarik barang dalam perjalanan, SEBELUM menghitung ---
+      //
+      // Dipisah jadi permintaan sendiri, bukan dibiarkan di dalam /api/compute,
+      // karena di sana transit cuma kebagian sisa anggaran. Hitungannya: satu
+      // fungsi Vercel 52 dtk; syncStock memesan 24 dtk, lalu
+      // `jatah = left - 18_000` menyisakan ±17 dtk untuk transit, dan loop
+      // dokumennya berhenti saat sisa < 12 dtk — jadi hanya ±6 dari 23 dokumen
+      // per klik. Butuh 4 kali Refresh sebelum SIT lengkap, dan itulah yang
+      // membuat Pusat sempat tertulis 171 pcs.
+      //
+      // `/api/transit/sync` punya 50 dtk untuk dirinya sendiri; 23 dokumen
+      // ditarik 6 sekaligus ±30 dtk, jadi satu klik cukup.
+      //
+      // GAGALNYA TIDAK MENGHENTIKAN PERHITUNGAN. Transit itu pelengkap: lebih
+      // baik DOI terhitung dengan SIT kemarin daripada tidak terhitung sama
+      // sekali. Tapi hasilnya dilaporkan, tidak ditelan diam-diam.
+      let catatanTransit = '';
+      // Hanya benar kalau transit SUDAH ditangani di langkah ini. Kalau
+      // penarikannya gagal, biarkan /api/compute mencoba sendiri — lebih baik
+      // transit ditarik dengan anggaran sempit daripada tidak sama sekali.
+      let transitBeres = false;
+      if (withStock) {
+        try {
+          const t = await postJson('/api/transit/sync?force=1', undefined, 'POST', ac.signal);
+          transitBeres = true;
+          if (t.partial) {
+            catatanTransit = `SIT baru sebagian (${t.docsKurang} dari ${t.docs} dokumen belum terbaca) — klik Refresh sekali lagi.`;
+          }
+        } catch (e) {
+          if (e instanceof Error && e.name === 'AbortError') throw e;
+          catatanTransit = `Penarikan SIT gagal (${e instanceof Error ? e.message.slice(0, 60) : e}) — DOI dihitung dengan SIT terakhir yang ada.`;
+        }
+      }
+
+      // --- Langkah 2: tarik stok & hitung ---
+      const r = await postJson('/api/compute', { withStock, skipTransit: transitBeres }, 'POST', ac.signal);
       if (r.skipped) {
         // Ini BUKAN keberhasilan: snapshot tidak berubah.
         toast({ tone: 'warn', title: r.message || 'Dilewati — perhitungan lain sedang berjalan' });
       } else {
         // Ada langkah yang GAGAL di tengah? Hasilnya tetap tersimpan, tapi
         // jangan disebut hijau — mis. "transit GAGAL (…)" pernah lewat begitu saja.
-        const bermasalah = typeof r.steps === 'string' && /GAGAL|SEBAGIAN/.test(r.steps);
+        const bermasalah = (typeof r.steps === 'string' && /GAGAL|SEBAGIAN/.test(r.steps)) || !!catatanTransit;
         // Daftar langkah TIDAK ikut ke sini — panjangnya bisa 300 karakter dan
         // notifikasi cuma hidup 10 detik. Semuanya sudah tersimpan di sync_log
         // dan terbaca di halaman Riwayat Proses.
@@ -167,7 +210,10 @@ export function RefreshButton({ onDone, withStock = true, label, className }: { 
           title: bermasalah
             ? `Selesai dengan catatan: ${r.skuCount} SKU, ${Math.round(r.durationMs / 1000)} dtk`
             : `Selesai: ${r.skuCount} SKU, ${Math.round(r.durationMs / 1000)} dtk`,
-          detail: bermasalah ? 'Ada langkah yang gagal atau baru sebagian.' : undefined,
+          // Catatan transit disebut APA ADANYA, bukan dilebur jadi "ada langkah
+          // yang gagal" — SIT yang belum lengkap punya tindakan lanjutan yang
+          // jelas (klik lagi), dan itu hilang kalau pesannya digeneralkan.
+          detail: catatanTransit || (bermasalah ? 'Ada langkah yang gagal atau baru sebagian.' : undefined),
         });
       }
       onDone?.();

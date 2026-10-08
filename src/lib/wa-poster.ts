@@ -52,7 +52,7 @@ export const KANVAS = { w: 1600, h: 1000 } as const;
  * yang sudah tidak dipakai siapa pun, dan luberan yang mestinya ketahuan jadi
  * lolos. Sekarang tesnya memanggil fungsi ini.
  */
-export const KARTU = { y: 216, bawah: 56 } as const;
+export const KARTU = { y: 216, bawah: 56, pad: 16 } as const;
 export const tinggiKartuTersedia = (kanvas: { h: number } = KANVAS) =>
   kanvas.h - KARTU.y - KARTU.bawah;
 
@@ -386,6 +386,74 @@ export function lebarTeksKira(teks: string, size: number, mono = false): number 
   return String(teks ?? '').length * (mono ? 0.62 : 0.56) * size;
 }
 
+/** Ukuran angka DOI besar, dan satuan "hari" yang menempel di belakangnya. */
+export const UKURAN_DOI = 38;
+export const UKURAN_SATUAN = 13;
+/** Jarak angka ke satuannya (atribut `dx` pada tspan-nya). */
+export const JEDA_SATUAN = 6;
+
+/** Lebar terpakai angka DOI besar BESERTA satuannya. */
+export function lebarDoiBesar(teks: string): number {
+  return lebarTeksKira(teks, UKURAN_DOI, true)
+    + JEDA_SATUAN
+    + lebarTeksKira('hari', UKURAN_SATUAN);
+}
+
+/** Pilihan ukuran ATP, dari yang paling diinginkan ke yang paling aman. */
+export const UKURAN_ATP = [38, 34, 30, 26, 22] as const;
+
+/**
+ * Ukuran ATP yang MUAT di sebelah angka DOI — satu ukuran untuk SELURUH poster.
+ *
+ * User meminta ATP sebesar DOI (38px). Terukur 8 Okt 2026, di kartu ber-isi
+ * 262px itu menabrak pada kasus nyata:
+ *
+ *   "105,3 hari" 153px + "71,0%"  118px = 271px  (lewat 8px)
+ *   "48,1 hari"  129px + "100,0%" 141px = 271px  (lewat 8px)
+ *
+ * SVG tidak memotong apa pun, jadi tabrakan itu tergambar sebagai dua angka
+ * saling menimpa — tanpa ada yang gagal.
+ *
+ * Dihitung dari SEMUA kartu sekaligus, bukan per kartu. Kalau tiap kartu
+ * menyusut sendiri-sendiri, Makassar bisa ber-ATP 30px sementara Pusat 38px di
+ * gambar yang sama — dan beda ukuran itu terbaca seolah punya arti, padahal
+ * cuma akibat panjang angka DOI-nya. Satu ukuran untuk semua: yang terbesar
+ * yang masih muat di kartu TERSEMPIT.
+ */
+export function ukuranAtpMuat(
+  pasangan: { doi: string; atp: string }[],
+  isi: number,
+  jeda = JEDA_LABEL,
+): number {
+  for (const size of UKURAN_ATP) {
+    const muatSemua = pasangan.every(
+      (p) => lebarDoiBesar(p.doi) + lebarTeksKira(p.atp, size, true) + jeda <= isi,
+    );
+    if (muatSemua) return size;
+  }
+  return UKURAN_ATP[UKURAN_ATP.length - 1];
+}
+
+/**
+ * DOI kalau barang dalam perjalanan ikut dihitung = (stok + SIT) ÷ ADS.
+ *
+ * Pembilang dan penyebutnya diambil dari ringkasan yang SAMA dengan `doi1`
+ * (keduanya sudah mengeluarkan SKU berstatus EXCLUDED), jadi selisih kedua
+ * angka itu memang murni SIT — bukan akibat cakupan baris yang berbeda.
+ *
+ * `null` kalau ADS 0: tanpa penjualan, "berapa hari stok ini bertahan" tidak
+ * punya jawaban, dan menuliskannya 0 hari terbaca seperti keadaan darurat.
+ */
+export function doiPlusSit(
+  stok: number,
+  sit: number,
+  ads: number | null | undefined,
+): number | null {
+  const a = Number(ads ?? 0);
+  if (!(a > 0)) return null;
+  return (Number(stok ?? 0) + Number(sit ?? 0)) / a;
+}
+
 /** Jeda minimal antara label dan batang. Kelipatan 8 → 8px (ISO 9241-125 §5). */
 export const JEDA_LABEL = 8;
 
@@ -430,17 +498,89 @@ export function potongTeks(teks: string, maksPx: number, size: number, mono = fa
  * "Over", bukan "Overstock": lebih pendek, dan kolom label di kartu 294px sudah
  * harus memuat "Belum Terjual".
  */
+/**
+ * Label sebaran dipecah dua: NAMA dan AMBANG HARI.
+ *
+ * Dulu satu string ("Kritis ≤4D"), dan akibatnya angka harinya berpindah-pindah
+ * ke kanan mengikuti panjang namanya — "Kritis ≤4D" / "Low ≤6D" / "Aman ≤7D"
+ * membuat ≤4D, ≤6D, ≤7D berdiri di tiga tempat berbeda. Mata harus mencari
+ * angkanya satu per satu, padahal justru angka itu yang dibandingkan antar
+ * baris. Dipisah, ambangnya bisa ditaruh di SATU kolom tetap.
+ *
+ * Baris yang tidak punya ambang (SIT, Dead Stock, dst) mengembalikan `ambang`
+ * kosong — bukan tanda hubung. Kolomnya memang tidak berlaku untuk mereka, dan
+ * mengisinya dengan "—" menyiratkan ada nilai yang hilang.
+ */
+export type LabelPita = { nama: string; ambang: string };
+
+export function labelPitaPisah(
+  key: StatusPoster,
+  ambang: AmbangDoi | null | undefined,
+): LabelPita {
+  const dasar = STATUS_POSTER[key]?.label ?? String(key);
+  if (!ambang) return { nama: key === 'OVERSTOCK' ? 'Over' : dasar, ambang: '' };
+  switch (key) {
+    case 'CRITICAL': return { nama: 'Kritis', ambang: `≤${ambang.kritis}D` };
+    case 'LOW': return { nama: 'Low', ambang: `≤${ambang.min}D` };
+    case 'HEALTHY': return { nama: 'Aman', ambang: `≤${ambang.max}D` };
+    case 'OVERSTOCK': return { nama: 'Over', ambang: `>${ambang.max}D` };
+    default: return { nama: dasar, ambang: '' };
+  }
+}
+
+export type TataLabel = {
+  /** Jarak dari tepi kiri label ke awal kolom ambang. */
+  xAmbang: number;
+  /** Lebar seluruh kolom label (nama + ambang) termasuk jeda ke batang. */
+  gutter: number;
+};
+
+/**
+ * Tempatkan kolom ambang supaya angka harinya SEJAJAR di semua baris.
+ *
+ * Kolomnya dihitung dari nama terpanjang yang PUNYA ambang saja — bukan dari
+ * sepuluh label. Kalau ikut "Belum Terjual" (80px), ambangnya terdorong jauh ke
+ * kanan dan "Kritis" menggantung sendirian dengan jurang di tengahnya. Baris
+ * tanpa ambang boleh memakai kolom itu, karena di situ memang tidak ada apa-apa.
+ *
+ * `maks` tetap dihormati: kalau mentok, kolom ambang digeser kiri supaya
+ * ambangnya tetap muat utuh — teks SVG tidak terpotong sendiri, ia menimpa
+ * tetangganya tanpa ada yang gagal.
+ */
+export function tataLabelStatus(
+  label: LabelPita[],
+  size: number,
+  maks = 110,
+): TataLabel {
+  const w = (t: string) => lebarTeksKira(t, size);
+  const berambang = label.filter((l) => l.ambang);
+  const namaBand = berambang.reduce((m, l) => Math.max(m, w(l.nama)), 0);
+  const ambangMaks = berambang.reduce((m, l) => Math.max(m, w(l.ambang)), 0);
+  const tanpaAmbang = label.filter((l) => !l.ambang).reduce((m, l) => Math.max(m, w(l.nama)), 0);
+
+  let xAmbang = Math.ceil(namaBand) + (berambang.length ? JEDA_LABEL : 0);
+  let isi = Math.max(xAmbang + Math.ceil(ambangMaks), Math.ceil(tanpaAmbang));
+  let gutter = Math.ceil(isi) + JEDA_LABEL;
+
+  if (gutter > maks) {
+    gutter = maks;
+    // Ambang didahulukan: ia angka, dan angka yang terpotong lebih berbahaya
+    // daripada nama yang terpotong ("≤14D" jadi "≤1D" membalik artinya).
+    xAmbang = Math.max(0, maks - JEDA_LABEL - Math.ceil(ambangMaks));
+    isi = maks - JEDA_LABEL;
+  }
+  return { xAmbang, gutter };
+}
+
+/**
+ * Versi satu baris, DIturunkan dari `labelPitaPisah` supaya tidak ada dua
+ * sumber ejaan. Dipakai halaman /wa (HTML, yang punya tata letak sendiri) dan
+ * tempat lain yang tidak membutuhkan kolom sejajar. Poster memakai yang dipisah.
+ */
 export function labelPita(
   key: StatusPoster,
   ambang: AmbangDoi | null | undefined,
 ): string {
-  const dasar = STATUS_POSTER[key]?.label ?? String(key);
-  if (!ambang) return key === 'OVERSTOCK' ? 'Over' : dasar;
-  switch (key) {
-    case 'CRITICAL': return `Kritis ≤${ambang.kritis}D`;
-    case 'LOW': return `Low ≤${ambang.min}D`;
-    case 'HEALTHY': return `Aman ≤${ambang.max}D`;
-    case 'OVERSTOCK': return `Over >${ambang.max}D`;
-    default: return dasar;
-  }
+  const l = labelPitaPisah(key, ambang);
+  return l.ambang ? `${l.nama} ${l.ambang}` : l.nama;
 }

@@ -338,6 +338,16 @@ export async function runCompute(
   trigger: string,
   withStockSync = true,
   budgetMs = defaultBudgetMs(),
+  /**
+   * Lewati penarikan transit di dalam sini karena pemanggil SUDAH menariknya
+   * lebih dulu lewat /api/transit/sync (tombol Refresh melakukan itu).
+   *
+   * Bukan sekadar hemat: anggaran satu permintaan 52 dtk, dan menarik transit
+   * dua kali berarti langkah kedua memakan jatah yang dibutuhkan untuk
+   * menghitung 6 area. Area terakhir yang kehabisan waktu akan DILEWATI, jadi
+   * pekerjaan ganda di sini membayar dengan snapshot yang tidak lengkap.
+   */
+  lewatiTransit = false,
 ): Promise<RunResult> {
   const t0 = Date.now();
   const anggaran = budget(budgetMs);
@@ -380,7 +390,9 @@ export async function runCompute(
       // terhitung. Biayanya kecil: daftar dokumen memang selalu ditarik ulang,
       // dan isi dokumen yang sudah pernah dibaca datang dari cache receive_doc.
       // Cron tetap menghormati jendela kesegaran.
-      if (settings.transitEnabled && anggaran.left() > 20_000) {
+      if (lewatiTransit) {
+        waktu.step('transit dilewati (sudah ditarik sebelum langkah ini)');
+      } else if (settings.transitEnabled && anggaran.left() > 20_000) {
         try {
           const paksa = trigger === 'manual';
           // Sisa waktu diberikan ke transit, dikurangi cadangan untuk menghitung

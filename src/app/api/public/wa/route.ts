@@ -7,6 +7,8 @@ import { ambangDoi } from '@/lib/area-master';
 import { muatArea } from '@/lib/area-store';
 import { toDateKeyUtc } from '@/lib/dates';
 import { persenAtpPerArea } from '@/lib/atp-store';
+import { AMBANG_ATP_BAWAAN } from '@/lib/atp';
+import { doiPlusSit } from '@/lib/wa-poster';
 
 export const dynamic = 'force-dynamic';
 
@@ -126,6 +128,22 @@ export async function GET(req: Request) {
         // Dicocokkan lewat NAMA area, kunci yang sama dengan `stock_current` —
         // bukan kode gudang. Area yang tidak punya baris ATP dikirim `undefined`,
         // bukan nol, supaya posternya menulis "—" dan tidak mengarang 0%.
+        // Ketersediaan dihitung dari BARIS SNAPSHOT yang sama dengan `sku`
+        // (`totalSku` memang `rows.length`, diperiksa di doi.ts), jadi
+        // available + kosong tidak pernah melebihi angka yang tertulis di
+        // "SEBARAN STATUS" pada kartu yang sama.
+        stok: {
+          available: snap.rows.filter((r) => r.availableQty > AMBANG_ATP_BAWAAN).length,
+          kosong: snap.rows.filter((r) => r.availableQty <= 0).length,
+          ambang: AMBANG_ATP_BAWAAN,
+        },
+        // Dari ringkasan yang sama dengan doi1/doi2 di atas, jadi selisihnya
+        // murni SIT. Pusat 8 Okt 2026: (216.752 + 62.024) / 31.725 = 8,8 hari,
+        // berbanding DOI 6,8 hari tanpa SIT.
+        doiSit: {
+          doi1: doiPlusSit(s?.total.stock ?? 0, s?.total.transit ?? 0, s?.total.ads1),
+          doi2: doiPlusSit(s?.total.stock ?? 0, s?.total.transit ?? 0, s?.total.ads2),
+        },
         atp: atpPerArea.has(area)
           ? {
               persen: atpPerArea.get(area)!.persen,

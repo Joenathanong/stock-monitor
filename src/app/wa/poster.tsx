@@ -6,8 +6,8 @@
 // yang bisa berbeda.
 import {
   FONT, FONT_MONO, KANVAS, WARNA, adsTeks, angkaRingkas, deretTren, hari, jalurSpark, labelDoi, lebarKartu,
-  rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, gutterLabel, lebarTeksKira, potongTeks, JEDA_LABEL, labelPita, tampil1, tampil2,
-  KARTU, tinggiKartuTersedia,
+  rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, lebarTeksKira, potongTeks, JEDA_LABEL, labelPitaPisah, tataLabelStatus, tampil1, tampil2,
+  KARTU, tinggiKartuTersedia, ukuranAtpMuat, UKURAN_DOI,
 } from '@/lib/wa-poster';
 // Dipakai dari atp.ts, TIDAK ditulis ulang di sini: angka di poster dan angka di
 // halaman /atp harus sama ejaannya ("71,0%"), dan dua fungsi dengan satu tugas
@@ -50,14 +50,16 @@ const Teks = ({
   </text>
 );
 
-function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
+function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onKlik }: {
   a: AreaWa; x: number; y: number; w: number; h: number;
   blok: DataWa['blok']; disp: DataWa['doiDisplay']; kritisMaks: number;
+  /** Ukuran angka ATP — dihitung SEKALI untuk seluruh poster, lihat ukuranAtpMuat. */
+  atpSize: number;
   /** Status yang ditampilkan — SAMA untuk semua kartu, lihat `kunciTampil`. */
   tampil: ReturnType<typeof kunciTampil>;
   onKlik?: () => void;
 }) {
-  const pad = 16;
+  const pad = KARTU.pad;
   const isi = w - 2 * pad;
   // Kursor vertikal: blok yang dimatikan tidak meninggalkan lubang — sisa ruang
   // jatuh ke blok berikutnya.
@@ -103,9 +105,18 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
     const nilaiUtama = utama === 1 ? a.doi1 : a.doi2;
     const keduanya = tampil1(disp) && tampil2(disp);
     bagian.push(<Teks key="l1" x={x + pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel}>{labelDoi(utama as 1 | 2, disp)}</Teks>);
-    if (keduanya) {
-      bagian.push(<Teks key="l2" x={x + w - pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel} anchor="end">OPSI 2</Teks>);
-    }
+    // Slot kanan: OPSI 2 kalau dua opsi DOI ditampilkan, kalau tidak ATP.
+    //
+    // Pengaturan `doi_display` saat ini OPSI1, jadi slot ini kosong dan itulah
+    // tempat yang user minta untuk ATP. Kalau nanti diubah ke BOTH, OPSI 2
+    // tetap memegang slot besar dan ATP turun jadi baris kecil di bawahnya —
+    // ATP tidak boleh MENGGANTIKAN angka DOI kedua, karena itu menghilangkan
+    // angka yang memang diminta tampil.
+    bagian.push(
+      <Teks key="l2" x={x + w - pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel} anchor="end">
+        {keduanya ? 'OPSI 2' : 'ATP'}
+      </Teks>,
+    );
     cy += 34;
     // Satuannya di dalam <text> yang sama sebagai <tspan>, bukan elemen terpisah
     // dengan x tetap: lebar angka 38px tidak bisa ditebak, dan "hari" pernah
@@ -119,8 +130,28 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
         <tspan fontFamily={FONT} fontSize={13} fontWeight={400} fill={WARNA.tintaLabel} dx={6}>hari</tspan>
       </text>,
     );
+    // ATP setebal dan sebesar angka DOI (permintaan user 8 Okt 2026). Ukurannya
+    // dari `atpSize`, yang dihitung sekali untuk SELURUH poster supaya kelima
+    // kartu seragam — bukan menyusut sendiri-sendiri.
+    bagian.push(
+      <Teks
+        key="v2" x={x + w - pad} y={cy}
+        size={keduanya ? 22 : atpSize}
+        weight={700}
+        fill={keduanya ? WARNA.tintaLabel : WARNA.tinta}
+        anchor="end" mono
+      >
+        {keduanya ? hari(a.doi2) : (a.atp ? persenAtp(a.atp.persen) : '—')}
+      </Teks>,
+    );
+    // Mode dua opsi: ATP jadi baris kecil di 26px jeda yang sudah ada sebelum
+    // grid kotak, jadi tidak ada tinggi tambahan dan BIAYA_BLOK tidak berubah.
     if (keduanya) {
-      bagian.push(<Teks key="v2" x={x + w - pad} y={cy} size={22} weight={700} fill={WARNA.tintaLabel} anchor="end" mono>{hari(a.doi2)}</Teks>);
+      bagian.push(
+        <Teks key="atp2" x={x + w - pad} y={cy + 16} size={11} fill={WARNA.tintaLabel} anchor="end">
+          {`ATP ${a.atp ? persenAtp(a.atp.persen) : '—'}`}
+        </Teks>,
+      );
     }
 
     cy += 26;
@@ -128,23 +159,31 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
     // "Nilai stok" HANYA barang di tangan; "Nilai + Nilai SIT" menambahkan barang
     // dalam perjalanan — dua angka itu sengaja bersebelahan supaya selisihnya
     // langsung terbaca, bukan harus dihitung sendiri.
+    // Urutan dikunci user 8 Okt 2026. Pasangannya tetap masuk akal per baris:
+    // rupiah dengan rupiah, pcs dengan pcs, hari dengan per-hari, SKU dengan SKU.
+    const doiSitNilai = utama === 1 ? a.doiSit?.doi1 : a.doiSit?.doi2;
     const kotak = [
       { l: 'Nilai stok', v: rupiahRingkas(a.value) },
       { l: 'Nilai + Nilai SIT', v: rupiahRingkas(a.value + a.valueTransit) },
       { l: 'Stok', v: `${angkaRingkas(a.stock)} pcs` },
-      { l: 'Dalam perjalanan', v: `${angkaRingkas(a.transit)} pcs` },
-      { l: `ADS ${labelDoi(tampil1(disp) ? 1 : 2, disp) === 'DOI' ? '' : `Opsi ${tampil1(disp) ? 1 : 2}`}`.trim(), v: adsTeks(tampil1(disp) ? a.ads1 : a.ads2) },
+      // "SIT" menggantikan "Dalam perjalanan": sejalan dengan "Nilai + Nilai SIT"
+      // di atasnya, dan menyisakan ruang untuk angkanya.
+      { l: 'SIT', v: `${angkaRingkas(a.transit)} pcs` },
+      // DOI besar di kepala kartu TIDAK memuat SIT (doi1 = stok ÷ ADS). Kotak ini
+      // yang memuatnya, jadi selisih keduanya langsung terbaca sebagai sumbangan
+      // barang yang sedang jalan.
+      { l: 'Aktual DOI + SIT', v: doiSitNilai === undefined ? '—' : `${hari(doiSitNilai)} hari` },
+      { l: `ADS ${labelDoi(utama as 1 | 2, disp) === 'DOI' ? '' : `Opsi ${utama}`}`.trim(), v: adsTeks(utama === 1 ? a.ads1 : a.ads2) },
       { l: 'Perlu open PO', v: `${a.perluPo} SKU` },
-      // ATP dan PEMBAGINYA bersebelahan, bukan persen sendirian.
+      // Ketersediaan, DENGAN PEMBAGINYA — bukan persen sendirian.
       //
-      // ATP lama menampilkan "Yogyakarta 68,6%" tanpa pembagi, dan 68,6% itu
-      // sebagian hukuman untuk 29 SKU EOMMA yang memang tidak disebar ke sana —
-      // tidak ada yang bisa melihatnya dari posternya. Dengan "siap / disebar"
-      // di sebelahnya, persen yang pembaginya kecil langsung kelihatan kecil.
-      { l: 'ATP', v: a.atp ? persenAtp(a.atp.persen) : '—' },
+      // Pembaginya `a.sku`, angka yang sudah tertulis di "SEBARAN STATUS" pada
+      // kartu yang sama, jadi pembacanya bisa memeriksanya sendiri tanpa
+      // bertanya. Ambangnya ikut ditulis di label: "Available" tanpa ambang
+      // berarti berbeda-beda di kepala tiap orang.
       {
-        l: 'Siap / disebar',
-        v: a.atp ? `${angkaRingkas(a.atp.siap)} / ${angkaRingkas(a.atp.dihitung)}` : '—',
+        l: `Available >${a.stok?.ambang ?? 5} pcs`,
+        v: a.stok ? `${angkaRingkas(a.stok.available)} / ${angkaRingkas(a.sku)}` : '—',
       },
     ];
     const kw = (isi - 8) / 2;
@@ -187,8 +226,13 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
     // Label pita DOI memuat ambang harinya ("Kritis ≤4D") — ambangnya BEDA per
     // kota, jadi tanpa itu "Kritis 34" di dua kartu sebelahan mengukur hal yang
     // berbeda tanpa ada yang menyebutkannya.
-    const labelSeg = semuaSeg.map((x) => labelPita(x.key, a.ambang));
-    const gLabel = gutterLabel(labelSeg, fs);
+    //
+    // Nama dan ambang digambar sebagai DUA teks, bukan satu: supaya ≤4D, ≤5D,
+    // ≤7D berdiri di kolom yang sama alih-alih bergeser mengikuti panjang
+    // namanya. Angka itulah yang dibandingkan antar baris.
+    const labelSeg = semuaSeg.map((x) => labelPitaPisah(x.key, a.ambang));
+    const tataLbl = tataLabelStatus(labelSeg, fs);
+    const gLabel = tataLbl.gutter;
     const gAngka = Math.ceil(
       semuaSeg.reduce((m, x) => Math.max(m, lebarTeksKira(String(x.n), fs, true)), 0),
     ) + 8;
@@ -208,11 +252,22 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
       }
       const ytop = sy + (tata.pitch - bh) / 2;
       const bx = x + pad + gLabel;
+      // Nama dipotong pada batas kolom ambang (atau pada gutter kalau baris ini
+      // tidak punya ambang) — bukan pada seluruh gutter, kalau tidak nama yang
+      // kepanjangan akan menimpa angka harinya.
+      const batasNama = labelSeg[i].ambang ? tataLbl.xAmbang - 2 : gLabel - JEDA_LABEL;
       bagian.push(
         <Teks key={`sl${i}`} x={x + pad} y={sy + fs} size={fs}>
-          {potongTeks(labelSeg[i], gLabel - JEDA_LABEL, fs)}
+          {potongTeks(labelSeg[i].nama, batasNama, fs)}
         </Teks>,
       );
+      if (labelSeg[i].ambang) {
+        bagian.push(
+          <Teks key={`sa${i}`} x={x + pad + tataLbl.xAmbang} y={sy + fs} size={fs} fill={WARNA.tintaLabel}>
+            {labelSeg[i].ambang}
+          </Teks>,
+        );
+      }
       bagian.push(<rect key={`sbg${i}`} x={bx} y={ytop} width={barW} height={bh} rx={bh / 2} fill={WARNA.garisHalus} />);
       {/* Batang tipis, ujung membulat, ditambatkan ke garis dasar kiri. */}
       {s.n > 0 && bagian.push(
@@ -307,6 +362,18 @@ export function Poster({ data, onPilihArea }: Props) {
   // Satu keputusan untuk seluruh poster: baris yang 0 di SEMUA area dibuang,
   // sisanya tampil di setiap kartu supaya barisnya sejajar antar kolom.
   const tampil = kunciTampil(area.map((a) => a.byStatus));
+
+  // Ukuran ATP: SATU untuk seluruh poster, yaitu terbesar yang masih muat di
+  // kartu tersempit. Diukur dari teks yang BENAR-BENAR akan digambar, bukan dari
+  // contoh — panjang "105,3" dan "100,0%" yang menentukan, dan itu baru
+  // diketahui setelah datanya ada.
+  const atpSize = ukuranAtpMuat(
+    area.map((a) => ({
+      doi: hari(tampil1(disp) ? a.doi1 : a.doi2),
+      atp: a.atp ? persenAtp(a.atp.persen) : '—',
+    })),
+    w - 2 * KARTU.pad,
+  );
   const ringkas = [
     { l: 'SKU dihitung', v: t ? angkaRingkas(t.sku) : '—' },
     ...(tampil1(disp) ? [{ l: labelDoi(1, disp), v: t ? `${hari(t.doi1)} hari` : '—' }] : []),
@@ -365,6 +432,7 @@ export function Poster({ data, onPilihArea }: Props) {
           w={w}
           h={kartuH}
           blok={data.blok}
+          atpSize={atpSize}
           disp={disp}
           kritisMaks={6}
           tampil={tampil}

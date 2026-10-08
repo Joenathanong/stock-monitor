@@ -304,3 +304,99 @@ Satu hal yang belum bisa saya periksa sendiri: **tampilannya**. Saya tidak bisa
 menjalankan `next build` maupun merender SVG di lingkungan ini. Tinggi kartu dan
 luberan sudah diuji secara angka (`wa-poster.test.ts`), tapi apakah "ATP" dan
 "Siap / disebar" enak dibaca di kotaknya hanya bisa dilihat dengan mata.
+
+## 11. Poster & refresh — perubahan 8 Okt 2026 (sore)
+
+**ATP pindah ke slot kanan, sebelah angka DOI besar** (permintaan user). Slot itu
+milik OPSI 2; karena `doi_display` sekarang `OPSI1`, slot itu kosong. Kalau nanti
+diubah ke `BOTH`, OPSI 2 tetap memegang slot besar dan ATP turun jadi baris kecil
+di jeda 26px yang sudah ada — ATP TIDAK menggantikan angka DOI kedua, karena itu
+menghilangkan angka yang memang diminta tampil.
+
+**Kotak "ATP" dan "Siap / disebar" diganti** jadi `Available >5 pcs` (300 / 349)
+dan `Stok kosong` (20 SKU). Pembaginya `a.sku` — angka yang SUDAH tertulis di
+"SEBARAN STATUS" pada kartu yang sama, jadi pembaca bisa memeriksanya sendiri.
+
+Yang ditolak: memakai `isActive` OCS (356 cabang / 375 Pusat) sebagai "SKU aktif".
+Poster sudah menyebut dua angka SKU — strip atas dan sebaran status — dan angka
+ketiga yang berbeda tanpa penjelasan hanya membuat orang bertanya mana yang benar.
+`available + kosong` sekarang selalu bisa dijumlahkan terhadap angka yang terlihat.
+
+**Ambang hari disejajarkan satu kolom.** Dulu "Kritis ≤4D" satu string, jadi ≤4D /
+≤5D / ≤7D berdiri di tiga tempat berbeda mengikuti panjang namanya — padahal
+justru angka itu yang dibandingkan antar baris. Sekarang `labelPitaPisah()`
+memisah nama dan ambang, `tataLabelStatus()` menaruh ambangnya di satu x.
+
+Kolomnya dihitung dari nama terpanjang yang PUNYA ambang saja ("Kritis"), bukan
+dari sepuluh label — kalau ikut "Belum Terjual" (80px), ambangnya terdorong jauh
+ke kanan dan "Kritis" menggantung dengan jurang di tengahnya. Saat ruang mentok,
+yang dipertahankan utuh adalah ambangnya: angka terpotong membalik arti ("≤14D"
+jadi "≤1D"), nama terpotong hanya kurang enak dibaca.
+
+**Refresh menarik SIT lebih dulu, di permintaannya sendiri.** Sebelumnya transit
+ditarik DI DALAM `/api/compute` dan cuma kebagian sisa anggaran:
+
+| | sebelum | sesudah |
+|---|---|---|
+| anggaran transit | ±17 dtk sisa dari 52 dtk | 50 dtk, permintaan sendiri |
+| dokumen per klik | ±6 dari 23 | 23 (±30 dtk) |
+| klik sampai SIT lengkap | 4 | 1 |
+
+Tombol Refresh sekarang: `POST /api/transit/sync?force=1` → lalu
+`POST /api/compute { skipTransit: true }`. Flag itu wajib — tanpa dia transit
+ditarik dua kali, dan anggaran yang terpakai untuk pekerjaan yang sudah selesai
+diambil dari jatah menghitung 6 area, sehingga area terakhir DILEWATI.
+
+Kalau penarikan SIT gagal, `skipTransit` dikirim `false` supaya `/api/compute`
+tetap mencoba sendiri — transit itu pelengkap, lebih baik DOI terhitung dengan
+SIT kemarin daripada tidak terhitung. Hasilnya dilaporkan apa adanya di toast,
+tidak dilebur jadi "ada langkah yang gagal".
+
+Batas tunggu Refresh naik 70 → 140 dtk. Dua permintaan berurutan yang
+masing-masing boleh memakai hampir satu batas fungsi Vercel tidak muat di 70 dtk,
+dan yang dibatalkan justru permintaan KEDUA — jadi SIT-nya baru, snapshot-nya tidak.
+
+## 12. Penyesuaian poster lanjutan (8 Okt 2026, sore — putaran kedua)
+
+Urutan kotak dikunci user:
+
+| kiri | kanan |
+|---|---|
+| Nilai stok | Nilai + Nilai SIT |
+| Stok | **SIT** (dulu "Dalam perjalanan") |
+| **Aktual DOI + SIT** | ADS |
+| Perlu open PO | Available >5 pcs |
+
+"Stok kosong" dihapus. Pasangan per baris tetap satu satuan: rupiah dengan
+rupiah, pcs dengan pcs, hari dengan per-hari, SKU dengan SKU.
+
+**Aktual DOI + SIT** = `(stok + SIT) ÷ ADS`, dihitung di server dari ringkasan
+yang SAMA dengan `doi1` — keduanya sudah mengeluarkan SKU EXCLUDED, jadi selisih
+kedua angka itu murni SIT, bukan akibat cakupan baris yang berbeda. `null` saat
+ADS 0, bukan 0 hari. Pusat 8 Okt 2026: (216.752 + 62.024) ÷ 31.725 = **8,8 hari**
+berbanding DOI 6,8 hari. Angka DOI besar di kepala kartu tetap TANPA SIT.
+
+**ATP sebesar DOI (38px, tebal), dengan penyusutan otomatis.** Terukur, di kartu
+ber-isi 262px ukuran penuh menabrak pada kasus nyata:
+
+```
+"105,3 hari" 153px + "71,0%"  118px = 271px   (lewat 8px)
+"48,1 hari"  129px + "100,0%" 141px = 271px   (lewat 8px)
+```
+
+`ukuranAtpMuat()` memilih ukuran terbesar dari [38, 34, 30, 26, 22] yang muat.
+
+SATU ukuran untuk SELURUH poster, bukan per kartu. Kalau tiap kartu menyusut
+sendiri, Makassar bisa ber-ATP 30px sementara Pusat 38px di gambar yang sama, dan
+beda ukuran itu terbaca seolah punya arti padahal cuma akibat panjang angka DOI.
+Terverifikasi dengan merender posternya betulan (React + react-dom/server) lalu
+mengukur SVG-nya:
+
+| | ukuran ATP | jarak terdekat ke angka DOI |
+|---|---|---|
+| angka seperti sekarang | 38px di kelima kartu | 15,2px |
+| DOI 103 hari + ATP 100,0% | 26px di kelima kartu | 12,8px |
+
+`KARTU.pad` jadi satu sumber; sebelumnya 16 ditulis dua kali (di `KartuArea` dan
+di penghitung ukuran ATP), dan dua tempat untuk satu angka adalah cara tata letak
+diam-diam melenceng.

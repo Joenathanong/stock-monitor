@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { pitaDoi } from './area-master';
-import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2, KANVAS, KARTU, tinggiKartuTersedia, BIAYA_BLOK } from './wa-poster';
+import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2, KANVAS, KARTU, tinggiKartuTersedia, BIAYA_BLOK, labelPitaPisah, tataLabelStatus, ukuranAtpMuat, lebarDoiBesar, doiPlusSit, UKURAN_DOI, UKURAN_ATP } from './wa-poster';
 
 test('rupiah diringkas per satuan', () => {
   assert.equal(rupiahRingkas(52_431_882_100), 'Rp 52,4 M');
@@ -423,4 +423,162 @@ test('kanvas 900 TIDAK cukup lagi setelah ATP masuk — ini yang membayar kenaik
   const baru = tataLetakStatus({ tinggiKartu: tinggiKartuTersedia(), blok: semua, nBaris: 10, diminta: 6 });
   assert.ok(baru.pitch > lama.pitch, `kanvas baru ${baru.pitch} harus lebih longgar dari ${lama.pitch}`);
   assert.ok(baru.poMuat >= lama.poMuat, 'daftar mendesak tidak boleh memendek');
+});
+
+// ---------------------------------------------------------------------------
+// Kolom ambang hari disejajarkan (permintaan user 8 Okt 2026).
+// ---------------------------------------------------------------------------
+
+const AMBANG_PUSAT = { kritis: 4, min: 5, max: 7 };
+const AMBANG_MKS = { kritis: 14, min: 31, max: 45 };
+
+test('labelPitaPisah memisah nama dan ambang, dan labelPita tetap gabungannya', () => {
+  assert.deepEqual(labelPitaPisah('CRITICAL', AMBANG_PUSAT), { nama: 'Kritis', ambang: '≤4D' });
+  assert.deepEqual(labelPitaPisah('LOW', AMBANG_PUSAT), { nama: 'Low', ambang: '≤5D' });
+  assert.deepEqual(labelPitaPisah('HEALTHY', AMBANG_PUSAT), { nama: 'Aman', ambang: '≤7D' });
+  assert.deepEqual(labelPitaPisah('OVERSTOCK', AMBANG_PUSAT), { nama: 'Over', ambang: '>7D' });
+  // Baris tanpa ambang: kosong, BUKAN "—". Kolomnya memang tidak berlaku.
+  assert.deepEqual(labelPitaPisah('WAITING', AMBANG_PUSAT), { nama: 'SIT', ambang: '' });
+  assert.deepEqual(labelPitaPisah('DEAD_STOCK', AMBANG_PUSAT), { nama: 'Dead Stock', ambang: '' });
+
+  // Satu sumber ejaan: yang gabungan diturunkan dari yang dipisah.
+  for (const k of [...URUT_STATUS, ...URUT_LAIN]) {
+    const l = labelPitaPisah(k, AMBANG_PUSAT);
+    assert.equal(labelPita(k, AMBANG_PUSAT), l.ambang ? `${l.nama} ${l.ambang}` : l.nama);
+  }
+});
+
+test('ambang mulai di SATU x yang sama untuk semua baris berambang', () => {
+  // Inilah yang diminta: ≤4D / ≤5D / ≤7D / >7D sejajar, bukan mengikuti
+  // panjang namanya masing-masing.
+  const label = [...URUT_STATUS, ...URUT_LAIN].map((k) => labelPitaPisah(k, AMBANG_PUSAT));
+  const t = tataLabelStatus(label, 11);
+  assert.ok(t.xAmbang > 0, 'kolom ambang harus punya posisi tetap');
+
+  // Nama terpanjang yang punya ambang ("Kritis") harus muat sebelum kolom itu.
+  for (const l of label.filter((x) => x.ambang)) {
+    assert.ok(
+      lebarTeksKira(l.nama, 11) <= t.xAmbang,
+      `"${l.nama}" (${lebarTeksKira(l.nama, 11).toFixed(1)}px) menabrak kolom ambang di ${t.xAmbang}px`,
+    );
+  }
+});
+
+test('kolom ambang TIDAK didorong oleh label yang tak punya ambang', () => {
+  // "Belum Terjual" jauh lebih lebar dari "Kritis". Kalau ia ikut menentukan
+  // kolom ambang, akan menganga jurang di antara "Kritis" dan "≤4D".
+  const semua = [...URUT_STATUS, ...URUT_LAIN].map((k) => labelPitaPisah(k, AMBANG_PUSAT));
+  const hanyaBand = URUT_STATUS.map((k) => labelPitaPisah(k, AMBANG_PUSAT));
+  assert.equal(
+    tataLabelStatus(semua, 11).xAmbang,
+    tataLabelStatus(hanyaBand, 11).xAmbang,
+    'baris tanpa ambang tidak boleh menggeser kolom ambang',
+  );
+});
+
+test('seluruh label + ambang muat di dalam gutter', () => {
+  for (const ambang of [AMBANG_PUSAT, AMBANG_MKS]) {
+    for (const fs of [10, 11]) {
+      const label = [...URUT_STATUS, ...URUT_LAIN].map((k) => labelPitaPisah(k, ambang));
+      const t = tataLabelStatus(label, fs);
+      for (const l of label) {
+        const ujung = l.ambang
+          ? t.xAmbang + lebarTeksKira(l.ambang, fs)
+          : lebarTeksKira(l.nama, fs);
+        assert.ok(
+          ujung <= t.gutter - JEDA_LABEL + 0.5,
+          `"${l.nama} ${l.ambang}" berakhir di ${ujung.toFixed(1)}px, gutter ${t.gutter}px (fs ${fs})`,
+        );
+      }
+    }
+  }
+});
+
+test('mentok batas: ambang tetap utuh, bukan terpotong', () => {
+  // Angka yang terpotong membalik arti ("≤14D" jadi "≤1D"), jadi saat ruang
+  // kurang yang mengalah adalah namanya.
+  const label = [...URUT_STATUS, ...URUT_LAIN].map((k) => labelPitaPisah(k, AMBANG_MKS));
+  const t = tataLabelStatus(label, 11, 60);
+  assert.equal(t.gutter, 60);
+  const ambangTerlebar = Math.max(...label.filter((l) => l.ambang).map((l) => lebarTeksKira(l.ambang, 11)));
+  assert.ok(
+    t.xAmbang + ambangTerlebar <= t.gutter - JEDA_LABEL + 0.5,
+    `ambang terlebar meluber: x ${t.xAmbang} + ${ambangTerlebar.toFixed(1)} > ${t.gutter - JEDA_LABEL}`,
+  );
+  assert.ok(t.xAmbang >= 0);
+});
+
+// ---------------------------------------------------------------------------
+// ATP sebesar DOI, dan DOI + SIT (permintaan user 8 Okt 2026, sore).
+// ---------------------------------------------------------------------------
+
+const ISI_KARTU = lebarKartu(5, KANVAS.w, 32, 16) - 2 * KARTU.pad;
+
+test('ATP memakai ukuran DOI kalau muat', () => {
+  const size = ukuranAtpMuat([{ doi: '6,8', atp: '71,0%' }, { doi: '48,1', atp: '71,0%' }], ISI_KARTU);
+  assert.equal(size, UKURAN_DOI, 'kasus normal harus dapat ukuran penuh 38px');
+});
+
+test('ATP menyusut HANYA saat benar-benar akan menabrak', () => {
+  // Kasus nyata yang terukur meleset di 38px.
+  for (const p of [{ doi: '105,3', atp: '71,0%' }, { doi: '48,1', atp: '100,0%' }]) {
+    const size = ukuranAtpMuat([p], ISI_KARTU);
+    assert.ok(size < UKURAN_DOI, `"${p.doi}" + "${p.atp}" seharusnya memaksa menyusut, dapat ${size}px`);
+    assert.ok(
+      lebarDoiBesar(p.doi) + lebarTeksKira(p.atp, size, true) + JEDA_LABEL <= ISI_KARTU,
+      `ukuran ${size}px masih menabrak`,
+    );
+  }
+});
+
+test('satu ukuran untuk SELURUH poster — kartu tersempit yang menentukan', () => {
+  // Kalau tiap kartu menyusut sendiri, beda ukuran antar kartu terbaca seolah
+  // punya arti. Jadi satu panggilan untuk semua kartu, dan hasilnya harus sama
+  // dengan ukuran terkecil yang dibutuhkan kartu mana pun.
+  const kartu = [
+    { doi: '6,8', atp: '71,0%' },
+    { doi: '105,3', atp: '100,0%' },
+    { doi: '48,1', atp: '71,0%' },
+  ];
+  const bersama = ukuranAtpMuat(kartu, ISI_KARTU);
+  const terkecil = Math.min(...kartu.map((p) => ukuranAtpMuat([p], ISI_KARTU)));
+  assert.equal(bersama, terkecil);
+  // Dan hasilnya muat di SEMUA kartu, bukan cuma di yang tersempit.
+  for (const p of kartu) {
+    assert.ok(
+      lebarDoiBesar(p.doi) + lebarTeksKira(p.atp, bersama, true) + JEDA_LABEL <= ISI_KARTU,
+      `"${p.doi}" + "${p.atp}" meluber di ${bersama}px`,
+    );
+  }
+});
+
+test('ukuran ATP selalu salah satu dari pilihan, tidak pernah mengarang', () => {
+  // Kartu mustahil sempit: tetap mengembalikan ukuran terkecil, tidak melempar
+  // dan tidak mengembalikan angka di luar daftar.
+  const size = ukuranAtpMuat([{ doi: '9999,9', atp: '100,0%' }], 10);
+  assert.ok((UKURAN_ATP as readonly number[]).includes(size));
+  assert.equal(size, UKURAN_ATP[UKURAN_ATP.length - 1]);
+});
+
+test('doiPlusSit = (stok + SIT) ÷ ADS, dan null saat ADS 0', () => {
+  // Angka nyata Pusat 8 Okt 2026.
+  const d = doiPlusSit(216_752, 62_024, 31_725);
+  assert.ok(d !== null && Math.abs(d - 8.787) < 0.01, `dapat ${d}`);
+  // Tanpa SIT harus kembali ke DOI biasa.
+  assert.equal(doiPlusSit(216_752, 0, 31_725), 216_752 / 31_725);
+  // ADS 0 → null, BUKAN 0. "0 hari" terbaca seperti keadaan darurat, padahal
+  // artinya pertanyaannya tidak punya jawaban.
+  assert.equal(doiPlusSit(1000, 500, 0), null);
+  assert.equal(doiPlusSit(1000, 500, null), null);
+});
+
+test('DOI + SIT tidak pernah lebih kecil dari DOI tanpa SIT', () => {
+  // SIT hanya menambah pembilang, jadi arahnya satu-satunya. Kalau tes ini
+  // gagal, pembagi keduanya sudah tidak sama lagi — dan selisih yang tampil di
+  // poster bukan lagi murni SIT.
+  for (const [stok, sit, ads] of [[216752, 62024, 31725], [1000, 0, 10], [0, 5000, 100]] as const) {
+    const tanpa = doiPlusSit(stok, 0, ads)!;
+    const dengan = doiPlusSit(stok, sit, ads)!;
+    assert.ok(dengan >= tanpa, `${dengan} < ${tanpa}`);
+  }
 });

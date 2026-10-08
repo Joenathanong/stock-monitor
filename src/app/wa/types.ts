@@ -51,7 +51,13 @@ export type AreaWa = {
    * `ambang` direkam, bukan diasumsikan: kalau nanti diubah dari 5, poster lama
    * tetap bisa dibaca dengan ambang yang memang berlaku saat itu.
    */
-  stok?: { available: number; kosong: number; ambang: number };
+  stok?: {
+    available: number;
+    /** Pembagi: SKU yang layak ATP di area ini (ketiga kategori, aktif). */
+    dasar: number;
+    kosong: number;
+    ambang: number;
+  };
   /**
    * DOI kalau SIT ikut dihitung = (stok + SIT) ÷ ADS, per opsi.
    *

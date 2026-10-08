@@ -2,35 +2,30 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { adalahBundle, kelayakan } from './atp';
+import { KATEGORI_ATP, kelayakan, brandDariKode, lengkapiDariKode, petaBrand } from './atp';
 
 /**
- * Penjaga: SIAPA PUN yang menyaring "SKU layak ATP" lewat SQL wajib juga
- * membuang bundle di JS.
+ * Penjaga: kode ATP TIDAK boleh menyaring `category = 'Sku'` sendiri.
  *
- * Kena 8 Okt 2026 di `scripts/sync-brand.ts`. Query cakupannya:
+ * Sejarahnya dua babak, dan keduanya kesalahan yang sama dalam bentuk berbeda.
  *
- *   SELECT DISTINCT sku FROM stock_current WHERE isActive = 1 AND category = 'Sku'
+ * 8 Okt pagi — ATP hanya kategori 'Sku', dan `scripts/sync-brand.ts` menyaring
+ * `category = 'Sku'` di query cakupannya tanpa membuang bundle. Akibatnya
+ * `- BDL-HANASUI-0000001615` masuk daftar "belum punya brand".
  *
- * Hasilnya memasukkan `- BDL-HANASUI-0000001615` ke daftar "27 SKU belum punya
- * brand", padahal itu bundle dan tidak pernah masuk hitungan ATP. Angka
- * cakupannya salah (348/375, seharusnya 348/374) dan user disuruh mengisi
- * brand untuk baris yang tidak dipakai.
+ * 8 Okt sore — user memutuskan ATP mencakup Sku + Bundle + Gimmick. Setiap
+ * `category = 'Sku'` yang tertinggal di kode ATP sekarang jadi jauh lebih
+ * mahal: ia diam-diam membuang 1.215 bundle dan 68 gimmick, yaitu 73% dari
+ * katalognya, dan angkanya tetap terlihat masuk akal.
  *
- * Akarnya: `category` TIDAK bisa memisahkan bundle — OCS menandai bundle
- * dengan `category = 'Sku'`. Jadi SQL saja selalu kurang satu syarat, dan
- * syarat itu hanya ada di `adalahBundle()`.
+ * Aturannya sekarang satu kalimat: daftar kategori ATP hanya boleh datang dari
+ * `KATEGORI_ATP`. Tes ini membaca sumbernya dan gagal kalau ada berkas ATP yang
+ * menuliskan daftarnya sendiri.
  *
- * Tes ini membaca sumbernya. Kalau ada berkas ATP yang menyaring
- * `category = 'Sku'` tapi tidak menyebut `adalahBundle`, ia gagal — supaya
- * ketahuan di `npm test`, bukan dari daftar yang user curigai.
- *
- * CAKUPANNYA SENGAJA HANYA BERKAS ATP, yaitu yang mengimpor `atp.ts`.
- * DOI Monitor juga menyaring `category = 'Sku'` di tujuh tempat (compute.ts,
- * sync.ts, query.ts, api/sku-master, api/transit, …) dan di sana bundle MEMANG
- * ikut dihitung — itu program terpisah dengan aturan sendiri. Melarangnya di
- * seluruh repo akan memaksa perubahan di DOI Monitor yang tidak diminta dan
- * salah. Jadi penjaga ini mengikat ATP saja.
+ * CAKUPANNYA HANYA BERKAS ATP, yaitu yang mengimpor `atp.ts`. DOI Monitor
+ * menyaring `category = 'Sku'` di tujuh tempat dan di sana itu MEMANG benar —
+ * user menegaskan DOI tetap SKU saja. Melarangnya di seluruh repo akan memaksa
+ * perubahan di DOI yang tidak diminta dan salah.
  */
 
 function berkasTs(dir: string, hasil: string[] = []): string[] {
@@ -44,61 +39,146 @@ function berkasTs(dir: string, hasil: string[] = []): string[] {
 
 /** `category = 'Sku'` di dalam SQL mentah, apa pun spasi dan kutipnya. */
 const SARING_SQL = /category\s*=\s*['"]Sku['"]/i;
-
-/**
- * Berkas ATP = yang mengimpor atp.ts. Itu batas yang dipakai penjaga ini.
- *
- * Ekstensinya ikut diterima (`./atp`, `./atp.ts`, `./atp.js`): repo ini menulis
- * impor tanpa ekstensi, tapi pola yang hanya cocok tanpa ekstensi membuat satu
- * berkas ber-ekstensi lolos tanpa suara — ketahuan saat menguji penjaga ini
- * sendiri dengan berkas pelanggar buatan.
- */
+/** Berkas ATP = yang mengimpor atp.ts (ekstensi ikut diterima). */
 const IMPOR_ATP = /from\s+['"][^'"]*\/atp(?:\.[jt]s)?['"]/;
 
-test('penyaring SQL category=Sku di berkas ATP juga membuang bundle', () => {
+test('berkas ATP tidak menyaring category=Sku sendiri', () => {
   const berkas = [...berkasTs('src'), ...berkasTs('scripts')]
     .filter((f) => !/[\\/]atp\.ts$/.test(f));
   const atp = berkas.filter((f) => IMPOR_ATP.test(readFileSync(f, 'utf8')));
-
-  // Kalau nol, penjaganya tidak menjaga apa pun — berarti polanya berubah.
   assert.ok(atp.length > 0, 'tidak ada berkas yang mengimpor atp.ts — penjaga ini jadi kosong');
 
   const pelanggar: string[] = [];
   for (const f of atp) {
-    const kode = readFileSync(f, 'utf8');
-    if (!SARING_SQL.test(kode)) continue;
-    // `kelayakan()` sudah menolak bundle di dalam dirinya, jadi memakainya cukup.
-    if (/adalahBundle|kelayakan\s*\(/.test(kode)) continue;
-    pelanggar.push(f);
+    const kode = readFileSync(f, 'utf8')
+      // Komentar dibuang: berkas-berkas ini MENJELASKAN sejarah aturannya, dan
+      // penjelasan itu menyebut `category = 'Sku'` berkali-kali.
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    if (SARING_SQL.test(kode)) pelanggar.push(f);
   }
   assert.deepEqual(
     pelanggar,
     [],
-    `Berkas ATP ini menyaring category='Sku' lewat SQL tanpa membuang bundle:\n  ${pelanggar.join('\n  ')}\n`
-      + "OCS menandai bundle dengan category='Sku', jadi hasilnya ikut terbawa.\n"
-      + 'Tambahkan `.filter((r) => !adalahBundle(r.sku))` — fungsi yang sama yang dipakai kelayakan().',
+    `Berkas ATP ini menuliskan sendiri daftar kategorinya:\n  ${pelanggar.join('\n  ')}\n`
+      + `ATP mencakup ${KATEGORI_ATP.join(', ')} — menyaring 'Sku' saja membuang 73% katalog diam-diam.\n`
+      + 'Pakai KATEGORI_ATP dari src/lib/atp.ts.',
   );
 });
 
-test('sync-brand memakai adalahBundle, bukan salinan aturannya', () => {
-  const kode = readFileSync('scripts/sync-brand.ts', 'utf8');
-  assert.match(kode, /adalahBundle/, 'sync-brand.ts harus memakai adalahBundle dari src/lib/atp');
-  // Ekstensi ikut diterima, alasan sama dengan IMPOR_ATP di atas.
-  assert.match(
-    kode,
-    /from '\.\.\/src\/lib\/atp(?:\.[jt]s)?'/,
-    'adalahBundle harus diimpor dari atp.ts — bukan ditulis ulang di skrip',
-  );
-  assert.doesNotMatch(
-    kode,
-    /BDL-\s*\)?\s*\.test|startsWith\(\s*['"]BDL/,
-    'jangan salin aturan bundle ke skrip; aturannya hanya boleh satu tempat',
-  );
+test('kelayakan menerima ketiga kategori, menolak selainnya', () => {
+  const b = (o: Record<string, unknown>) =>
+    ({ sku: 'X', areaId: 'Medan', availableQty: 10, isActive: true, category: 'Sku', ...o }) as never;
+  for (const kat of KATEGORI_ATP) assert.equal(kelayakan(b({ category: kat })).layak, true, kat);
+  assert.equal(kelayakan(b({ category: 'Material' })).sebab, 'BUKAN_KATEGORI_SKU');
+  assert.equal(kelayakan(b({ category: null })).sebab, 'BUKAN_KATEGORI_SKU');
+
+  // Bundle TIDAK lagi ditolak — ini pembalikan aturan 8 Okt sore.
+  assert.equal(kelayakan(b({ sku: '- BDL-HANASUI-0000001615', category: 'Sku' })).layak, true);
+  assert.equal(kelayakan(b({ sku: 'BDL-EOMMA-0000000001', category: 'Bundle' })).layak, true);
 });
 
-test('kelayakan menolak bundle yang OCS tandai category=Sku', () => {
-  // Baris nyata dari OCS, 8 Okt 2026.
-  const r = { sku: '- BDL-HANASUI-0000001615', isActive: true, category: 'Sku', sapCode: '' };
-  assert.equal(adalahBundle(r.sku), true);
-  assert.deepEqual(kelayakan(r), { layak: false, sebab: 'BUNDLE', kotor: true });
+test('saringan aktif: AKTIF / NONAKTIF / SEMUA', () => {
+  const b = (isActive: boolean) =>
+    ({ sku: 'X', areaId: 'Medan', availableQty: 10, isActive, category: 'Sku' }) as never;
+  assert.equal(kelayakan(b(true), 'AKTIF').layak, true);
+  assert.equal(kelayakan(b(false), 'AKTIF').sebab, 'TIDAK_AKTIF');
+  assert.equal(kelayakan(b(false), 'NONAKTIF').layak, true);
+  assert.equal(kelayakan(b(true), 'NONAKTIF').sebab, 'TIDAK_AKTIF');
+  assert.equal(kelayakan(b(true), 'SEMUA').layak, true);
+  assert.equal(kelayakan(b(false), 'SEMUA').layak, true);
+});
+
+test('brand bundle dibaca dari kode, dengan ejaan daftar prioritas', () => {
+  // Pola nyata OCS 8 Okt 2026 — 1.215 dari 1.215 cocok, 0 gagal.
+  assert.equal(brandDariKode('BDL-HANASUI-0000001615'), 'Hanasui');
+  assert.equal(brandDariKode('- BDL-HANASUI-0000001615'), 'Hanasui');
+  assert.equal(brandDariKode('BDL-EOMMA-0000000001'), 'EOMMA');
+  assert.equal(brandDariKode('BDL-NCO-0000000123'), 'NCO');
+  assert.equal(brandDariKode('BDL-FYNE-0000000123'), 'FYNE');
+  // Bukan bundle, atau brand di luar daftar → kosong, BUKAN terkaan.
+  assert.equal(brandDariKode('ACNE-DAY-CREAM'), '');
+  assert.equal(brandDariKode('BDL-MERKASING-0001'), '');
+  // Gimmick sengaja tidak ikut pola ini: "GIMMICK-TUMBLER-..." bukan brand.
+  assert.equal(brandDariKode('GIMMICK-TUMBLER-NCO'), '');
+});
+
+test('lookup OCS selalu menang atas kode', () => {
+  const peta = petaBrand([{ SellerSku: 'BDL-HANASUI-0000000001', ShopCode: 'NCO' }]);
+  const { brand, asal, diisi } = lengkapiDariKode(peta, [
+    'BDL-HANASUI-0000000001',   // sudah ada dari lookup → tidak boleh ditimpa
+    'BDL-HANASUI-0000000002',   // belum ada → diisi dari kode
+  ]);
+  assert.equal(brand.get('BDL-HANASUI-0000000001'), 'NCO', 'pernyataan eksplisit OCS harus menang');
+  assert.equal(brand.get('BDL-HANASUI-0000000002'), 'Hanasui');
+  assert.equal(diisi, 1);
+  // Asalnya ditandai supaya hasil terkaan bisa ditinjau ulang nanti.
+  assert.equal(asal.get('BDL-HANASUI-0000000002'), 'kode BDL-');
+  assert.equal(asal.get('BDL-HANASUI-0000000001'), 'NCO');
+});
+
+// ---------------------------------------------------------------------------
+// Pola kode diperluas + kode menang atas prioritas (keputusan user 8 Okt 2026).
+// ---------------------------------------------------------------------------
+
+test('brand dibaca dari kode untuk SEMUA awalan, bukan hanya BDL-', () => {
+  // SKU nyata dari daftar 46 yang belum punya brand.
+  assert.equal(brandDariKode('CS-HANASUI-POWER-BRIGHT-SERUM'), 'Hanasui');
+  assert.equal(brandDariKode('GIMMICK-NCO-GIFT-TUMBLR-CORKCICLE'), 'NCO');
+  assert.equal(brandDariKode('GIMMICK-FYNE-POWERBANK'), 'FYNE');
+  assert.equal(brandDariKode('GIMMICK-EOMMA-BUKU'), 'EOMMA');
+  assert.equal(brandDariKode('BDL-HANASUI-0000001615'), 'Hanasui');
+  // Bentuk KOTOR yang nyata ada di OCS — dua jenis, dua pembersihan berbeda.
+  assert.equal(brandDariKode('- BDL-HANASUI-0000001615'), 'Hanasui', 'awalan "- "');
+  assert.equal(brandDariKode('90 FYNE-BRIGHT-BARRIER-MOIST'), 'FYNE', 'awalan "90 "');
+  // Brand di segmen PERTAMA (parfum NCO) maupun KEDUA sama-sama terbaca.
+  assert.equal(brandDariKode('NCO-EDP-AMETHYST'), 'NCO');
+});
+
+test('segmen yang BUKAN brand tetap kosong — ini yang membuatnya bukan terkaan', () => {
+  // Enam belas SKU nyata yang memang harus tetap manual. Kalau salah satu dari
+  // ini mengembalikan brand, aturannya sudah berubah jadi menebak.
+  for (const s of [
+    'CS-MUD-MASK-JAPANESE', 'CS-ACNE-TREATMENT-ESSENCE', 'CS-ADVANCE-EXFOLIATING-SERUM',
+    'CS-ANTI-AGING-PEEL-OFF-MASK', 'CS-SUNSCREEN-SPF30-RENEW-HANGTAG',
+    'GIMMICK-TAS-PUFFY-PINK', 'GIMMICK-TUMBLER-OAWALA', 'GIMMICK-CATOKAN-NVMEE',
+    'GIMMICK-MATTEDORABLE-EYE-CURLER', 'GIMMICK-AERIS-BRUSH-COMPLETE-SET',
+  ]) {
+    assert.equal(brandDariKode(s), '', `"${s}" seharusnya kosong, bukan terkaan`);
+  }
+  // EOMMA ada di SKU ini tapi di SEGMEN TERAKHIR, bukan kedua — tidak diterima.
+  assert.equal(brandDariKode('GIMMICK-VOUCHER-KLIKNCLEAN-EOMMA'), '');
+});
+
+test('bentrokan dua brand: kode SKU menang atas urutan prioritas', () => {
+  // Kasus nyata: 11 parfum NCO-EDP-* terdaftar di toko Hanasui DAN NCO.
+  // Urutan prioritas melabelinya Hanasui; kodenya sendiri menyebut NCO.
+  const peta = petaBrand([
+    { SellerSku: 'NCO-EDP-AMETHYST', ShopCode: 'Hanasui' },
+    { SellerSku: 'NCO-EDP-AMETHYST', ShopCode: 'NCO' },
+  ]);
+  assert.equal(peta.brand.get('NCO-EDP-AMETHYST'), 'NCO');
+  assert.equal(peta.bentrok[0].dariKode, true);
+  // Asalnya tetap merekam KEDUANYA supaya bisa ditinjau.
+  assert.equal(peta.asal.get('NCO-EDP-AMETHYST'), 'Hanasui, NCO');
+});
+
+test('bentrokan yang kodenya tidak menyebut brand tetap pakai urutan prioritas', () => {
+  // Lima sisanya dari 16 bentrokan: BBS-* dan BALMTINT-* tidak menyebut brand.
+  const peta = petaBrand([
+    { SellerSku: 'BBS-CHEERFUL-BLISS', ShopCode: 'Hanasui' },
+    { SellerSku: 'BBS-CHEERFUL-BLISS', ShopCode: 'NCO' },
+  ]);
+  assert.equal(peta.brand.get('BBS-CHEERFUL-BLISS'), 'Hanasui', 'prioritas yang memutus');
+  assert.equal(peta.bentrok[0].dariKode, false);
+});
+
+test('kode TIDAK menang kalau brandnya bukan kandidat bentrokan', () => {
+  // Kalau kode menyebut brand yang OCS tidak daftarkan untuk SKU itu, yang
+  // meragukan adalah kodenya — bukan datanya. Prioritas yang dipakai.
+  const peta = petaBrand([
+    { SellerSku: 'BDL-EOMMA-0000000001', ShopCode: 'Hanasui' },
+    { SellerSku: 'BDL-EOMMA-0000000001', ShopCode: 'FYNE' },
+  ]);
+  assert.equal(peta.brand.get('BDL-EOMMA-0000000001'), 'Hanasui');
+  assert.equal(peta.bentrok[0].dariKode, false);
 });

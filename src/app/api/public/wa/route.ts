@@ -86,9 +86,9 @@ export async function GET(req: Request) {
    * terkirim dengan kotak ATP bertanda "—". Fitur baru tidak boleh memadamkan
    * laporan yang sudah jalan.
    */
-  const atpPerArea = await persenAtpPerArea()
-    .then((r) => new Map(r.hasil.map((h) => [h.areaId, h])))
-    .catch(() => new Map());
+  const atpHasil = await persenAtpPerArea().catch(() => null);
+  const atpPerArea = new Map((atpHasil?.hasil ?? []).map((h) => [h.areaId, h]));
+  const atpStok = atpHasil?.stok ?? new Map();
 
   const perArea = await Promise.all(
     kota.map(async (area) => {
@@ -132,11 +132,27 @@ export async function GET(req: Request) {
         // (`totalSku` memang `rows.length`, diperiksa di doi.ts), jadi
         // available + kosong tidak pernah melebihi angka yang tertulis di
         // "SEBARAN STATUS" pada kartu yang sama.
-        stok: {
-          available: snap.rows.filter((r) => r.availableQty > AMBANG_ATP_BAWAAN).length,
-          kosong: snap.rows.filter((r) => r.availableQty <= 0).length,
-          ambang: AMBANG_ATP_BAWAAN,
-        },
+        // Pembaginya KUMPULAN ATP (ketiga kategori), bukan kumpulan DOI —
+        // keputusan user 8 Okt 2026. Jadi kotak ini dan ATP% di sebelahnya
+        // berbicara tentang katalog yang sama, TAPI pembaginya tidak lagi sama
+        // dengan "SEBARAN STATUS · 349 SKU" di kartu yang sama. Itu disadari
+        // dan diterima: sebaran status memang hanya tentang produk satuan.
+        //
+        // Jatuh balik ke kumpulan DOI kalau ATP tidak terbaca, supaya poster
+        // tidak kehilangan kotaknya saat tabel ATP belum ada.
+        stok: atpStok.has(area)
+          ? {
+              available: atpStok.get(area)!.available,
+              dasar: atpStok.get(area)!.layak,
+              kosong: atpStok.get(area)!.kosong,
+              ambang: AMBANG_ATP_BAWAAN,
+            }
+          : {
+              available: snap.rows.filter((r) => r.availableQty > AMBANG_ATP_BAWAAN).length,
+              dasar: snap.rows.length,
+              kosong: snap.rows.filter((r) => r.availableQty <= 0).length,
+              ambang: AMBANG_ATP_BAWAAN,
+            },
         // Dari ringkasan yang sama dengan doi1/doi2 di atas, jadi selisihnya
         // murni SIT. Pusat 8 Okt 2026: (216.752 + 62.024) / 31.725 = 8,8 hari,
         // berbanding DOI 6,8 hari tanpa SIT.

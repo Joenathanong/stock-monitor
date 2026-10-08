@@ -400,3 +400,162 @@ mengukur SVG-nya:
 `KARTU.pad` jadi satu sumber; sebelumnya 16 ditulis dua kali (di `KartuArea` dan
 di penghitung ukuran ATP), dan dua tempat untuk satu angka adalah cara tata letak
 diam-diam melenceng.
+
+## 13. ATP diperluas ke tiga kategori (8 Okt 2026, sore — putaran ketiga)
+
+**Keputusan user: ATP = Sku + Bundle + Gimmick. DOI tetap SKU saja.**
+
+### Tidak perlu tabel ATP sendiri
+
+User menanyakan apakah ATP butuh data sendiri agar tidak merusak DOI. Tidak.
+Pemisahannya sudah ada, dan letaknya sudah benar:
+
+- `syncStock` menulis **seluruh** baris OCS ke `stock_current` tanpa menyaring
+  kategori, dan menghapus baris yang hilang dari sumber.
+- Penyaring `category = 'Sku'` dipasang **saat membaca**, di 7 tempat milik DOI:
+  `compute.ts:45`, `compute.ts:317`, `query.ts:394`, `sync.ts:470`,
+  `api/sku-master` (×2), `api/transit`.
+- ATP membaca lewat `muatStokAtp()` yang tidak menyaring kategori di SQL sama
+  sekali; `kelayakan()` yang memutuskan.
+
+Jadi yang berubah hanya `kelayakan()`. Tujuh penyaring DOI tidak disentuh.
+**Tabel ATP sendiri justru lebih berbahaya**: salinan kedua stok OCS, sinkronisasi
+kedua, dan dua salinan yang akan melenceng — persis yang ingin dihindari.
+
+Efek sampingnya: SKU baru kategori apa pun **otomatis masuk ATP** begitu Refresh
+jalan. Tidak ada daftar yang dipelihara tangan.
+
+### Kenapa ini membalik keputusan sebelumnya
+
+Pagi hari saya menyimpulkan bundle harus di luar karena menghitungnya akan
+menghitung barang fisik berkali-kali. **Alasan itu lemah dan saya cabut**: ATP
+mencacah JUMLAH SKU di atas ambang, bukan menjumlahkan qty. Pencacahan SKU tidak
+rusak oleh stok turunan. Dan bundle memang bisa dipesan pembeli — itu arti
+harfiah "available to promise".
+
+Yang tetap berlaku sebagai peringatan, terukur 8 Okt 2026 di Pusat:
+
+| | baris aktif punya stok | tanpa lokasi rak & bulk |
+|---|---|---|
+| Sku | 306 | 0 |
+| Gimmick | 47 | 0 |
+| **Bundle** | 975 | **975 (100%)** |
+
+User mengonfirmasi 8 Okt 2026: yang ia maksud "turunan" memang **Bundle**, bukan
+Gimmick — dan ia tetap ingin bundle ikut dihitung seluruhnya, bukan hanya SKU
+asalnya. Jadi sifat turunan itu BUKAN alasan mengeluarkannya; ia hanya alasan
+menyediakan `perKategori` supaya pergerakan angkanya bisa ditelusuri.
+
+Stok bundle TURUNAN — tidak menempati lokasi fisik mana pun. Satu komponen habis
+menjatuhkan puluhan bundle sekaligus, jadi ATP% akan bergerak lebih tajam. Itu
+keadaan sebenarnya, bukan cacat hitungan. `perKategori` di `HasilArea` ada supaya
+pergerakan itu bisa ditelusuri sumbernya.
+
+### Brand bundle dari kode SKU
+
+`DTO_LookupStockDetailedData` memuat **NOL bundle** (cakupan 0,0% dari 1.215
+bundle aktif). Tanpa penanganan, 1.215 dari 1.662 baris checklist (73%) tidak
+punya brand — dan filter brand adalah satu-satunya mekanisme isi borongan.
+Pekerjaannya jadi 6.075 keputusan satu per satu.
+
+`brandDariKode()` membaca `BDL-<BRAND>-`. Diukur: **1.215 dari 1.215 cocok, 0
+gagal**; HANASUI 924 · NCO 216 · FYNE 49 · EOMMA 26.
+
+Ini TIDAK melanggar aturan user "jangan ambil brand dari nama". Yang dilarang
+adalah menerka dari medan `Name` — teks bebas yang bentuknya tidak dijamin. Ini
+medan berbeda: kode SKU, tetap dari OCS, bentuknya baku, dan kebenarannya bisa
+dihitung. Lookup OCS tetap menang kalau keduanya ada; asalnya dicatat
+`"kode BDL-"` supaya bisa ditinjau ulang.
+
+Gimmick sengaja TIDAK ikut pola ini: `GIMMICK-<X>-` cocok 68 dari 68, tapi X
+sering bukan brand (TAS, TUMBLER, VOUCHER, STICKER, CATOKAN) — hanya 51 dari 68
+yang brand asli. 48 dapat brand dari lookup; 20 sisanya diisi tangan.
+
+### Pilihan aktif / non-aktif di /atp
+
+Tiga pilihan: Aktif saja (bawaan) · Non-aktif saja · Aktif + non-aktif. Nilai
+asing di URL jatuh ke `AKTIF`, bukan `SEMUA` — salah ketik tidak boleh diam-diam
+melebarkan daftar.
+
+**Persennya SELALU dihitung dari yang aktif, apa pun saringan tampilannya.**
+Kalau ikut, menggeser filter ke "Non-aktif" mengubah ATP% jadi angka tentang
+barang yang justru TIDAK bisa dijanjikan, tanpa apa pun di layar yang memberi
+tahu artinya sudah berganti. Filter mengubah apa yang DILIHAT, bukan yang
+DIUKUR. Halaman menampilkan peringatan saat filternya bukan "Aktif".
+
+Penyaringannya per BARIS (sku × area), bukan per SKU: satu SKU bisa aktif di satu
+area dan nonaktif di area lain.
+
+### Angka nyata OCS, 8 Okt 2026
+
+Pembagi ATP naik dari 375 jadi 1.657 (Pusat). Kotak "Available" di poster ikut
+kumpulan ATP (keputusan user), jadi pembaginya tidak lagi sama dengan
+"SEBARAN STATUS · 349 SKU" di kartu yang sama — disadari dan diterima.
+
+| area | layak | available >5 | % | Sku | Bundle | Gimmick |
+|---|---|---|---|---|---|---|
+| Pusat | 1.657 | 1.126 | 68,0% | 278/375 | 811/1.215 | 37/67 |
+| Medan | 1.560 | 1.093 | 70,1% | 293/356 | 798/1.163 | 2/41 |
+| Makassar | 1.560 | 1.077 | 69,0% | 292/356 | 782/1.163 | 3/41 |
+| Surabaya | 1.560 | 1.102 | 70,6% | 293/356 | 802/1.163 | 7/41 |
+| Yogyakarta | 1.560 | 1.093 | 70,1% | 294/356 | 796/1.163 | 3/41 |
+
+Gimmick di cabang hampir seluruhnya kosong (2–7 dari 41); hanya Pusat yang
+terisi (37 dari 67). Itu bukan cacat data — gimmick memang ditahan di Pusat.
+
+## 14. Brand: pola kode diperluas + kode menang atas prioritas (8 Okt 2026, malam)
+
+Dua keputusan user setelah menjalankan `sync:brand` yang pertama (hasilnya:
+cakupan naik 92,8% → **97,2%**, 2.606 baris ditulis, 46 SKU tersisa).
+
+### Pola kode berlaku untuk semua awalan, bukan hanya `BDL-`
+
+`brandDariKode()` memeriksa **dua segmen pertama** kode SKU. Brand bisa ada di
+segmen 1 (`NCO-EDP-AMETHYST`) atau segmen 2 (`CS-HANASUI-…`, `BDL-HANASUI-…`,
+`GIMMICK-NCO-…`). Segmen ke-3 dan seterusnya sengaja TIDAK diperiksa:
+`GIMMICK-VOUCHER-KLIKNCLEAN-EOMMA` memuat EOMMA di ujung, tapi itu voucher UNTUK
+EOMMA — memperluas pencarian ke seluruh kode mengubah aturan ini jadi menebak.
+
+Penjaganya tetap sama dan itu yang membuatnya bukan terkaan: segmen hanya
+diterima kalau **persis salah satu dari empat brand yang dikenal**.
+
+Hasil terhadap 46 SKU nyata: **30 dapat brand, 16 tetap manual** — dan 16 itu
+tepat yang kodenya memang tidak menyebut brand (`CS-MUD-MASK-JAPANESE`,
+`GIMMICK-TAS-PUFFY-PINK`, `GIMMICK-TUMBLER-OAWALA`, `GIMMICK-MATTEDORABLE-*`).
+
+### Kode SKU menang atas urutan prioritas pada bentrokan
+
+Terbaca dari hasil nyata: **11 parfum `NCO-EDP-*`** terdaftar di toko Hanasui DAN
+NCO, lalu urutan prioritas melabelinya **Hanasui** — padahal kodenya sendiri
+menyebut NCO. Akibatnya siapa pun yang mengisi borongan dengan filter brand
+"NCO" melewatkan sebelas parfum NCO tanpa tahu.
+
+Aturan baru: kalau kode SKU menyebut brand yang **termasuk kandidat bentrokan**,
+itu yang menang. Syarat "harus kandidat" penting — kalau kode menyebut brand yang
+TIDAK OCS daftarkan untuk SKU itu, yang meragukan adalah kodenya, bukan datanya,
+jadi urutan prioritas yang dipakai. Lima bentrokan sisanya (`BBS-*`,
+`BALMTINT-SASSY-3`) kodenya tidak menyebut brand, jadi tetap diputus prioritas.
+
+`bentrok[].dariKode` menandai mana yang diputus kode, dan `sync:brand`
+mencetaknya terpisah — dua aturan berbeda tidak boleh terlihat sama.
+
+### Dua bug yang ditangkap tes saya sendiri
+
+Keduanya ada di `brandDariKode` dan keduanya lolos dari pembacaan mata:
+
+1. Regex awal hanya melihat segmen **kedua**, jadi `NCO-EDP-AMETHYST` terbaca
+   "EDP" dan jatuh kembali ke Hanasui — persis bug yang hendak diperbaiki.
+2. `"- BDL-HANASUI-…"` membuat segmen pertama **kosong** sehingga brand tergeser
+   ke indeks 2 dan tidak terbaca. Perlu DUA pembersihan berbeda: awalan di depan
+   kode (`"- "`) dibuang sebelum dipotong, awalan di dalam segmen (`"90 "`)
+   dibersihkan per segmen.
+
+### `sync:brand` ditulis berkelompok
+
+Dulu satu `upsert` per SKU. Dengan 586 SKU masih tertahankan; begitu bundle ikut
+jumlahnya jadi **2.607** dan skripnya duduk 4–13 menit **tanpa satu baris
+keluaran** — user wajar mengira macet, dan memang melaporkannya.
+
+Sekarang `INSERT … ON DUPLICATE KEY UPDATE` per 400 baris: **7 bolak-balik, bukan
+2.607**, dengan kemajuan dicetak per kelompok. Ukuran kelompoknya sama dengan
+`BATCH` di sync.ts.

@@ -14,8 +14,8 @@
 import { prisma } from './prisma';
 import { toDateKeyUtc } from './dates';
 import {
-  AMBANG_ATP_BAWAAN, adalahBundle, kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan,
-  type BarisStokAtp, type Sebaran, type HasilArea, type SebabTolak,
+  AMBANG_ATP_BAWAAN, kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan,
+  type BarisStokAtp, type Sebaran, type HasilArea, type SebabTolak, type SaringAktif,
 } from './atp';
 
 /** Benar kalau tabel ATP-nya belum dibuat (db:push belum dijalankan). */
@@ -35,19 +35,21 @@ export type BarisAtp = BarisStokAtp & {
 };
 
 /**
- * Stok semua area untuk ATP.
+ * Stok semua area untuk ATP — KETIGA kategori (Sku, Bundle, Gimmick).
  *
- * Bundle dibuang DI SINI, sedekat mungkin dengan sumbernya, supaya tidak ada
- * jalur lain yang kelewat: `category = 'Sku'` TIDAK bisa memisahkan bundle —
- * OCS menandai `- BDL-HANASUI-0000001615` dengan `category: "Sku"` (dibuktikan
- * 8 Okt 2026). Jadi SQL menyaring dua syarat, `adalahBundle()` menyaring yang
- * ketiga, dan keduanya memakai fungsi yang sama dengan `kelayakan()`.
+ * Tidak ada yang dibuang di sini lagi. Sampai 8 Okt 2026 bundle dibuang di
+ * fungsi ini; sejak user memutuskan ketiga kategori ikut dihitung, penyaringnya
+ * cuma satu dan letaknya di `kelayakan()` — satu tempat, dengan sebab yang
+ * dilaporkan.
  *
- * Baris yang TIDAK layak tetap dibawa (tidak di-WHERE habis) kecuali bundle,
- * karena `hitungAtp` perlu melaporkan jumlah yang ditolak per sebab. Laporan
- * yang menyembunyikan penolakannya membuat pembagi bisa salah tanpa ada yang
- * tahu. Bundle dikecualikan dari aturan itu karena jumlahnya tidak informatif:
- * ia bukan produk yang "gagal masuk", ia bukan produk ATP sama sekali.
+ * Baris yang TIDAK layak tetap dibawa (tidak di-WHERE habis) karena `hitungAtp`
+ * perlu melaporkan jumlah yang ditolak per sebab. Laporan yang menyembunyikan
+ * penolakannya membuat pembagi bisa salah tanpa ada yang tahu.
+ *
+ * `stock_current` memang sudah memuat ketiganya: `syncStock` menulis SELURUH
+ * baris OCS tanpa menyaring kategori, dan menghapus baris yang hilang dari
+ * sumber. Jadi SKU baru — kategori apa pun — otomatis muncul di ATP begitu
+ * Refresh dijalankan; tidak ada daftar yang harus dipelihara tangan.
  */
 export async function muatStokAtp(): Promise<BarisAtp[]> {
   const rows = await prisma.$queryRawUnsafe<{
@@ -61,7 +63,6 @@ export async function muatStokAtp(): Promise<BarisAtp[]> {
     + 'ORDER BY s.sku, s.areaId',
   );
   return rows
-    .filter((r) => !adalahBundle(r.sku))
     .map((r) => ({
       sku: r.sku,
       areaId: r.areaId,
@@ -192,6 +193,8 @@ export type MuatAtp = {
     name: string;
     brand: string;
     brandManual: boolean;
+    /** 'Sku' | 'Bundle' | 'Gimmick' — Bundle 73% dari barisnya, jadi perlu bisa disaring. */
+    kategori: string;
     /** Per area: keadaan SKU ini di sana. */
     area: Record<string, {
       /** true/false = sudah diputuskan; null = belum. */
@@ -211,6 +214,10 @@ export type MuatAtp = {
   siap: boolean;
   /** SKU layak ATP yang brand-nya kosong — perlu diisi manual. */
   tanpaBrand: string[];
+  /** Saringan tampilan yang sedang berlaku. */
+  saring: SaringAktif;
+  /** Jumlah BARIS (sku × area) per status, untuk label tombol filter. */
+  cacah: { aktif: number; nonaktif: number; semua: number };
 };
 
 /**
@@ -222,20 +229,42 @@ export type MuatAtp = {
  * tidak cocok dengan centangnya — dan yang akan dicurigai user adalah
  * perhitungannya, bukan dua panggilannya.
  */
-export async function muatAtp(ambang: number = AMBANG_ATP_BAWAAN): Promise<MuatAtp> {
+export async function muatAtp(
+  ambang: number = AMBANG_ATP_BAWAAN,
+  /** Baris mana yang DITAMPILKAN di tabel. Tidak mengubah persennya. */
+  saring: SaringAktif = 'AKTIF',
+): Promise<MuatAtp> {
   const [rows, { sebaran, siap }, catatan] = await Promise.all([
     muatStokAtp(), muatSebaran(), muatCatatanSebaran(),
   ]);
 
   const areas = [...new Set(rows.map((r) => r.areaId))].filter(Boolean).sort((a, b) => a.localeCompare(b));
-  const hasil = hitungAtp(rows, sebaran, ambang);
+
+  // PERSENNYA SELALU DARI YANG AKTIF, apa pun saringan tampilannya.
+  //
+  // Kalau `hasil` ikut `saring`, menggeser filter tampilan ke "Non-aktif" akan
+  // mengubah ATP% jadi angka tentang barang yang justru TIDAK bisa dijanjikan —
+  // dan tidak ada apa pun di layar yang memberi tahu bahwa artinya sudah
+  // berganti. Filter tampilan mengubah apa yang DILIHAT, bukan apa yang
+  // DIUKUR.
+  const hasil = hitungAtp(rows, sebaran, ambang, 'AKTIF');
   const keseluruhan = atpKeseluruhan(hasil);
 
+  // Baris tabel mengikuti saringan tampilan. Satu SKU bisa aktif di satu area
+  // dan nonaktif di area lain, jadi penyaringannya per BARIS, bukan per SKU —
+  // menyaring per SKU akan menghilangkan area yang masih aktif.
+  const barisTampil = saring === 'SEMUA'
+    ? rows
+    : rows.filter((r) => (saring === 'AKTIF' ? r.isActive : !r.isActive));
+
   const perSku = new Map<string, MuatAtp['sku'][number]>();
-  for (const r of rows) {
+  for (const r of barisTampil) {
     let b = perSku.get(r.sku);
     if (!b) {
-      b = { sku: r.sku, name: r.name, brand: r.brand, brandManual: r.brandManual, area: {} };
+      b = {
+        sku: r.sku, name: r.name, brand: r.brand, brandManual: r.brandManual,
+        kategori: String(r.category ?? ''), area: {},
+      };
       perSku.set(r.sku, b);
     }
     // Nama & brand dari baris mana pun yang punya isinya — tidak semua area
@@ -243,7 +272,7 @@ export async function muatAtp(ambang: number = AMBANG_ATP_BAWAAN): Promise<MuatA
     if (!b.name && r.name) b.name = r.name;
     if (!b.brand && r.brand) { b.brand = r.brand; b.brandManual = r.brandManual; }
 
-    const k = kelayakan(r);
+    const k = kelayakan(r, saring);
     const putusan = sebaran.get(kunciSebaran(r.sku, r.areaId));
     b.area[r.areaId] = {
       dibagikan: putusan === undefined ? null : putusan,
@@ -264,7 +293,13 @@ export async function muatAtp(ambang: number = AMBANG_ATP_BAWAAN): Promise<MuatA
     .filter((s) => !s.brand && Object.values(s.area).some((a) => a.tolak === null))
     .map((s) => s.sku);
 
-  return { areas, sku, hasil, keseluruhan, ambang, siap, tanpaBrand };
+  // Jumlah baris per status aktif — supaya tombol filternya bisa menyebutkan
+  // berapa yang akan muncul SEBELUM diklik, bukan setelahnya.
+  const jumlahAktif = rows.filter((r) => r.isActive).length;
+  return {
+    areas, sku, hasil, keseluruhan, ambang, siap, tanpaBrand, saring,
+    cacah: { aktif: jumlahAktif, nonaktif: rows.length - jumlahAktif, semua: rows.length },
+  };
 }
 
 /**
@@ -309,8 +344,32 @@ export async function rekamAtpHarian(
  */
 export async function persenAtpPerArea(
   ambang: number = AMBANG_ATP_BAWAAN,
-): Promise<{ hasil: HasilArea[]; keseluruhan: ReturnType<typeof atpKeseluruhan>; siap: boolean }> {
+): Promise<{
+  hasil: HasilArea[];
+  keseluruhan: ReturnType<typeof atpKeseluruhan>;
+  siap: boolean;
+  /** Ketersediaan per area di SELURUH kumpulan ATP, lepas dari checklist sebaran. */
+  stok: Map<string, { available: number; layak: number; kosong: number }>;
+}> {
   const [rows, { sebaran, siap }] = await Promise.all([muatStokAtp(), muatSebaran()]);
-  const hasil = hitungAtp(rows, sebaran, ambang);
-  return { hasil, keseluruhan: atpKeseluruhan(hasil), siap };
+  // 'AKTIF' ditulis tegas, bukan dibiarkan bawaan: poster memuat angka yang
+  // dibaca orang lain tanpa konteks, jadi aturannya tidak boleh ikut berubah
+  // kalau bawaan `kelayakan()` suatu saat diganti.
+  const hasil = hitungAtp(rows, sebaran, ambang, 'AKTIF');
+
+  // Pembagi kotak "Available" di poster: SELURUH SKU yang layak ATP di area itu
+  // — bukan hanya yang sudah dicentang sebarannya. Keputusan user 8 Okt 2026.
+  // Bedanya dengan ATP% memang itu: ATP% dibagi yang DISEBAR, Available dibagi
+  // yang LAYAK. Dua pertanyaan berbeda, dan checklist yang masih kosong membuat
+  // hanya yang kedua bisa dijawab hari ini.
+  const stok = new Map<string, { available: number; layak: number; kosong: number }>();
+  for (const r of rows) {
+    if (!kelayakan(r, 'AKTIF').layak) continue;
+    const e = stok.get(r.areaId) ?? { available: 0, layak: 0, kosong: 0 };
+    e.layak++;
+    if (r.availableQty > ambang) e.available++;
+    if (r.availableQty <= 0) e.kosong++;
+    stok.set(r.areaId, e);
+  }
+  return { hasil, keseluruhan: atpKeseluruhan(hasil), siap, stok };
 }

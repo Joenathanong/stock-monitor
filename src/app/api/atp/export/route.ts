@@ -31,21 +31,27 @@ export async function GET(req: Request) {
     ? Math.min(10_000, Math.max(0, Math.trunc(ambangRaw)))
     : AMBANG_ATP_BAWAAN;
   const brand = (u.searchParams.get('brand') || 'ALL').trim();
+  const kategori = (u.searchParams.get('kategori') || 'ALL').trim();
   const q = (u.searchParams.get('q') || '').trim().toLowerCase();
+  const sRaw = String(u.searchParams.get('saring') ?? '').toUpperCase();
+  const saring = sRaw === 'NONAKTIF' || sRaw === 'SEMUA' ? sRaw : 'AKTIF';
 
-  const data = await muatAtp(ambang);
+  const data = await muatAtp(ambang, saring);
 
   // Baris disaring, TAPI `data.hasil` (persen per area) TIDAK dihitung ulang
   // dari baris yang tersaring: persen ATP adalah angka seluruh produk, dan
   // menghitungnya ulang per brand akan memberi dua angka berbeda bernama sama.
   // Lembar Ringkasan menyebutkan ini supaya tidak jadi teka-teki.
   const baris = data.sku.filter((s) => {
+    if (kategori !== 'ALL' && s.kategori !== kategori) return false;
     if (brand !== 'ALL' && (s.brand || '(tanpa brand)') !== brand) return false;
     if (q && !s.sku.toLowerCase().includes(q) && !s.name.toLowerCase().includes(q)) return false;
     return true;
   });
 
   const filterTeks = [
+    `Status di OCS: ${saring === 'AKTIF' ? 'aktif saja' : saring === 'NONAKTIF' ? 'non-aktif saja' : 'aktif + non-aktif'}`,
+    kategori === 'ALL' ? 'Kategori: semua (Sku, Bundle, Gimmick)' : `Kategori: ${kategori}`,
     brand === 'ALL' ? 'Brand: semua' : `Brand: ${brand}`,
     q ? `Pencarian: "${q}"` : null,
     `Ambang available: lebih dari ${ambang} pcs`,
@@ -54,9 +60,8 @@ export async function GET(req: Request) {
 
   const tgl = toDateKeyUtc(new Date());
   const SEBAB: Record<SebabTolak, string> = {
-    TIDAK_AKTIF: 'Nonaktif di OCS',
-    BUKAN_KATEGORI_SKU: 'Bukan kategori Sku',
-    BUNDLE: 'Bundle',
+    TIDAK_AKTIF: 'Status tidak cocok filter',
+    BUKAN_KATEGORI_SKU: 'Kategori di luar ATP',
   };
 
   const lembar: Lembar[] = [
@@ -111,6 +116,7 @@ export async function GET(req: Request) {
       columns: [
         { header: 'SKU', key: 'sku', width: 34 },
         { header: 'Nama', key: 'name', width: 46 },
+        { header: 'Kategori', key: 'kat', width: 11 },
         { header: 'Brand', key: 'brand', width: 12 },
         ...data.areas.map((a) => ({ header: a, key: `a_${a}`, width: 13 })),
       ],
@@ -118,6 +124,7 @@ export async function GET(req: Request) {
         const r: Record<string, unknown> = {
           sku: s.sku,
           name: s.name,
+          kat: s.kategori,
           brand: s.brand || '(tanpa brand)',
         };
         for (const a of data.areas) {
@@ -137,6 +144,7 @@ export async function GET(req: Request) {
       columns: [
         { header: 'SKU', key: 'sku', width: 34 },
         { header: 'Nama', key: 'name', width: 46 },
+        { header: 'Kategori', key: 'kat', width: 11 },
         { header: 'Brand', key: 'brand', width: 12 },
         { header: 'Area', key: 'area', width: 14 },
         { header: 'Available Qty', key: 'qty', width: 14 },
@@ -153,6 +161,7 @@ export async function GET(req: Request) {
         return {
           sku: s.sku,
           name: s.name,
+          kat: s.kategori,
           brand: s.brand || '(tanpa brand)',
           area: a,
           qty: x.availableQty,

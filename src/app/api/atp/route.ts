@@ -2,10 +2,21 @@ import { prisma } from '@/lib/prisma';
 import { fail, json, safe } from '@/lib/http';
 import { sessionFromRequest, canWrite } from '@/lib/auth';
 import { muatAtp, simpanSebaran, simpanBrandManual, rekamAtpHarian, type SatuPutusan } from '@/lib/atp-store';
-import { AMBANG_ATP_BAWAAN } from '@/lib/atp';
+import { AMBANG_ATP_BAWAAN, type SaringAktif } from '@/lib/atp';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
+
+/**
+ * Saringan tampilan aktif/non-aktif dari URL. Bawaan `AKTIF`.
+ *
+ * Nilai asing SENGAJA jatuh ke `AKTIF`, bukan ke `SEMUA`: salah ketik di URL
+ * tidak boleh diam-diam melebarkan daftar dengan barang yang sudah dinonaktifkan.
+ */
+function saringDariUrl(u: URL): SaringAktif {
+  const v = String(u.searchParams.get('saring') ?? '').toUpperCase();
+  return v === 'NONAKTIF' || v === 'SEMUA' ? v : 'AKTIF';
+}
 
 /** Ambang dari URL, dibatasi masuk akal. Bawaan 5 (keputusan user 7 Okt 2026). */
 function ambangDariUrl(u: URL): number {
@@ -23,7 +34,7 @@ function ambangDariUrl(u: URL): number {
 export async function GET(req: Request) {
   const u = new URL(req.url);
   const ambang = ambangDariUrl(u);
-  const hasil = await muatAtp(ambang);
+  const hasil = await muatAtp(ambang, saringDariUrl(u));
 
   return json(safe({
     ok: true,
@@ -79,7 +90,7 @@ export async function POST(req: Request) {
   return json(safe({
     ok: true,
     ...h,
-    ...(await muatAtp(ambangDariUrl(u))),
+    ...(await muatAtp(ambangDariUrl(u), saringDariUrl(u))),
     pesan: h.gagal.length
       ? `${h.tersimpan} keputusan disimpan, ${h.gagal.length} gagal.`
       : `${h.tersimpan} keputusan disimpan${h.dihapus ? `, ${h.dihapus} dikosongkan` : ''}.`,
@@ -106,7 +117,8 @@ export async function PUT(req: Request) {
       detail: `${sku} → "${String(b?.brand ?? '').trim()}" (oleh ${sesi?.n || sesi?.u || '?'})`,
     },
   });
-  return json(safe({ ok: true, ...(await muatAtp(ambangDariUrl(new URL(req.url)))) }));
+  const u2 = new URL(req.url);
+  return json(safe({ ok: true, ...(await muatAtp(ambangDariUrl(u2), saringDariUrl(u2))) }));
 }
 
 /**
@@ -121,7 +133,7 @@ export async function PATCH(req: Request) {
   if (!canWrite(sesi?.r)) return fail('Tidak berwenang', 403);
 
   const ambang = ambangDariUrl(new URL(req.url));
-  const { hasil, siap } = await muatAtp(ambang);
+  const { hasil, siap } = await muatAtp(ambang, 'AKTIF');
   if (!siap) return fail('Tabel atp_share belum ada — jalankan `npm run db:push`');
 
   const n = await rekamAtpHarian(hasil, ambang);

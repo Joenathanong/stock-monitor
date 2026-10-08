@@ -60,9 +60,10 @@ test('bundle dikenali dari BDL-, BUKAN dari Category', () => {
   // Jangan salah tangkap SKU yang kebetulan memuat huruf itu.
   assert.equal(adalahBundle('ABDL-SOMETHING'), false, 'BDL- di tengah kata bukan bundle');
 
-  const r = kelayakan(baris({ sku: '- BDL-HANASUI-0000001615', category: 'Sku' }));
-  assert.equal(r.layak, false);
-  assert.equal(r.sebab, 'BUNDLE', 'ditolak karena bundle, bukan karena kategori');
+  // `adalahBundle` TETAP ADA tapi tugasnya berganti: sejak 8 Okt 2026 sore ia
+  // dipakai menentukan brand dari kode, bukan membuang barisnya. Bundle kini
+  // LAYAK masuk ATP.
+  assert.equal(kelayakan(baris({ sku: '- BDL-HANASUI-0000001615', category: 'Sku' })).layak, true);
 });
 
 test('SKU kotor DITANDAI tapi tetap dihitung', () => {
@@ -78,9 +79,13 @@ test('SKU kotor DITANDAI tapi tetap dihitung', () => {
   assert.equal(r.kotor, true, 'tapi tetap ditandai');
 });
 
-test('tidak aktif dan bukan kategori Sku ditolak dengan sebab masing-masing', () => {
+test('tidak aktif dan kategori di luar ATP ditolak dengan sebab masing-masing', () => {
   assert.equal(kelayakan(baris({ isActive: false })).sebab, 'TIDAK_AKTIF');
-  assert.equal(kelayakan(baris({ category: 'Gimmick' })).sebab, 'BUKAN_KATEGORI_SKU');
+  // Gimmick dan Bundle DITERIMA sejak 8 Okt 2026 sore — dulu keduanya ditolak.
+  assert.equal(kelayakan(baris({ category: 'Gimmick' })).layak, true);
+  assert.equal(kelayakan(baris({ category: 'Bundle' })).layak, true);
+  // Yang benar-benar di luar daftar tetap ditolak, dengan sebabnya.
+  assert.equal(kelayakan(baris({ category: 'Material' })).sebab, 'BUKAN_KATEGORI_SKU');
   assert.equal(kelayakan(baris({ category: null })).sebab, 'BUKAN_KATEGORI_SKU');
 });
 
@@ -158,19 +163,38 @@ test('yang tidak layak dirinci sebabnya, tidak dilebur jadi satu angka', () => {
   const h = hitungAtp([
     baris({ sku: 'A', availableQty: 100 }),
     baris({ sku: 'MATI', isActive: false }),
-    baris({ sku: 'BDL-X' }),
-    baris({ sku: 'G', category: 'Gimmick' }),
+    baris({ sku: 'LAIN', category: 'Material' }),
   ], sebaran([['A', 'Medan', true]]))[0];
   assert.equal(h.dihitung, 1);
-  assert.deepEqual(h.ditolak, { TIDAK_AKTIF: 1, BUKAN_KATEGORI_SKU: 1, BUNDLE: 1 });
+  assert.deepEqual(h.ditolak, { TIDAK_AKTIF: 1, BUKAN_KATEGORI_SKU: 1 });
 });
 
-test('tidak layak diperiksa SEBELUM sebaran — bundle tidak jadi "belum diputuskan"', () => {
-  // Kalau urutannya tertukar, 10.055 baris Bundle akan muncul sebagai
+test('perincian per kategori selalu berjumlah sama dengan pembaginya', () => {
+  // Bundle 73% dari katalog, jadi tanpa perincian ini ATP% lebih banyak
+  // bercerita tentang bundle daripada produk satuan tanpa ada yang bisa melihat.
+  // Jumlah ketiganya WAJIB sama dengan `dihitung`; kalau tidak, ada baris yang
+  // masuk pembagi tapi tidak terhitung di kategori mana pun.
+  const h = hitungAtp([
+    baris({ sku: 'A', availableQty: 100 }),
+    baris({ sku: 'B', availableQty: 1, category: 'Bundle' }),
+    baris({ sku: 'C', availableQty: 100, category: 'Bundle' }),
+    baris({ sku: 'D', availableQty: 100, category: 'Gimmick' }),
+  ], sebaran([['A', 'Medan', true], ['B', 'Medan', true], ['C', 'Medan', true], ['D', 'Medan', true]]))[0];
+  assert.equal(h.dihitung, 4);
+  assert.equal(h.siap, 3, 'B qty 1 tidak lebih dari ambang 5');
+  const jumlah = Object.values(h.perKategori).reduce((t, k) => t + k.dihitung, 0);
+  assert.equal(jumlah, h.dihitung);
+  assert.deepEqual(h.perKategori.Sku, { dihitung: 1, siap: 1 });
+  assert.deepEqual(h.perKategori.Bundle, { dihitung: 2, siap: 1 });
+  assert.deepEqual(h.perKategori.Gimmick, { dihitung: 1, siap: 1 });
+});
+
+test('tidak layak diperiksa SEBELUM sebaran', () => {
+  // Kalau urutannya tertukar, baris di luar kategori ATP akan muncul sebagai
   // "belum diputuskan" dan menenggelamkan peringatan yang sebenarnya.
-  const h = hitungAtp([baris({ sku: 'BDL-X' }), baris({ sku: 'BDL-Y' })], new Map())[0];
+  const h = hitungAtp([baris({ sku: 'X', category: 'Material' }), baris({ sku: 'Y', category: 'Material' })], new Map())[0];
   assert.equal(h.belumDiputus, 0);
-  assert.equal(h.ditolak.BUNDLE, 2);
+  assert.equal(h.ditolak.BUKAN_KATEGORI_SKU, 2);
 });
 
 // --- keseluruhan -----------------------------------------------------------
@@ -180,9 +204,9 @@ test('ATP keseluruhan dijumlahkan, BUKAN dirata-rata dari persen per area', () =
   // Rata-rata persen = 45% (menyesatkan). Jumlah = 270/302 = 89,4%.
   const hasil = [
     { areaId: 'Besar', dihitung: 300, siap: 270, persen: 90, takDisebar: 0, belumDiputus: 0,
-      ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0, BUNDLE: 0 }, kotor: 0 },
+      ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0 }, perKategori: {}, kotor: 0 },
     { areaId: 'Kecil', dihitung: 2, siap: 0, persen: 0, takDisebar: 0, belumDiputus: 0,
-      ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0, BUNDLE: 0 }, kotor: 0 },
+      ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0 }, perKategori: {}, kotor: 0 },
   ];
   const t = atpKeseluruhan(hasil);
   assert.equal(t.dihitung, 302);
@@ -195,7 +219,7 @@ test('cabang berpembagi 0 tidak bisa jadi "terlemah"', () => {
   // Kalau ikut, cabang baru yang belum diisi akan selalu jadi "cabang terlemah"
   // dan menutupi cabang yang benar-benar bermasalah.
   const kosong = { areaId: 'Bali', dihitung: 0, siap: 0, persen: null, takDisebar: 0,
-    belumDiputus: 10, ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0, BUNDLE: 0 }, kotor: 0 };
+    belumDiputus: 10, ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0 }, perKategori: {}, kotor: 0 };
   const isi = { ...kosong, areaId: 'Medan', dihitung: 10, siap: 7, persen: 70, belumDiputus: 0 };
   assert.equal(atpKeseluruhan([kosong, isi]).terlemah?.areaId, 'Medan');
   assert.equal(atpKeseluruhan([kosong]).terlemah, null);
@@ -239,6 +263,9 @@ test('petaBrand: bentrokan DIKEMBALIKAN, bukan diselesaikan diam-diam', () => {
   assert.equal(h.bentrok.length, 1);
   assert.deepEqual(h.bentrok[0], {
     sku: 'BBS-CHEERFUL-BLISS', brand: ['Hanasui', 'NCO'], menang: 'Hanasui',
+    // false = diputus urutan prioritas. "BBS" bukan brand, jadi kodenya tidak
+    // punya suara di sini — beda dengan NCO-EDP-* yang kodenya menyebut NCO.
+    dariKode: false,
   });
 });
 

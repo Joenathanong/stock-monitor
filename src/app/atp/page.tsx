@@ -9,13 +9,15 @@ type SelArea = {
   dibagikan: Putusan;
   availableQty: number;
   siap: boolean;
-  tolak: 'TIDAK_AKTIF' | 'BUKAN_KATEGORI_SKU' | 'BUNDLE' | null;
+  tolak: 'TIDAK_AKTIF' | 'BUKAN_KATEGORI_SKU' | null;
   note: string;
 };
 type BarisSku = {
   sku: string; name: string; brand: string; brandManual: boolean;
+  kategori: string;
   area: Record<string, SelArea>;
 };
+type Saring = 'AKTIF' | 'NONAKTIF' | 'SEMUA';
 type HasilArea = {
   areaId: string; dihitung: number; siap: number; persen: number | null;
   takDisebar: number; belumDiputus: number;
@@ -25,15 +27,20 @@ type Resp = {
   ok: boolean; areas: string[]; sku: BarisSku[]; hasil: HasilArea[];
   keseluruhan: { dihitung: number; siap: number; persen: number | null; terlemah: HasilArea | null };
   ambang: number; siap: boolean; tanpaBrand: string[]; pesan: string;
+  saring: Saring;
+  cacah: { aktif: number; nonaktif: number; semua: number };
+};
+
+const LABEL_SARING: Record<Saring, string> = {
+  AKTIF: 'Aktif saja', NONAKTIF: 'Non-aktif saja', SEMUA: 'Aktif + non-aktif',
 };
 
 const persenTeks = (p: number | null | undefined) =>
   (p === null || p === undefined ? '—' : `${p.toFixed(1).replace('.', ',')}%`);
 
 const SEBAB: Record<string, string> = {
-  TIDAK_AKTIF: 'nonaktif di OCS',
-  BUKAN_KATEGORI_SKU: 'bukan kategori Sku',
-  BUNDLE: 'bundle',
+  TIDAK_AKTIF: 'status tidak cocok filter',
+  BUKAN_KATEGORI_SKU: 'kategori di luar ATP',
 };
 
 /** Kunci perubahan yang belum disimpan. Sama bentuknya dengan kunciSebaran(). */
@@ -48,7 +55,11 @@ export default function AtpPage() {
   // atau saat kursor keluar, bukan tiap ketukan.
   const [ambang, setAmbang] = useState(5);
   const [ambangDraf, setAmbangDraf] = useState('5');
-  const { data, error, reload } = useApi<Resp>(`/api/atp?ambang=${ambang}`);
+  // Saringan aktif/non-aktif ditangani SERVER, bukan di layar: ia menentukan
+  // baris mana yang dikirim, jadi tabel 1.662 SKU x 5 cabang tidak perlu
+  // dikirim utuh hanya untuk dibuang separuhnya di browser.
+  const [saring, setSaring] = useState<Saring>('AKTIF');
+  const { data, error, reload } = useApi<Resp>(`/api/atp?ambang=${ambang}&saring=${saring}`);
 
   function terapkanAmbang() {
     // Kotak kosong dikembalikan ke nilai lama, TIDAK diterapkan sebagai 0:
@@ -63,6 +74,7 @@ export default function AtpPage() {
   }
 
   const [brand, setBrand] = useState('ALL');
+  const [kategori, setKategori] = useState('ALL');
   const [cari, setCari] = useState('');
   const [hanyaBelum, setHanyaBelum] = useState(false);
   // Perubahan ditahan dulu, baru disimpan sekali. 375 SKU x 6 cabang = 2.250
@@ -88,6 +100,7 @@ export default function AtpPage() {
   };
 
   const lolosFilter = (r: BarisSku) => {
+    if (kategori !== 'ALL' && r.kategori !== kategori) return false;
     if (brand !== 'ALL' && (r.brand || '(tanpa brand)') !== brand) return false;
     const q = cari.trim().toLowerCase();
     if (q && !r.sku.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q)) return false;
@@ -97,7 +110,7 @@ export default function AtpPage() {
 
   const baris = useMemo(
     () => (data?.sku ?? []).filter(lolosFilter),
-    [data, brand, cari, hanyaBelum, ubah], // eslint-disable-line react-hooks/exhaustive-deps
+    [data, brand, kategori, cari, hanyaBelum, ubah], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   function putar(r: BarisSku, a: string) {
@@ -167,13 +180,17 @@ export default function AtpPage() {
   }
 
   const unduh = `/api/atp/export?ambang=${ambang}&brand=${encodeURIComponent(brand)}`
-    + `&q=${encodeURIComponent(cari.trim())}`;
+    + `&q=${encodeURIComponent(cari.trim())}&saring=${saring}&kategori=${encodeURIComponent(kategori)}`;
 
   const columns = useMemo<Column<BarisSku>[]>(() => [
     { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 240, sticky: true, isTitle: true },
     {
       key: 'name', label: 'Nama', get: (r) => r.name, width: 280, prio: 'p2',
       render: (r) => <span className="text-label" title={r.name}>{r.name}</span>,
+    },
+    {
+      key: 'kat', label: 'Kategori', get: (r) => r.kategori, width: 100,
+      render: (r) => <span className={`chip ${r.kategori === 'Sku' ? 'chip-ok' : ''}`}>{r.kategori}</span>,
     },
     {
       key: 'brand', label: 'Brand', get: (r) => r.brand || '', width: 130,
@@ -257,6 +274,14 @@ export default function AtpPage() {
       ) : null}
       {data?.pesan ? <Alert tone="warn">{data.pesan}</Alert> : null}
       {msg ? <Alert tone={msg.tone}>{msg.text}</Alert> : null}
+      {saring !== 'AKTIF' ? (
+        <Alert tone="warn">
+          Filter status sedang <b>{LABEL_SARING[saring]}</b> — itu mengubah baris yang
+          <b> ditampilkan</b> di tabel. Persen ATP dan kartu per cabang di atas <b>tetap dihitung
+          dari SKU aktif saja</b>, karena barang yang sudah dinonaktifkan di OCS tidak bisa
+          dijanjikan ke siapa pun.
+        </Alert>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi label="ATP keseluruhan" value={persenTeks(k?.persen)}
@@ -295,6 +320,27 @@ export default function AtpPage() {
       <div className="card card-pad">
         <div className="card-title mb-2">Filter & isi borongan</div>
         <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className="label">Status di OCS</label>
+            <select
+              className="input w-44" value={saring}
+              onChange={(e) => setSaring(e.target.value as Saring)}
+            >
+              {(['AKTIF', 'NONAKTIF', 'SEMUA'] as Saring[]).map((v) => (
+                <option key={v} value={v}>
+                  {LABEL_SARING[v]}
+                  {data ? ` (${fmt(v === 'AKTIF' ? data.cacah.aktif : v === 'NONAKTIF' ? data.cacah.nonaktif : data.cacah.semua)} baris)` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">Kategori</label>
+            <select className="input w-36" value={kategori} onChange={(e) => setKategori(e.target.value)}>
+              <option value="ALL">Semua kategori</option>
+              {['Sku', 'Bundle', 'Gimmick'].map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </div>
           <div>
             <label className="label">Brand</label>
             <select className="input w-40" value={brand} onChange={(e) => setBrand(e.target.value)}>

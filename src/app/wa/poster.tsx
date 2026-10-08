@@ -183,7 +183,10 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
       // berarti berbeda-beda di kepala tiap orang.
       {
         l: `Available >${a.stok?.ambang ?? 5} pcs`,
-        v: a.stok ? `${angkaRingkas(a.stok.available)} / ${angkaRingkas(a.sku)}` : '—',
+        // Pembagi dari `stok.dasar` (kumpulan ATP), BUKAN `a.sku` (kumpulan DOI).
+        // Dua angka itu memang beda sekarang — 1.662 vs 349 — dan yang benar di
+        // kotak ini adalah pembagi yang dipakai menghitung pembilangnya.
+        v: a.stok ? `${angkaRingkas(a.stok.available)} / ${angkaRingkas(a.stok.dasar)}` : '—',
       },
     ];
     const kw = (isi - 8) / 2;

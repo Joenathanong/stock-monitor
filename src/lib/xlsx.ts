@@ -104,3 +104,57 @@ export async function writeSheet(
   ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: columns.length } };
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
+
+export type Lembar = {
+  nama: string;
+  columns: { header: string; key: string; width?: number }[];
+  rows: SheetRow[];
+  /** Baris catatan di atas tabel — mis. filter yang berlaku saat diunduh. */
+  catatan?: string[];
+};
+
+/**
+ * Bangun XLSX berisi BEBERAPA lembar.
+ *
+ * `writeSheet` di atas tetap ada dan tidak diubah: ia dipakai /api/export yang
+ * sudah jalan, dan menambah parameter di sana berarti menyentuh jalur ekspor DOI
+ * yang tidak sedang dikerjakan.
+ *
+ * `catatan` ditulis DI ATAS header, dan autoFilter/freeze digeser mengikutinya.
+ * Gunanya satu: berkas yang diunduh dengan filter brand aktif harus menyebutkan
+ * filternya di dalam berkas. Tanpa itu, "ATP 71%" di sebuah berkas tidak bisa
+ * dibedakan dari ATP seluruh produk, dan berkas yang beredar lewat WhatsApp
+ * kehilangan konteks URL-nya.
+ */
+export async function writeWorkbook(lembar: Lembar[]): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'DOI Planner';
+  wb.created = new Date();
+
+  for (const L of lembar) {
+    const ws = wb.addWorksheet(L.nama);
+    // `ws.columns` DITETAPKAN LEBIH DULU, sebelum baris apa pun ditambahkan.
+    // ExcelJS memakai `columns` untuk memetakan kunci objek ke nomor kolom; kalau
+    // baris sudah ada saat ia diset, pemetaannya tidak berlaku untuk baris itu.
+    // `header` sengaja TIDAK diisi di sini — kalau diisi, ExcelJS menulis header
+    // di baris 1 dan baris catatan tidak bisa berada di atasnya.
+    ws.columns = L.columns.map((c) => ({ key: c.key, width: c.width ?? 16 }));
+
+    const catatan = L.catatan ?? [];
+    for (const c of catatan) {
+      const r = ws.addRow([c]);
+      r.font = { italic: true, color: { argb: 'FF666666' } };
+    }
+    const barisHeader = catatan.length + 1;
+    const head = ws.getRow(barisHeader);
+    L.columns.forEach((c, i) => { head.getCell(i + 1).value = c.header; });
+    head.font = { bold: true };
+    ws.views = [{ state: 'frozen', ySplit: barisHeader }];
+    for (const row of L.rows) ws.addRow(row);
+    ws.autoFilter = {
+      from: { row: barisHeader, column: 1 },
+      to: { row: barisHeader, column: L.columns.length },
+    };
+  }
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}

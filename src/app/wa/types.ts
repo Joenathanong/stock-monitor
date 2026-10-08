@@ -26,6 +26,19 @@ export type AreaWa = {
    */
   ambang?: { kritis: number; min: number; max: number };
   perluPo: number;
+  /**
+   * ATP area ini. OPSIONAL dengan sengaja.
+   *
+   * Poster memuat datanya dari /api/public/wa lewat HTTP, dan dua sisi itu bisa
+   * berbeda versi untuk sementara saat deploy berjalan. Kalau medan ini wajib,
+   * poster yang menerima balasan tanpa `atp` akan gagal total — seluruh gambar
+   * hilang karena satu angka tambahan. Opsional: kotaknya menampilkan "—".
+   *
+   * `persen: null` BUKAN 0%: artinya belum ada SKU yang diputuskan sebarannya
+   * di area itu, jadi pembaginya 0. Menggambarnya sebagai 0% akan terbaca
+   * seperti bencana stok.
+   */
+  atp?: { persen: number | null; siap: number; dihitung: number };
   tren: { date: string; doi1: number | null; doi2: number | null }[];
   kritis: KritisWa[];
 };

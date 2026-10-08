@@ -6,6 +6,7 @@ import { AREA_GABUNGAN } from '@/lib/areas';
 import { ambangDoi } from '@/lib/area-master';
 import { muatArea } from '@/lib/area-store';
 import { toDateKeyUtc } from '@/lib/dates';
+import { persenAtpPerArea } from '@/lib/atp-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,6 +74,20 @@ export async function GET(req: Request) {
     barisArea.map((a) => [a.name, ambangDoi(a, bawaanAmbang)]),
   );
 
+  /**
+   * ATP per area — hanya PERSENNYA (keputusan user 8 Okt 2026: checklist
+   * sebarannya tidak masuk poster).
+   *
+   * Dibungkus try/catch dan boleh kosong. ATP adalah lapisan BARU di atas DOI
+   * Monitor, dan poster DOI harian sudah dikirim bot tiap hari sebelum ATP ada.
+   * Kalau `atp_share` belum di-push, atau penarikannya gagal, poster harus tetap
+   * terkirim dengan kotak ATP bertanda "—". Fitur baru tidak boleh memadamkan
+   * laporan yang sudah jalan.
+   */
+  const atpPerArea = await persenAtpPerArea()
+    .then((r) => new Map(r.hasil.map((h) => [h.areaId, h])))
+    .catch(() => new Map());
+
   const perArea = await Promise.all(
     kota.map(async (area) => {
       const snap = await latestSnapshot(area);
@@ -108,6 +123,16 @@ export async function GET(req: Request) {
         byStatus: s?.byStatus ?? null,
         ambang: ambangPerNama.get(area) ?? bawaanAmbang,
         perluPo: blok.po ? snap.rows.filter((r) => Math.max(r.suggested1, r.suggested2) > 0).length : 0,
+        // Dicocokkan lewat NAMA area, kunci yang sama dengan `stock_current` —
+        // bukan kode gudang. Area yang tidak punya baris ATP dikirim `undefined`,
+        // bukan nol, supaya posternya menulis "—" dan tidak mengarang 0%.
+        atp: atpPerArea.has(area)
+          ? {
+              persen: atpPerArea.get(area)!.persen,
+              siap: atpPerArea.get(area)!.siap,
+              dihitung: atpPerArea.get(area)!.dihitung,
+            }
+          : undefined,
         tren: tren.map((t) => ({ date: t.date, doi1: t.doi1, doi2: t.doi2 })),
         kritis,
       };

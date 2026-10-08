@@ -10,6 +10,7 @@ import { mapReceive, type OcsReceiveLine } from './receive';
 import { petaArea, areaAktifDb } from './area-store';
 import { sapKey } from './phase-out';
 import { budget, defaultBudgetMs } from './budget';
+import { petaParalel } from './paralel';
 import { addDays, keyToUtcDate, toDateKeyUtc, todayKey, type DateKey } from './dates';
 import type { DoiSettings } from './settings';
 
@@ -173,10 +174,29 @@ export async function syncTransit(
   const anggaran = budget(budgetMs);
 
   if (!force && refreshHours > 0) {
-    const terbaru = await prisma.transitStock.findFirst({
-      where: { source: 'ocs' }, orderBy: { updatedAt: 'desc' }, select: { updatedAt: true },
+    // Yang diperiksa baris PALING TUA (`asc`), bukan paling baru.
+    //
+    // Dulu `desc`, dan itu bug yang mematikan penarikan selama dua hari.
+    // Penarikan sebagian hanya menyentuh beberapa baris, dan baris itu dapat
+    // `updatedAt` sekarang. Dengan `desc`, SATU baris yang baru ditulis membuat
+    // seluruh tabel tampak segar — jadi penarikan berikutnya dilewati, dan
+    // dokumen yang belum terbaca tidak pernah terbaca. Log 8 Okt 2026:
+    //
+    //   02:24  transit 1 baris SEBAGIAN (22 dari 23 dokumen belum terbaca)
+    //   05:25  (3 jam 1 menit kemudian — persis saat kuncinya kedaluwarsa)
+    //
+    // Satu baris yang berhasil mengunci 22 dokumen lainnya selama 3 jam, dan
+    // karena penarikan berikutnya juga sebagian, kuncinya terpasang lagi. Tidak
+    // pernah menyusul. Akibatnya Pusat tertulis 171 pcs sementara OCS punya
+    // 62.096 pcs menuju Pusat.
+    //
+    // Dengan `asc`, "segar" berarti BARIS TERTUA pun masih segar — yaitu
+    // penarikan terakhir memang tuntas. Penarikan sebagian tidak lagi bisa
+    // mengunci dirinya sendiri.
+    const terlama = await prisma.transitStock.findFirst({
+      where: { source: 'ocs' }, orderBy: { updatedAt: 'asc' }, select: { updatedAt: true },
     });
-    if (terbaru && Date.now() - terbaru.updatedAt.getTime() < refreshHours * 3_600_000) {
+    if (terlama && Date.now() - terlama.updatedAt.getTime() < refreshHours * 3_600_000) {
       return { ok: true, skipped: true, rows: 0, message: 'Transit masih segar', durationMs: Date.now() - t0 };
     }
   }
@@ -213,30 +233,75 @@ export async function syncTransit(
 
   const lines: OcsReceiveLine[] = [];
   let dariCache = 0, dariOcs = 0, kurang = 0;
+
+  // Dokumen yang sudah ada di cache dipakai langsung — gratis, tidak perlu
+  // antre bersama yang harus ditarik.
+  const perluTarik: typeof docs = [];
   for (const d of docs) {
     const simpan = tersimpan.get(d.DoDocNum);
-    if (simpan) { lines.push(...simpan); dariCache++; continue; }
-    // Sisakan waktu untuk menulis; dokumen yang belum sempat ditarik dilaporkan.
-    if (anggaran.left() < 12_000) { kurang++; continue; }
-    try {
-      const isi = await fetchReceiveLines(d.DoDocNum, Math.min(20_000, anggaran.slice(8_000, 8_000)), 1);
-      lines.push(...isi);
-      dariOcs++;
-      if (cacheSiap) {
-        try {
-          await prisma.receiveDoc.upsert({
-            where: { docNum: d.DoDocNum },
-            create: { docNum: d.DoDocNum, lines: JSON.stringify(isi), lineCount: isi.length, pulledAt: new Date() },
-            update: { lines: JSON.stringify(isi), lineCount: isi.length, pulledAt: new Date() },
-          });
-        } catch {
-          cacheSiap = false;   // sekali gagal, berhenti mencoba
-        }
+    if (simpan) { lines.push(...simpan); dariCache++; }
+    else perluTarik.push(d);
+  }
+
+  /**
+   * Isi dokumen dibaca BERBARENGAN, bukan satu per satu.
+   *
+   * Dulu berurutan, dan itu membuat penarikan mustahil tuntas. Satu dokumen
+   * butuh 6–11 detik (OCS memang begitu), jatah transit di `runCompute` ±18
+   * detik, dan loop berhenti begitu sisa waktu < 12 detik — jadi tepat SATU
+   * dokumen per penarikan, terbukti di log aplikasi sendiri:
+   *
+   *   05:25  transit 0 baris SEBAGIAN (23 dari 23 dokumen belum terbaca)
+   *   05:29  transit 1 baris SEBAGIAN (22 dari 23 dokumen belum terbaca)
+   *
+   * Dokumen baru datang tiap hari; satu per penarikan tidak akan pernah
+   * menyusul. Dibaca berbarengan pada batas 6, 23 dokumen selesai ±30 detik
+   * (diukur langsung ke OCS dengan sesi login yang sama, 8 Okt 2026) — jadi
+   * OCS tidak lambat, kita yang menunggu satu-satu.
+   *
+   * Batasnya 6, tidak lebih: OCS dipakai orang lain untuk bekerja, dan 23
+   * permintaan serentak dari kita bisa jadi beban di sana.
+   *
+   * `boleh()` memeriksa anggaran SEBELUM setiap dokumen, jadi kehabisan waktu
+   * tetap berarti "sebagian" — bukan seluruh penarikan gagal.
+   */
+  const BATAS_PARALEL = 6;
+  const hasilTarik = await petaParalel(
+    perluTarik,
+    async (d) => {
+      try {
+        const isi = await fetchReceiveLines(d.DoDocNum, Math.min(20_000, anggaran.slice(8_000, 8_000)), 1);
+        return { ok: true as const, docNum: d.DoDocNum, isi };
+      } catch {
+        // Satu dokumen gagal tidak boleh menggagalkan semuanya. Galatnya
+        // ditangkap DI SINI, bukan dibiarkan naik: `petaParalel` sengaja tidak
+        // menelan galat, jadi satu dokumen bermasalah akan membatalkan seluruh
+        // Promise.all kalau tidak ditangani di sini.
+        return { ok: false as const, docNum: d.DoDocNum, isi: [] as OcsReceiveLine[] };
       }
-    } catch {
-      // Satu dokumen gagal tidak boleh menggagalkan semuanya; dilaporkan sebagai
-      // kurang supaya pembersihan dilewati dan transit lama tidak terhapus.
-      kurang++;
+    },
+    { batas: BATAS_PARALEL, boleh: () => anggaran.left() >= 12_000 },
+  );
+
+  // Menulis cache dilakukan SETELAH semua bacaan selesai, berurutan: 6 upsert
+  // serentak ke TiDB di tengah penarikan hanya menambah pesaing untuk koneksi
+  // yang sama, dan cache itu percepatan — bukan sesuatu yang perlu cepat.
+  for (const slot of hasilTarik.hasil) {
+    if (!slot.ada) { kurang++; continue; }          // tidak pernah dijalankan
+    const r = slot.nilai;
+    if (!r.ok) { kurang++; continue; }               // dijalankan tapi gagal
+    lines.push(...r.isi);
+    dariOcs++;
+    if (cacheSiap) {
+      try {
+        await prisma.receiveDoc.upsert({
+          where: { docNum: r.docNum },
+          create: { docNum: r.docNum, lines: JSON.stringify(r.isi), lineCount: r.isi.length, pulledAt: new Date() },
+          update: { lines: JSON.stringify(r.isi), lineCount: r.isi.length, pulledAt: new Date() },
+        });
+      } catch {
+        cacheSiap = false;   // sekali gagal, berhenti mencoba
+      }
     }
   }
 

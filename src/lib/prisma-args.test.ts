@@ -88,3 +88,56 @@ test('argumen metode Prisma bukan ternary', () => {
   }
   assert.deepEqual(pelanggaran, [], `\n${pelanggaran.join('\n')}\n`);
 });
+
+/**
+ * Penjaga kedua, kelas galat yang sama: nama KUNCI GABUNGAN yang dikarang.
+ *
+ * Untuk `@@id([sku, areaId])` tanpa `name:`, Prisma menamai kuncinya
+ * `sku_areaId`. Menulis `where: { atp_share_key: { … } }` lolos `tsc` di
+ * lingkungan ini — stub client-nya bertipe `any` (lihat catatan di atas) — lalu
+ * gagal saat dijalankan dengan pesan validasi Prisma, di tengah penyimpanan
+ * user. Kena 8 Okt 2026 saat `atp-store.ts` ditulis.
+ *
+ * Aturannya: nama kunci gabungan hanya boleh (a) `name:` yang tertulis di
+ * schema, atau (b) daftar medannya digabung pakai `_`. Tidak ada pilihan
+ * ketiga, dan `schema.prisma` adalah satu-satunya hakimnya.
+ */
+function kunciSah(): { sah: Set<string>; medan: Set<string> } {
+  const sch = readFileSync('prisma/schema.prisma', 'utf8');
+  const sah = new Set<string>();
+  const medan = new Set<string>();
+  for (const m of sch.matchAll(/^ {2}(\w+)\s+\w/gm)) medan.add(m[1]);
+  for (const m of sch.matchAll(/@@(?:id|unique)\(\s*\[([^\]]+)\]([^)]*)\)/g)) {
+    const bidang = m[1].split(',').map((s) => s.trim()).filter(Boolean);
+    if (bidang.length < 2) continue;
+    sah.add(bidang.join('_'));
+    const nama = /name:\s*['"]([^'"]+)['"]/.exec(m[2] ?? '');
+    if (nama) sah.add(nama[1]);
+  }
+  return { sah, medan };
+}
+
+test('nama kunci gabungan Prisma ada di schema.prisma', () => {
+  const { sah, medan } = kunciSah();
+  assert.ok(sah.size > 0, 'tidak ada @@id/@@unique gabungan terbaca — pembaca schema-nya rusak');
+
+  const pelanggaran: string[] = [];
+  // `where: { <ident>: {` — hanya ident ber-underscore yang diperiksa, karena
+  // itulah bentuk nama kunci gabungan; medan biasa di repo ini camelCase.
+  const re = /where:\s*\{\s*([A-Za-z_]\w*_\w+)\s*:\s*\{/g;
+  for (const f of [...berkasTs('src'), ...berkasTs('scripts')]) {
+    const kode = tanpaKomentar(readFileSync(f, 'utf8'));
+    if (!kode.includes('prisma.')) continue;
+    for (let m = re.exec(kode); m; m = re.exec(kode)) {
+      const k = m[1];
+      if (sah.has(k) || medan.has(k)) continue;
+      const baris = kode.slice(0, m.index).split('\n').length;
+      pelanggaran.push(
+        `${f}:${baris} — kunci "${k}" tidak ada di schema.prisma`
+        + ` · yang sah: ${[...sah].sort().join(', ')}`,
+      );
+    }
+    re.lastIndex = 0;
+  }
+  assert.deepEqual(pelanggaran, [], `\n${pelanggaran.join('\n')}\n`);
+});

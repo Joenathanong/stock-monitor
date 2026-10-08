@@ -169,6 +169,48 @@ export async function fetchStock(budgetMs = 30_000): Promise<OcsStockRow[]> {
   return rows;
 }
 
+// ---------- Brand (= toko) per SKU ----------
+
+/**
+ * Satu baris `DTO_LookupStockDetailedData` — satu-satunya sumber brand di OCS.
+ *
+ * Dibongkar 8 Okt 2026 dengan akun JONATHAN (akses 5 area). Catatan penting:
+ *
+ *  - OCS TIDAK punya medan bernama "Brand". Yang ada `ShopCode`/`ShopName`,
+ *    isinya Hanasui / NCO / FYNE / EOMMA — di OCS, brand = toko.
+ *  - `DTO_WmsItems` juga punya `ShopCode`, TAPI ia per-bin (BinCode, Qty per
+ *    rak) sehingga satu SKU punya banyak baris. Endpoint ini lebih ringkas.
+ *  - Kuncinya `SellerSku`, bentuknya sama dengan `Sku` di
+ *    DTO_WmsItemStockLiteV2 — terbukti 348 dari 375 SKU aktif cocok (92,8%).
+ *  - 16 SKU punya DUA brand (semua pasangan Hanasui/NCO). Diselesaikan oleh
+ *    `brandMenang` di atp.ts dengan urutan prioritas tetap, BUKAN di sini.
+ */
+export type OcsBrandRow = {
+  SellerSku?: string;
+  ItemCode?: string;
+  ShopCode?: string;
+  ShopName?: string;
+  AreaId?: string;
+};
+
+/**
+ * Tarik peta SKU -> brand.
+ *
+ * JEBAKAN YANG SUDAH TERBUKTI: `$filter` OData di OCS DIABAIKAN DIAM-DIAM —
+ * `?$filter=AreaId eq 'Medan'` menjawab HTTP 200 dengan 0 baris, bukan error.
+ * Jadi JANGAN pernah menyaring di URL; tarik semuanya lalu saring di sini.
+ */
+export async function fetchBrandLookup(budgetMs = 30_000): Promise<OcsBrandRow[]> {
+  const attempts = budgetMs >= 24_000 ? 2 : 1;
+  const perAttempt = Math.max(8_000, Math.floor((budgetMs - (attempts - 1) * 2_000) / attempts));
+  const data = await authedGet<OcsBrandRow[] | { value: OcsBrandRow[] }>(
+    '/odata/DTO_LookupStockDetailedData', perAttempt, attempts,
+  );
+  const rows = Array.isArray(data) ? data : data?.value;
+  if (!Array.isArray(rows)) throw new Error('Format respons DTO_LookupStockDetailedData tidak dikenali');
+  return rows;
+}
+
 // ---------- Harga produk ----------
 
 /**

@@ -424,7 +424,9 @@ body {
 .wa-canvas { width: 100%; max-width: 1600px; }
 
 /* Mode bot (?bare=1): halaman PERSIS seukuran poster, tanpa sisa apa pun, supaya
-   tangkapan layar viewport 1600×900 sudah jadi gambar jadi. */
+   tangkapan layar seukuran viewport sudah jadi gambar jadi. Tingginya mengikuti
+   isi, jadi yang mengunci ukuran adalah `KANVAS` di wa-poster.ts (kini
+   1600×1000) — bukan angka di berkas ini. */
 .wa-root.is-bare { min-height: 0; padding: 0; gap: 0; display: block; width: 1600px; }
 .wa-root.is-bare .wa-canvas { width: 1600px; max-width: none; }
 .wa-bar {

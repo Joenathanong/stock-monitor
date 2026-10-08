@@ -30,6 +30,7 @@
     "check:eji-login": "tsx scripts/check-eji-login.ts",
     "check:net": "tsx scripts/check-net.ts",
     "sync:supplier": "tsx scripts/sync-supplier-stock.ts",
+    "sync:brand": "tsx scripts/sync-brand.ts",
     "sync:stock": "tsx scripts/sync-stock.ts",
     "sync:transit": "tsx scripts/sync-transit.ts",
     "sync:sales": "tsx scripts/sync-sales.ts",

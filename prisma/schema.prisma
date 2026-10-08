@@ -473,3 +473,96 @@ model ProductPrice {
 
   @@map("product_price")
 }
+
+// ===========================================================================
+// ATP Monitoring (8 Okt 2026). ADITIF — tidak ada model lama yang diubah atau
+// di-rename. Jalankan `npm run check:push` sebelum `db:push` untuk membuktikan
+// tidak ada tabel yang akan terhapus.
+// ===========================================================================
+
+/// Brand (= toko) per SKU.
+///
+/// Di OCS TIDAK ADA medan bernama "Brand". Yang ada `ShopCode`/`ShopName` di
+/// `DTO_LookupStockDetailedData`, isinya Hanasui / NCO / FYNE / EOMMA.
+///
+/// Diukur 8 Okt 2026 dengan akun JONATHAN: dari 375 SKU aktif kategori Sku,
+/// 348 (92,8%) dapat brand. 27 sisanya hampir semuanya berprefiks `CS-`.
+/// Yang kosong TIDAK ditebak dari nama (keputusan user) — ditampilkan apa adanya
+/// sebagai "brand belum diketahui" dan diisi manual.
+///
+/// 16 SKU punya DUA brand (semuanya pasangan Hanasui/NCO, mis.
+/// BBS-CHEERFUL-BLISS = ItemCode 1201020204). Diselesaikan dengan urutan
+/// prioritas tetap Hanasui -> NCO -> FYNE -> EOMMA, supaya hasilnya TIDAK
+/// berubah hanya karena urutan baris dari OCS bergeser.
+model SkuBrand {
+  sku       String   @id @db.VarChar(120)
+  /// Brand hasil penyelesaian prioritas. Kosong = belum diketahui.
+  brand     String   @default("") @db.VarChar(40)
+  /// Semua brand yang OCS sebut untuk SKU ini, dipisah koma — untuk audit.
+  brandAsal String   @default("") @db.VarChar(200)
+  /// true = diisi orang, bukan dari OCS. Isi manual TIDAK boleh tertimpa sync.
+  manual    Boolean  @default(false)
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([brand])
+  @@map("sku_brand")
+}
+
+/// Sebaran SKU ke cabang — lapisan keputusan MANUSIA, di atas `isActive` OCS.
+///
+/// KENAPA TABEL INI ADA, dibuktikan 8 Okt 2026: `isActive` dari OCS TIDAK
+/// mencatat sebaran. Himpunan SKU aktif di Medan, Makassar, Surabaya, dan
+/// Yogyakarta IDENTIK PERSIS (356 SKU yang sama, diuji dengan membandingkan
+/// himpunan, bukan jumlah); Pusat punya 19 tambahan. Kalau flag itu memang
+/// mencatat sebaran, Medan dan Makassar pasti berbeda. Jadi tidak ada data OCS
+/// yang bisa menjawab "produk ini disebar ke cabang itu atau tidak".
+///
+/// TIGA KEADAAN, dan ketiganya harus bisa dibedakan:
+///   baris TIDAK ADA    -> belum diputuskan (bawaan; cabang/SKU baru masuk sini)
+///   dibagikan = true   -> memang disebar ke cabang itu  -> IKUT pembagi ATP
+///   dibagikan = false  -> sengaja TIDAK disebar         -> KELUAR dari pembagi
+///
+/// Tidak adanya baris disengaja sebagai bawaan: keputusan user adalah cabang
+/// baru TIDAK ada yang tercentang sampai diisi manual, dan "belum diputuskan"
+/// harus terhitung sebagai peringatan, bukan diam-diam dianggap tidak disebar.
+model AtpShare {
+  sku        String   @db.VarChar(120)
+  /// NAMA area (bukan kode gudang) — kunci yang sama dengan `stock_current`.
+  areaId     String   @db.VarChar(60)
+  dibagikan  Boolean
+  note       String?  @db.VarChar(300)
+  /// Siapa yang memutuskan — supaya keputusan sebaran bisa ditelusuri.
+  updatedBy  String   @default("") @db.VarChar(120)
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@id([sku, areaId])
+  @@index([areaId, dibagikan])
+  @@map("atp_share")
+}
+
+/// Potret ATP harian per area, untuk tren.
+///
+/// Tabel sendiri, bukan menumpang `stock_daily`: yang disimpan di sini adalah
+/// hasil keputusan ATP (pembagi, siap, belum diputuskan) pada ambang dan aturan
+/// yang berlaku HARI ITU. Menghitungnya ulang dari `stock_daily` nanti akan
+/// memakai ambang yang berlaku SEKARANG, sehingga tren masa lalu berubah setiap
+/// kali ambangnya diubah — dan grafiknya jadi bohong tentang masa lalu.
+model AtpDaily {
+  snapshotDate DateTime @db.Date
+  areaId       String   @db.VarChar(60)
+  /// Ambang yang dipakai saat potret ini dibuat (pcs). Direkam, bukan diasumsikan.
+  ambang       Int      @default(5)
+  /// Pembagi: SKU yang dibagikan ke area ini DAN layak masuk ATP.
+  dihitung     Int      @default(0)
+  /// Dari `dihitung`, yang availableQty > ambang.
+  siap         Int      @default(0)
+  /// Tidak ikut pembagi: sengaja tidak disebar.
+  takDisebar   Int      @default(0)
+  /// Tidak ikut pembagi: belum ada keputusannya.
+  belumDiputus Int      @default(0)
+  updatedAt    DateTime @default(now()) @updatedAt
+
+  @@id([snapshotDate, areaId])
+  @@index([areaId, snapshotDate])
+  @@map("atp_daily")
+}

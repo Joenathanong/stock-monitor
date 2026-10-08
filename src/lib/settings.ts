@@ -61,7 +61,7 @@ export const DEFAULT_SETTINGS = {
   price_source: 'MIN',          // MIN | MAX | AVG dari SalePrice antar marketplace
   price_refresh_hours: 12,      // harga master jarang berubah; jangan tarik tiap Refresh
 
-  // --- Poster WhatsApp (/wa) — satu gambar 1600×900 berisi 5 area ---
+  // --- Poster WhatsApp (/wa) — satu gambar berisi 5 area; ukurannya `KANVAS` ---
   // Blok mana yang ikut digambar. Dimatikan = kartunya lebih lega, bukan kosong:
   // tata letak poster menyesuaikan sendiri.
   wa_blok_angka: 1,             // DOI opsi 1 & 2, nilai stok, SIT, jumlah SKU

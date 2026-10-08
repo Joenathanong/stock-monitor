@@ -1,0 +1,371 @@
+'use client';
+import { useMemo, useState } from 'react';
+import { Alert, Kpi, RefreshButton, postJson, useApi, fmt } from '@/components/ui';
+import { DataGrid, type Column } from '@/components/DataGrid';
+
+type Putusan = boolean | null;
+
+type SelArea = {
+  dibagikan: Putusan;
+  availableQty: number;
+  siap: boolean;
+  tolak: 'TIDAK_AKTIF' | 'BUKAN_KATEGORI_SKU' | 'BUNDLE' | null;
+  note: string;
+};
+type BarisSku = {
+  sku: string; name: string; brand: string; brandManual: boolean;
+  area: Record<string, SelArea>;
+};
+type HasilArea = {
+  areaId: string; dihitung: number; siap: number; persen: number | null;
+  takDisebar: number; belumDiputus: number;
+  ditolak: Record<string, number>; kotor: number;
+};
+type Resp = {
+  ok: boolean; areas: string[]; sku: BarisSku[]; hasil: HasilArea[];
+  keseluruhan: { dihitung: number; siap: number; persen: number | null; terlemah: HasilArea | null };
+  ambang: number; siap: boolean; tanpaBrand: string[]; pesan: string;
+};
+
+const persenTeks = (p: number | null | undefined) =>
+  (p === null || p === undefined ? '—' : `${p.toFixed(1).replace('.', ',')}%`);
+
+const SEBAB: Record<string, string> = {
+  TIDAK_AKTIF: 'nonaktif di OCS',
+  BUKAN_KATEGORI_SKU: 'bukan kategori Sku',
+  BUNDLE: 'bundle',
+};
+
+/** Kunci perubahan yang belum disimpan. Sama bentuknya dengan kunciSebaran(). */
+const kunci = (sku: string, areaId: string) => `${areaId}\u0000${sku}`;
+
+export default function AtpPage() {
+  // Dua keadaan untuk satu angka, dengan sengaja: `ambang` yang dipakai memanggil
+  // server, dan `ambangDraf` yang sedang diketik. `useApi` menarik ulang setiap
+  // kali URL-nya berubah, jadi kalau input ini terikat langsung ke `ambang`,
+  // mengetik "15" memicu tiga penarikan (1, 15, dan 0 saat dikosongkan) — dan
+  // tiap penarikan membaca SELURUH stock_current. Jadi diterapkan saat Enter
+  // atau saat kursor keluar, bukan tiap ketukan.
+  const [ambang, setAmbang] = useState(5);
+  const [ambangDraf, setAmbangDraf] = useState('5');
+  const { data, error, reload } = useApi<Resp>(`/api/atp?ambang=${ambang}`);
+
+  function terapkanAmbang() {
+    // Kotak kosong dikembalikan ke nilai lama, TIDAK diterapkan sebagai 0:
+    // `Number('')` itu 0, jadi tanpa penjaga ini menghapus isi kotak akan
+    // mengubah aturannya jadi "available kalau lebih dari 0" — perubahan arti
+    // yang besar, dari gerakan yang tidak dimaksudkan mengubah apa pun.
+    if (ambangDraf.trim() === '') { setAmbangDraf(String(ambang)); return; }
+    const v = Math.max(0, Math.trunc(Number(ambangDraf)));
+    if (!Number.isFinite(v)) { setAmbangDraf(String(ambang)); return; }
+    setAmbangDraf(String(v));
+    if (v !== ambang) setAmbang(v);
+  }
+
+  const [brand, setBrand] = useState('ALL');
+  const [cari, setCari] = useState('');
+  const [hanyaBelum, setHanyaBelum] = useState(false);
+  // Perubahan ditahan dulu, baru disimpan sekali. 375 SKU x 6 cabang = 2.250
+  // sel; menyimpan tiap klik berarti 2.250 permintaan saat pengisian awal, dan
+  // satu yang gagal di tengah meninggalkan keadaan separuh tanpa ada yang tahu
+  // bagian mana. Satu tombol Simpan membuat batasnya jelas.
+  const [ubah, setUbah] = useState<Map<string, Putusan>>(new Map());
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ tone: 'ok' | 'error' | 'warn'; text: string } | null>(null);
+  const [editBrand, setEditBrand] = useState<{ sku: string; brand: string } | null>(null);
+
+  const areas = data?.areas ?? [];
+  const daftarBrand = useMemo(() => {
+    const s = new Set((data?.sku ?? []).map((r) => r.brand || '(tanpa brand)'));
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [data]);
+
+  /** Keadaan sel setelah perubahan yang belum disimpan ikut diperhitungkan. */
+  const nilai = (r: BarisSku, a: string): Putusan => {
+    const k = kunci(r.sku, a);
+    if (ubah.has(k)) return ubah.get(k)!;
+    return r.area[a]?.dibagikan ?? null;
+  };
+
+  const lolosFilter = (r: BarisSku) => {
+    if (brand !== 'ALL' && (r.brand || '(tanpa brand)') !== brand) return false;
+    const q = cari.trim().toLowerCase();
+    if (q && !r.sku.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q)) return false;
+    if (hanyaBelum && !areas.some((a) => r.area[a] && nilai(r, a) === null)) return false;
+    return true;
+  };
+
+  const baris = useMemo(
+    () => (data?.sku ?? []).filter(lolosFilter),
+    [data, brand, cari, hanyaBelum, ubah], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  function putar(r: BarisSku, a: string) {
+    // belum → Ya → Tidak → belum. Tiga keadaan, jadi tidak bisa satu checkbox:
+    // checkbox hanya punya dua, dan "belum diputuskan" bukan sama dengan
+    // "tidak disebar" — yang pertama masih menunggu orang.
+    const s = nilai(r, a);
+    const berikut: Putusan = s === null ? true : s === true ? false : null;
+    setUbah((prev) => {
+      const n = new Map(prev);
+      const k = kunci(r.sku, a);
+      const asal = r.area[a]?.dibagikan ?? null;
+      if (berikut === asal) n.delete(k); else n.set(k, berikut);
+      return n;
+    });
+  }
+
+  /**
+   * Isi borongan untuk SATU kolom cabang, hanya baris yang lolos filter di atas.
+   *
+   * Sengaja dibatasi ke filter halaman (brand, pencarian, "belum diputuskan"),
+   * BUKAN ke filter kolom di dalam tabel: tabelnya menyaring sendiri dan
+   * halaman ini tidak tahu hasilnya, jadi mengklaim "semua yang tampil" akan
+   * bohong begitu user memakai filter kolom. Jumlahnya ditulis di tombol supaya
+   * yang akan terjadi terlihat sebelum diklik.
+   */
+  function borongan(a: string, ke: Putusan) {
+    const target = baris.filter((r) => r.area[a]);
+    const kata = ke === null ? 'DIKOSONGKAN (kembali belum diputuskan)' : ke ? 'DISEBAR' : 'TIDAK disebar';
+    if (!target.length) return;
+    if (!confirm(`Tandai ${target.length} SKU di ${a} sebagai ${kata}?`)) return;
+    setUbah((prev) => {
+      const n = new Map(prev);
+      for (const r of target) {
+        const k = kunci(r.sku, a);
+        const asal = r.area[a]?.dibagikan ?? null;
+        if (ke === asal) n.delete(k); else n.set(k, ke);
+      }
+      return n;
+    });
+  }
+
+  async function simpan() {
+    if (!ubah.size) return;
+    setBusy(true);
+    try {
+      const putusan = [...ubah.entries()].map(([k, dibagikan]) => {
+        const [areaId, sku] = k.split('\u0000');
+        return { sku, areaId, dibagikan };
+      });
+      const r = await postJson(`/api/atp?ambang=${ambang}`, { putusan });
+      setMsg({ tone: r.gagal?.length ? 'warn' : 'ok', text: r.pesan });
+      setUbah(new Map());
+      reload();
+    } catch (e) {
+      setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) });
+    } finally { setBusy(false); }
+  }
+
+  async function simpanBrand() {
+    if (!editBrand) return;
+    try {
+      await postJson('/api/atp', { sku: editBrand.sku, brand: editBrand.brand }, 'PUT');
+      setEditBrand(null);
+      reload();
+    } catch (e) { setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) }); }
+  }
+
+  const unduh = `/api/atp/export?ambang=${ambang}&brand=${encodeURIComponent(brand)}`
+    + `&q=${encodeURIComponent(cari.trim())}`;
+
+  const columns = useMemo<Column<BarisSku>[]>(() => [
+    { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 240, sticky: true, isTitle: true },
+    {
+      key: 'name', label: 'Nama', get: (r) => r.name, width: 280, prio: 'p2',
+      render: (r) => <span className="text-label" title={r.name}>{r.name}</span>,
+    },
+    {
+      key: 'brand', label: 'Brand', get: (r) => r.brand || '', width: 130,
+      render: (r) => (editBrand?.sku === r.sku ? (
+        <span className="flex gap-1">
+          <input
+            className="input w-24" value={editBrand.brand} aria-label={`Brand ${r.sku}`}
+            onChange={(e) => setEditBrand({ ...editBrand, brand: e.target.value })}
+          />
+          <button className="btn btn-sm btn-primary" onClick={simpanBrand}>OK</button>
+        </span>
+      ) : (
+        <button
+          className={`chip ${r.brand ? '' : 'chip-bad'}`}
+          title={r.brandManual ? 'diisi manual — tidak akan tertimpa sync:brand' : 'dari OCS'}
+          onClick={() => setEditBrand({ sku: r.sku, brand: r.brand })}
+        >
+          {r.brand || 'kosong'}{r.brandManual ? ' ✎' : ''}
+        </button>
+      )),
+    },
+    ...areas.map((a): Column<BarisSku> => ({
+      key: `a_${a}`,
+      label: a,
+      // Nilai mentah untuk sort/filter adalah TEKSNYA, bukan boolean: user
+      // memfilter dengan kata yang ia lihat di sel.
+      get: (r) => {
+        const v = nilai(r, a);
+        return v === null ? 'Belum' : v ? 'Ya' : 'Tidak';
+      },
+      width: 112,
+      render: (r) => {
+        const sel = r.area[a];
+        if (!sel) return <span className="empty">—</span>;
+        const v = nilai(r, a);
+        const berubah = ubah.has(kunci(r.sku, a));
+        const label = v === null ? 'Belum' : v ? 'Ya' : 'Tidak';
+        const warna = v === null ? '' : v ? 'chip-ok' : 'chip-bad';
+        return (
+          <span className="flex items-center gap-1">
+            <button
+              className={`chip ${warna} ${berubah ? 'ring-1 ring-offset-1' : ''}`}
+              title={
+                `${r.sku} di ${a}\n`
+                + `Available: ${fmt(sel.availableQty)} pcs — ${sel.siap ? `siap (lebih dari ${ambang})` : `belum siap (${ambang} atau kurang)`}\n`
+                + (sel.tolak ? `TIDAK layak ATP: ${SEBAB[sel.tolak]}\n` : '')
+                + 'Klik untuk ganti: Belum → Ya → Tidak → Belum'
+              }
+              onClick={() => putar(r, a)}
+            >
+              {label}
+            </button>
+            <span className={`text-[11px] ${sel.siap ? 'text-label' : 'text-muted'}`}>{fmt(sel.availableQty)}</span>
+          </span>
+        );
+      },
+    })),
+  ], [areas, ubah, editBrand, ambang]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const k = data?.keseluruhan;
+  const belumTotal = (data?.hasil ?? []).reduce((t, h) => t + h.belumDiputus, 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="page-title">ATP Monitoring</h1>
+          <div className="mt-1 text-[12px] text-label">
+            Dari SKU yang <b>memang disebar</b> ke sebuah cabang, berapa persen yang stoknya
+            lebih dari <b>{ambang} pcs</b> sehingga bisa dijanjikan. SKU yang tidak disebar
+            dan yang belum diputuskan <b>tidak ikut pembagi</b> — itu sebabnya checklist di
+            bawah menentukan angkanya.
+          </div>
+        </div>
+        <RefreshButton withStock onDone={reload} />
+      </div>
+
+      {error ? <Alert tone="error">{error}</Alert> : null}
+      {data && !data.siap ? (
+        <Alert tone="error">Tabel <code>atp_share</code> belum ada — jalankan <code>npm run db:push</code>.</Alert>
+      ) : null}
+      {data?.pesan ? <Alert tone="warn">{data.pesan}</Alert> : null}
+      {msg ? <Alert tone={msg.tone}>{msg.text}</Alert> : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Kpi label="ATP keseluruhan" value={persenTeks(k?.persen)}
+          hint={k ? `${fmt(k.siap)} siap dari ${fmt(k.dihitung)} yang disebar` : ''} />
+        <Kpi label="Cabang terlemah" value={k?.terlemah?.areaId ?? '—'}
+          hint={k?.terlemah ? persenTeks(k.terlemah.persen) : 'belum ada pembagi'} />
+        <Kpi label="Belum diputuskan" value={fmt(belumTotal)} unit="keputusan"
+          hint="di luar pembagi, dan masih menunggu orang" />
+        <Kpi label="Brand kosong" value={fmt(data?.tanpaBrand.length ?? 0)} unit="SKU"
+          hint="layak ATP tapi OCS tidak menyebut brand-nya" />
+      </div>
+
+      <div className="card card-pad">
+        <div className="card-title mb-2">Per cabang</div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {(data?.hasil ?? []).map((h) => (
+            <div key={h.areaId} className="rounded border border-[var(--line)] p-2">
+              <div className="flex items-baseline justify-between">
+                <b className="text-[13px]">{h.areaId}</b>
+                <span className="font-mono text-[15px]">{persenTeks(h.persen)}</span>
+              </div>
+              <div className="mt-1 h-1.5 w-full rounded bg-[var(--line)]">
+                <div className="h-1.5 rounded bg-[var(--c1)]" style={{ width: `${h.persen ?? 0}%` }} />
+              </div>
+              <div className="mt-1 text-[11px] text-label">
+                {fmt(h.siap)} siap / {fmt(h.dihitung)} disebar
+              </div>
+              <div className="text-[11px] text-muted">
+                {fmt(h.takDisebar)} tidak disebar · {fmt(h.belumDiputus)} belum diputuskan
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card card-pad">
+        <div className="card-title mb-2">Filter & isi borongan</div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className="label">Brand</label>
+            <select className="input w-40" value={brand} onChange={(e) => setBrand(e.target.value)}>
+              <option value="ALL">Semua brand</option>
+              {daftarBrand.map((b) => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Cari SKU / nama</label>
+            <input className="input w-48" value={cari} onChange={(e) => setCari(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Ambang available (pcs)</label>
+            <input
+              className="input w-24 text-right" type="number" min={0} value={ambangDraf}
+              onChange={(e) => setAmbangDraf(e.target.value)}
+              onBlur={terapkanAmbang}
+              onKeyDown={(e) => { if (e.key === 'Enter') terapkanAmbang(); }}
+              title="Tekan Enter atau klik di luar kotak untuk menerapkan"
+            />
+          </div>
+          <label className="check">
+            <input type="checkbox" checked={hanyaBelum} onChange={(e) => setHanyaBelum(e.target.checked)} />
+            Hanya yang belum diputuskan
+          </label>
+          <a className="btn" href={unduh}>Unduh Excel</a>
+        </div>
+
+        <div className="mt-3 border-t border-[var(--line)] pt-3">
+          <div className="text-[12px] text-label">
+            Isi borongan ke <b>{baris.length} SKU</b> yang lolos filter di atas (filter kolom di
+            dalam tabel tidak ikut dihitung). Perubahannya ditahan dulu — belum tersimpan sampai
+            tombol <b>Simpan</b> ditekan.
+          </div>
+          <div className="mt-2 space-y-1">
+            {areas.map((a) => (
+              <div key={a} className="flex flex-wrap items-center gap-2">
+                <span className="w-24 text-[12px] font-medium">{a}</span>
+                <button className="btn btn-sm" onClick={() => borongan(a, true)}>Semua disebar</button>
+                <button className="btn btn-sm" onClick={() => borongan(a, false)}>Semua tidak</button>
+                <button className="btn btn-sm" onClick={() => borongan(a, null)}>Kosongkan</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {ubah.size ? (
+        <div className="card card-pad flex flex-wrap items-center justify-between gap-2 border-[var(--c1)]">
+          <div className="text-[13px]">
+            <b>{fmt(ubah.size)} perubahan belum disimpan.</b>{' '}
+            <span className="text-label">Persen ATP di atas belum ikut berubah — ia dihitung dari yang tersimpan.</span>
+          </div>
+          <div className="flex gap-2">
+            <button className="btn" onClick={() => setUbah(new Map())} disabled={busy}>Batalkan semua</button>
+            <button className="btn btn-primary" onClick={simpan} disabled={busy}>
+              {busy ? 'Menyimpan…' : `Simpan ${ubah.size} perubahan`}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <DataGrid<BarisSku>
+        id="atp"
+        rows={baris}
+        columns={columns}
+        rowKey={(r) => r.sku}
+        loading={!data}
+        emptyText="Tidak ada SKU. Jalankan Refresh dulu agar stok dari OCS terisi."
+        toolbarExtra={<span className="text-[12px] text-label">{baris.length} SKU · {areas.length} cabang</span>}
+      />
+    </div>
+  );
+}

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { pitaDoi } from './area-master';
-import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2 } from './wa-poster';
+import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2, KANVAS, KARTU, tinggiKartuTersedia, BIAYA_BLOK } from './wa-poster';
 
 test('rupiah diringkas per satuan', () => {
   assert.equal(rupiahRingkas(52_431_882_100), 'Rp 52,4 M');
@@ -143,10 +143,11 @@ test('status yang BELUM dikenal tidak hilang tanpa jejak', () => {
 });
 
 test('poster LAMA memang sudah meluber — ini yang membuktikannya', () => {
-  // kartuH nyata = 900 - 216 - 56. Dengan semua blok aktif dan kritisMaks 6,
-  // tata letak sebelum 7 Okt 2026 butuh lebih dari itu. SVG tanpa clipPath tidak
-  // memotong, jadi kelebihannya tergambar menimpa kaki poster tanpa ada yang
-  // gagal. Tes ini merekam fakta itu supaya tidak terulang diam-diam.
+  // Angka di tes ini SENGAJA angka LAMA (kanvas 900), karena yang direkamnya
+  // adalah fakta sejarah: kartu 628px dengan semua blok aktif dan kritisMaks 6
+  // memang tidak cukup. SVG tanpa clipPath tidak memotong, jadi kelebihannya
+  // tergambar menimpa kaki poster tanpa ada yang gagal. Jangan diganti mengikuti
+  // kanvas sekarang — tes ini bukan tentang kanvas sekarang.
   const KARTU_H = 900 - 216 - 56;
   assert.equal(KARTU_H, 628);
   const semua = { angka: true, status: true, tren: true, po: true };
@@ -155,7 +156,7 @@ test('poster LAMA memang sudah meluber — ini yang membuktikannya', () => {
 });
 
 test('sepuluh baris berbatang MUAT, dengan jarak baris yang mengalah', () => {
-  const KARTU_H = 628;
+  const KARTU_H = tinggiKartuTersedia();
   const semua = { angka: true, status: true, tren: true, po: true };
   const t = tataLetakStatus({ tinggiKartu: KARTU_H, blok: semua, nBaris: 10, diminta: 6 });
   assert.ok(t.pitch >= 13 && t.pitch <= 20, `jarak ${t.pitch}`);
@@ -165,7 +166,7 @@ test('sepuluh baris berbatang MUAT, dengan jarak baris yang mengalah', () => {
 });
 
 test('jarak baris dipilih yang TERBESAR yang masih muat, bukan yang terkecil', () => {
-  const KARTU_H = 628;
+  const KARTU_H = tinggiKartuTersedia();
   const semua = { angka: true, status: true, tren: true, po: true };
   const t = tataLetakStatus({ tinggiKartu: KARTU_H, blok: semua, nBaris: 10, diminta: 6 });
   // Satu langkah lebih longgar harus membuat daftar PO kehabisan tempat —
@@ -178,7 +179,7 @@ test('jarak baris dipilih yang TERBESAR yang masih muat, bukan yang terkecil', (
 });
 
 test('mematikan blok memberi ruang balik — jarak melonggar atau daftar memanjang', () => {
-  const KARTU_H = 628;
+  const KARTU_H = tinggiKartuTersedia();
   const semua = tataLetakStatus({ tinggiKartu: KARTU_H, blok: { angka: true, status: true, tren: true, po: true }, nBaris: 10, diminta: 6 });
   const tanpaTren = tataLetakStatus({ tinggiKartu: KARTU_H, blok: { angka: true, status: true, tren: false, po: true }, nBaris: 10, diminta: 6 });
   assert.ok(
@@ -240,7 +241,7 @@ test('status tak dikenal ikut aturan yang sama', () => {
 });
 
 test('jumlah baris menyusut, jadi jarak baris bisa melonggar', () => {
-  const KARTU_H = 628;
+  const KARTU_H = tinggiKartuTersedia();
   const semua = { angka: true, status: true, tren: true, po: true };
   const sepuluh = tataLetakStatus({ tinggiKartu: KARTU_H, blok: semua, nBaris: 10, diminta: 6 });
   const enam = tataLetakStatus({ tinggiKartu: KARTU_H, blok: semua, nBaris: 6, diminta: 6 });
@@ -373,4 +374,53 @@ test('label berambang TETAP muat di kolom label kartu 294px', () => {
       assert.ok(barW >= 60, `batang ${barW.toFixed(0)}px terlalu pendek (gutter ${g}px, fs ${fs})`);
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// ATP masuk blok angka (8 Okt 2026) — kanvas naik 900 → 1000.
+// ---------------------------------------------------------------------------
+
+test('tinggi kartu berasal dari KANVAS, bukan angka tertulis', () => {
+  // Dulu 628 ditulis mati di tes ini dan `900 - 216 - 56` ditulis di poster.tsx.
+  // Dua tempat untuk satu angka: mengubah kanvas membuat tes menjaga tinggi yang
+  // tidak dipakai siapa pun, dan luberan yang mestinya ketahuan jadi lolos.
+  assert.equal(tinggiKartuTersedia(), KANVAS.h - KARTU.y - KARTU.bawah);
+  assert.equal(tinggiKartuTersedia({ h: 900 }), 628, 'rumusnya sama dengan yang lama');
+});
+
+test('blok angka = 4 baris kotak, dan biayanya cocok dengan posternya', () => {
+  // `BIAYA_BLOK.angka` harus sama dengan jumlah kenaikan `cy` di poster.tsx:
+  //   26 (label) + 34 (angka besar) + 26 (jeda) + (4 * 46 - 6 + 8) (grid kotak)
+  // Kalau salah satunya digeser sendirian, isinya meluber dan SVG tidak memotong.
+  assert.equal(BIAYA_BLOK.angka, 26 + 34 + 26 + (4 * 46 - 6 + 8));
+  assert.equal(BIAYA_BLOK.angka, 272);
+  // Pasangan ATP menambah tepat satu baris kotak dari tata letak 3 baris.
+  assert.equal(BIAYA_BLOK.angka - (26 + 34 + 26 + (3 * 46 - 6 + 8)), 46);
+});
+
+test('ATP masuk tanpa mengorbankan jarak baris atau daftar mendesak', () => {
+  const semua = { angka: true, status: true, tren: true, po: true };
+  const H = tinggiKartuTersedia();
+  const t = tataLetakStatus({ tinggiKartu: H, blok: semua, nBaris: 10, diminta: 6 });
+
+  // Inilah imbalan kanvas yang lebih tinggi, dan alasan kenaikannya layak:
+  // jarak baris status naik ke yang PALING longgar (20, sebelumnya 16) DAN
+  // daftar mendesak tetap kebagian baris. Kalau salah satu turun, kenaikan
+  // kanvasnya tidak cukup dan angkanya harus ditinjau — bukan dibiarkan.
+  assert.equal(t.pitch, BIAYA_BLOK.pitchPilihan[0], `jarak baris ${t.pitch}, harusnya paling longgar`);
+  assert.ok(t.poMuat >= 1, `daftar mendesak kebagian ${t.poMuat} baris`);
+
+  const butuh = tinggiKartu({ blok: semua, nBaris: 10, pitch: t.pitch, kritisMaks: t.poMuat });
+  assert.ok(butuh <= H, `butuh ${butuh} dari ${H}`);
+});
+
+test('kanvas 900 TIDAK cukup lagi setelah ATP masuk — ini yang membayar kenaikannya', () => {
+  // Pembenaran kenaikan kanvas, bukan selera. Di 628px, blok angka 4 baris
+  // memaksa jarak baris status turun ke bawah 20 — persis mundur dari yang baru
+  // saja diperbaiki 7 Okt 2026.
+  const semua = { angka: true, status: true, tren: true, po: true };
+  const lama = tataLetakStatus({ tinggiKartu: 628, blok: semua, nBaris: 10, diminta: 6 });
+  const baru = tataLetakStatus({ tinggiKartu: tinggiKartuTersedia(), blok: semua, nBaris: 10, diminta: 6 });
+  assert.ok(baru.pitch > lama.pitch, `kanvas baru ${baru.pitch} harus lebih longgar dari ${lama.pitch}`);
+  assert.ok(baru.poMuat >= lama.poMuat, 'daftar mendesak tidak boleh memendek');
 });

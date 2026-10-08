@@ -31,8 +31,30 @@ export const WARNA = {
   violet: '#7445F7',
 } as const;
 
-/** Kanvas tetap: bot cukup mengunduh, tidak perlu mengatur ukuran jendela. */
-export const KANVAS = { w: 1600, h: 900 } as const;
+/**
+ * Kanvas tetap: bot cukup mengunduh, tidak perlu mengatur ukuran jendela.
+ *
+ * Tingginya 1000, naik dari 900 pada 8 Okt 2026 saat ATP masuk ke blok angka.
+ * Blok itu jadi 4 baris kotak (dari 3), +46px, dan di kanvas 900 tambahan itu
+ * memaksa jarak baris status turun lagi. Yang dibayar kanvas lebih tinggi:
+ * jarak baris status naik dari 16 ke 20 (yang paling longgar yang tersedia) DAN
+ * daftar mendesak tetap kebagian satu baris seperti sebelumnya — jadi ATP masuk
+ * tanpa ada yang dikorbankan. Angkanya diuji, bukan dikira: lihat
+ * wa-poster.test.ts.
+ */
+export const KANVAS = { w: 1600, h: 1000 } as const;
+
+/**
+ * Posisi & sisa ruang kartu area. SATU sumber, dipakai poster DAN tesnya.
+ *
+ * Dulu tingginya ditulis `900 - 216 - 56` di poster.tsx dan `628` di tesnya.
+ * Dua tempat untuk satu angka: begitu kanvasnya diubah, tesnya menjaga tinggi
+ * yang sudah tidak dipakai siapa pun, dan luberan yang mestinya ketahuan jadi
+ * lolos. Sekarang tesnya memanggil fungsi ini.
+ */
+export const KARTU = { y: 216, bawah: 56 } as const;
+export const tinggiKartuTersedia = (kanvas: { h: number } = KANVAS) =>
+  kanvas.h - KARTU.y - KARTU.bawah;
 
 export const FONT = "Arial, Helvetica, 'Liberation Sans', sans-serif";
 export const FONT_MONO = "'DejaVu Sans Mono', Menlo, Consolas, monospace";
@@ -265,7 +287,15 @@ export function lebarKartu(jumlah: number, total = KANVAS.w, margin = 32, jarak 
  */
 export const BIAYA_BLOK = {
   kepala: 30 + 12,
-  angka: 26 + 34 + 26 + (3 * 46 - 6 + 8),
+  /**
+   * Label opsi + angka besar + jeda + GRID KOTAK.
+   *
+   * Gridnya 4 baris x 2 kolom sejak ATP ikut (8 Okt 2026): ATP% dan pembaginya
+   * ("siap / disebar") jadi pasangan terakhir. Pembaginya ikut ditulis dengan
+   * sengaja — ATP lama menampilkan persen tanpa pembagi, dan itulah yang membuat
+   * "Yogyakarta 68,6%" tidak bisa ditelusuri sampai ada yang memeriksa EOMMA.
+   */
+  angka: 26 + 34 + 26 + (4 * 46 - 6 + 8),
   /** Judul + jeda + penutup, di luar barisnya sendiri. */
   statusTetap: 16 + 8 + 8,
   tren: 16 + 6 + 56 + 20,

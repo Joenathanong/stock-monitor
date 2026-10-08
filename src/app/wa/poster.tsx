@@ -7,11 +7,16 @@
 import {
   FONT, FONT_MONO, KANVAS, WARNA, adsTeks, angkaRingkas, deretTren, hari, jalurSpark, labelDoi, lebarKartu,
   rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, gutterLabel, lebarTeksKira, potongTeks, JEDA_LABEL, labelPita, tampil1, tampil2,
+  KARTU, tinggiKartuTersedia,
 } from '@/lib/wa-poster';
+// Dipakai dari atp.ts, TIDAK ditulis ulang di sini: angka di poster dan angka di
+// halaman /atp harus sama ejaannya ("71,0%"), dan dua fungsi dengan satu tugas
+// akan berbeda pada kasus null-nya.
+import { persenTeks as persenAtp } from '@/lib/atp';
 import type { DataWa, AreaWa } from './types';
 
 /**
- * Poster 1600×900 — SATU elemen <svg>, bukan HTML.
+ * Poster 1600×1000 — SATU elemen <svg>, bukan HTML.
  *
  * Alasannya unduhan JPG: SVG bisa diserialkan lalu digambar ke <canvas> tanpa
  * pustaka apa pun, dan hasilnya PERSIS sama dengan yang di layar. html2canvas
@@ -130,6 +135,17 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
       { l: 'Dalam perjalanan', v: `${angkaRingkas(a.transit)} pcs` },
       { l: `ADS ${labelDoi(tampil1(disp) ? 1 : 2, disp) === 'DOI' ? '' : `Opsi ${tampil1(disp) ? 1 : 2}`}`.trim(), v: adsTeks(tampil1(disp) ? a.ads1 : a.ads2) },
       { l: 'Perlu open PO', v: `${a.perluPo} SKU` },
+      // ATP dan PEMBAGINYA bersebelahan, bukan persen sendirian.
+      //
+      // ATP lama menampilkan "Yogyakarta 68,6%" tanpa pembagi, dan 68,6% itu
+      // sebagian hukuman untuk 29 SKU EOMMA yang memang tidak disebar ke sana —
+      // tidak ada yang bisa melihatnya dari posternya. Dengan "siap / disebar"
+      // di sebelahnya, persen yang pembaginya kecil langsung kelihatan kecil.
+      { l: 'ATP', v: a.atp ? persenAtp(a.atp.persen) : '—' },
+      {
+        l: 'Siap / disebar',
+        v: a.atp ? `${angkaRingkas(a.atp.siap)} / ${angkaRingkas(a.atp.dihitung)}` : '—',
+      },
     ];
     const kw = (isi - 8) / 2;
     kotak.forEach((k, i) => {
@@ -139,7 +155,10 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
       bagian.push(<Teks key={`kl${i}`} x={kx + 8} y={ky + 15} size={11} fill={WARNA.tintaLabel}>{k.l}</Teks>);
       bagian.push(<Teks key={`kv${i}`} x={kx + 8} y={ky + 32} size={14} weight={700} mono>{k.v}</Teks>);
     });
-    cy += 3 * 46 - 6 + 8;
+    // 4 baris kotak. HARUS sama dengan `BIAYA_BLOK.angka` di wa-poster.ts —
+    // tesnya mengunci kesamaan itu, karena SVG tidak memotong luberan dan
+    // selisih di sini tergambar menimpa kaki poster tanpa ada yang gagal.
+    cy += 4 * 46 - 6 + 8;
   }
 
   // --- sebaran status ---
@@ -280,8 +299,8 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, onKlik }: {
 export function Poster({ data, onPilihArea }: Props) {
   const area = data.areas;
   const w = lebarKartu(area.length || 1, KANVAS.w, M, JARAK);
-  const kartuY = 216;
-  const kartuH = KANVAS.h - kartuY - 56;
+  const kartuY = KARTU.y;
+  const kartuH = tinggiKartuTersedia();
   const t = data.total;
 
   const disp = data.doiDisplay ?? 'BOTH';

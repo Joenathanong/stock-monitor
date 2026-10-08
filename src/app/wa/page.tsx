@@ -131,10 +131,15 @@ export default function WaPage() {
   /**
    * `?bare=1` — mode untuk bot penangkap layar.
    *
-   * Halaman jadi PERSIS 1600×900: tanpa padding, tanpa baris tombol di bawah,
-   * tanpa popup. Bot cukup `setViewport({width:1600,height:900})` lalu
+   * Halaman jadi PERSIS seukuran poster: tanpa padding, tanpa baris tombol di
+   * bawah, tanpa popup. Bot cukup `setViewport` seukuran kanvas lalu
    * `page.screenshot()` — tidak perlu mencari elemen, tidak perlu memotong, dan
    * ukurannya tidak berubah kalau tata letak halaman diubah nanti.
+   *
+   * UKURANNYA DARI `KANVAS`, jangan ditulis mati di skrip bot: 8 Okt 2026
+   * tingginya berubah 900 → 1000 saat ATP masuk, dan bot yang memakai 900 akan
+   * MEMOTONG kaki poster tanpa galat apa pun — gambarnya terkirim, cuma kurang.
+   * Saat ini `KANVAS` = 1600×1000.
    */
   const bare = useMemo(() => (typeof window === 'undefined' ? false : new URLSearchParams(window.location.search).get('bare') === '1'), []);
 

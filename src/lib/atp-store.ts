@@ -15,7 +15,7 @@ import { prisma } from './prisma';
 import { toDateKeyUtc } from './dates';
 import {
   AMBANG_ATP_BAWAAN, kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan, skuBelumDiset,
-  susunTurunan,
+  susunTurunan, bundlingTerblokir,
   type BarisStokAtp, type Sebaran, type HasilArea, type SebabTolak, type SaringAktif,
   type SkuBelumDiset, type PetaBundle, type RingkasTurunan,
 } from './atp';
@@ -297,6 +297,14 @@ export type MuatAtp = {
       siap: boolean;
       /** Tidak layak ATP? sebabnya; null = layak. */
       tolak: SebabTolak | null;
+      /**
+       * Komponen bundling yang TIDAK disebar ke area ini. Tidak kosong =
+       * bundling ini keluar dari pembagi walau centangnya "Ya". Dibawa ke
+       * layar supaya selnya bisa menyebutkan SIAPA yang memblokirnya —
+       * "tiba-tiba tidak dihitung" tanpa alasan adalah bentuk kesalahan yang
+       * paling sulit dipercaya saat ketahuan.
+       */
+      blokir: string[];
       note: string;
     }>;
   }[];
@@ -365,7 +373,11 @@ export async function muatAtp(
   // dan tidak ada apa pun di layar yang memberi tahu bahwa artinya sudah
   // berganti. Filter tampilan mengubah apa yang DILIHAT, bukan apa yang
   // DIUKUR.
-  const hasil = hitungAtp(rows, sebaran, ambang, 'AKTIF');
+  // Bundling yang komponennya sengaja tidak disebar — keputusan user 9 Okt
+  // 2026 (opsi A). DITURUNKAN di sini, TIDAK PERNAH ditulis ke atp_share.
+  const blokir = bundlingTerblokir(bundle.peta, sebaran, areas);
+
+  const hasil = hitungAtp(rows, sebaran, ambang, 'AKTIF', blokir);
   const keseluruhan = atpKeseluruhan(hasil);
 
   // Baris tabel mengikuti saringan tampilan. Satu SKU bisa aktif di satu area
@@ -399,6 +411,7 @@ export async function muatAtp(
       availableQty: r.availableQty,
       siap: r.availableQty > ambang,
       tolak: k.layak ? null : k.sebab!,
+      blokir: blokir.get(kunciSebaran(r.sku, r.areaId)) ?? [],
       note: catatan.get(kunciSebaran(r.sku, r.areaId))?.note ?? '',
     };
     b.stokTotal += r.availableQty;
@@ -498,11 +511,19 @@ export async function persenAtpPerArea(
    */
   stok: Map<string, { available: number; layak: number }>;
 }> {
-  const [rows, { sebaran, siap }] = await Promise.all([muatStokAtp(), muatSebaran()]);
+  const [rows, { sebaran, siap }, bundle] = await Promise.all([
+    muatStokAtp(), muatSebaran(), muatKomposisiBundle(),
+  ]);
+  // Aturan turunan HARUS ikut di sini juga. Poster dan halaman ATP membaca
+  // tabel yang sama; kalau salah satunya menerapkan aturan dan yang lain
+  // tidak, dua angka bernama sama akan berbeda — persis kesalahan yang
+  // ditemukan user 8 Okt 2026 (Available 69,6% vs ATP 69,8%).
+  const areas = [...new Set(rows.map((r) => r.areaId))].filter(Boolean).sort((a, b) => a.localeCompare(b));
+  const blokir = bundlingTerblokir(bundle.peta, sebaran, areas);
   // 'AKTIF' ditulis tegas, bukan dibiarkan bawaan: poster memuat angka yang
   // dibaca orang lain tanpa konteks, jadi aturannya tidak boleh ikut berubah
   // kalau bawaan `kelayakan()` suatu saat diganti.
-  const hasil = hitungAtp(rows, sebaran, ambang, 'AKTIF');
+  const hasil = hitungAtp(rows, sebaran, ambang, 'AKTIF', blokir);
 
   // Diturunkan dari `hasil` — BUKAN dihitung ulang. Menghitungnya sendiri di
   // sini persis cara dua angka yang mestinya sama jadi berbeda.

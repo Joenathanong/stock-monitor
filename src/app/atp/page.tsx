@@ -11,6 +11,8 @@ type SelArea = {
   availableQty: number;
   siap: boolean;
   tolak: 'TIDAK_AKTIF' | 'BUKAN_KATEGORI_SKU' | null;
+  /** Komponen bundling yang tidak disebar ke cabang ini — bundling keluar dari pembagi. */
+  blokir: string[];
   note: string;
 };
 /** Keadaan satu komponen bundling di satu cabang. */
@@ -45,6 +47,8 @@ type HasilArea = {
   areaId: string; dihitung: number; siap: number; persen: number | null;
   takDisebar: number; belumDiputus: number;
   ditolak: Record<string, number>; kotor: number;
+  /** Bagian dari takDisebar yang keluar karena komponen bundling-nya tidak disebar. */
+  takDisebarTurunan: number;
 };
 type Resp = {
   ok: boolean; areas: string[]; sku: BarisSku[]; hasil: HasilArea[];
@@ -430,21 +434,34 @@ export default function AtpPage() {
         const v = nilai(r, a);
         const berubah = ubah.has(kunci(r.sku, a));
         const label = v === null ? 'Belum' : v ? 'Ya' : 'Tidak';
+        // Terblokir komponen: centangnya TETAP milik user dan tetap ditampilkan
+        // apa adanya — yang berubah cuma perlakuannya di pembagi. Menukar
+        // labelnya jadi "Tidak" akan membuat orang mengira keputusannya sudah
+        // diubah, lalu mengklik untuk mengembalikan sesuatu yang tidak pernah
+        // berubah.
+        const diblokir = v === true && sel.blokir.length > 0;
         const warna = v === null ? '' : v ? 'chip-ok' : 'chip-bad';
         return (
           <span className="flex items-center gap-1">
             <button
-              className={`chip ${warna} ${berubah ? 'ring-1 ring-offset-1' : ''}`}
+              className={`chip ${diblokir ? 'chip-bad' : warna} ${berubah ? 'ring-1 ring-offset-1' : ''}`}
+              style={diblokir ? { textDecoration: 'line-through' } : undefined}
               title={
                 `${r.sku} di ${a}\n`
                 + `Available: ${fmt(sel.availableQty)} pcs — ${sel.siap ? `siap (lebih dari ${ambang})` : `belum siap (${ambang} atau kurang)`}\n`
                 + (sel.tolak ? `TIDAK layak ATP: ${SEBAB[sel.tolak]}\n` : '')
+                + (diblokir
+                  ? `TIDAK ikut pembagi: ${sel.blokir.length} komponen bundling tidak disebar ke ${a} —\n`
+                    + `  ${sel.blokir.slice(0, 6).join('\n  ')}${sel.blokir.length > 6 ? `\n  … ${sel.blokir.length - 6} lagi` : ''}\n`
+                    + 'Centang Anda TIDAK diubah. Sebar lagi komponennya, bundling ini ikut kembali sendiri.\n'
+                  : '')
                 + 'Klik untuk ganti: Belum → Ya → Tidak → Belum'
               }
               onClick={() => putar(r, a)}
             >
               {label}
             </button>
+            {diblokir ? <span className="text-[11px] text-critical" title="Komponennya tidak disebar">⛔</span> : null}
             <span className={`text-[11px] ${sel.siap ? 'text-label' : 'text-muted'}`}>{fmt(sel.availableQty)}</span>
           </span>
         );
@@ -681,6 +698,24 @@ export default function AtpPage() {
           {baruList.length <= 8 ? <> — {baruList.map((b) => b.sku).join(', ')}</> : null}
         </Alert>
       ) : null}
+
+      {(() => {
+        // Aturan turunan (keputusan user 9 Okt 2026) harus TERLIHAT, bukan cuma
+        // ada di tooltip: ia memindahkan bundling keluar dari pembagi, dan
+        // perubahan pembagi yang tidak diumumkan adalah cara angka ATP berubah
+        // tanpa ada yang bisa menjelaskan sebabnya.
+        const per = (data?.hasil ?? []).filter((h) => h.takDisebarTurunan > 0);
+        const total = per.reduce((t, h) => t + h.takDisebarTurunan, 0);
+        if (!total) return null;
+        return (
+          <Alert tone="info">
+            <b>{fmt(total)} bundling keluar dari pembagi</b> karena ada komponennya yang
+            sengaja <b>tidak disebar</b> ke cabang itu ({per.map((h) => `${h.areaId} ${fmt(h.takDisebarTurunan)}`).join(', ')}).
+            Centangnya tidak diubah dan selnya ditandai <span className="mono">⛔</span> —
+            begitu komponennya disebar lagi, bundling-nya ikut kembali sendiri.
+          </Alert>
+        );
+      })()}
 
       {hanyaBaru ? (
         <Alert tone="info">

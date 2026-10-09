@@ -75,6 +75,9 @@ export async function GET(req: Request) {
         'Angka di lembar ini SELURUH produk, tidak mengikuti filter brand di lembar lain.',
         'Pembagi = SKU yang DIBAGIKAN ke area itu dan layak ATP. SKU yang tidak disebar '
           + 'dan yang belum diputuskan TIDAK ikut pembagi.',
+        'Bundling yang salah satu komponennya TIDAK disebar ke area itu juga keluar dari '
+          + 'pembagi, walau centangnya "Ya" — lihat kolom terakhir. Centangnya tidak diubah; '
+          + 'begitu komponennya disebar lagi, bundling-nya ikut kembali sendiri.',
       ],
       columns: [
         { header: 'Area', key: 'area', width: 16 },
@@ -82,6 +85,7 @@ export async function GET(req: Request) {
         { header: 'Siap', key: 'siap', width: 9 },
         { header: 'Pembagi (dibagikan & layak)', key: 'dihitung', width: 27 },
         { header: 'Tidak disebar', key: 'takDisebar', width: 15 },
+        { header: '— di antaranya karena komponen bundling', key: 'takDisebarTurunan', width: 38 },
         { header: 'Belum diputuskan', key: 'belum', width: 18 },
         { header: 'Nonaktif di OCS', key: 'nonaktif', width: 16 },
         { header: 'Bukan kategori Sku', key: 'bukanSku', width: 19 },
@@ -94,6 +98,7 @@ export async function GET(req: Request) {
           siap: h.siap,
           dihitung: h.dihitung,
           takDisebar: h.takDisebar,
+          takDisebarTurunan: h.takDisebarTurunan,
           belum: h.belumDiputus,
           nonaktif: h.ditolak.TIDAK_AKTIF,
           bukanSku: h.ditolak.BUKAN_KATEGORI_SKU,
@@ -104,7 +109,7 @@ export async function GET(req: Request) {
           persen: persenTeks(data.keseluruhan.persen),
           siap: data.keseluruhan.siap,
           dihitung: data.keseluruhan.dihitung,
-          takDisebar: '', belum: '', nonaktif: '', bukanSku: '', kotor: '',
+          takDisebar: '', takDisebarTurunan: '', belum: '', nonaktif: '', bukanSku: '', kotor: '',
         },
       ],
     },
@@ -187,8 +192,10 @@ export async function GET(req: Request) {
           qty: x.availableQty,
           siap: x.siap ? 'Ya' : 'Tidak',
           bagi,
-          ikut: x.tolak === null && x.dibagikan === true ? 'Ya' : 'Tidak',
-          tolak: x.tolak ? SEBAB[x.tolak] : '',
+          ikut: x.tolak === null && x.dibagikan === true && !x.blokir.length ? 'Ya' : 'Tidak',
+          tolak: x.tolak ? SEBAB[x.tolak]
+            : x.blokir.length ? `Komponen tidak disebar: ${x.blokir.slice(0, 3).join(', ')}${x.blokir.length > 3 ? ` +${x.blokir.length - 3}` : ''}`
+            : '',
           note: x.note,
         };
       }).filter(Boolean) as Record<string, unknown>[]),

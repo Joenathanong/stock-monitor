@@ -1128,3 +1128,72 @@ penyimpanan bebas untuk apa pun yang dikirim klien: `key` harus cocok
 `grid:<id>`, dan `value` maksimal 8 KB serta harus JSON yang sah. Tabel yang
 belum di-`db:push` dijawab sebagai "tidak ada", bukan galat — tabelnya tetap
 jalan dengan localStorage.
+
+## Aturan turunan: komponen tidak disebar → bundling keluar dari pembagi (9 Okt 2026)
+
+Permintaan user: *"jika sku a saya tidak sebar ke makassar, saya mau bundling
+yang ada komponen sku a nya juga tidak aktif."* Dipilih **opsi A**: bundling
+itu **keluar dari pembagi**, diperlakukan sama seperti SKU yang dicentang Tidak.
+
+Alasan opsi A dan bukan "tetap di pembagi tapi dihitung tidak siap": ini
+keputusan **sengaja**, bukan kegagalan stok. ATP mengukur ketersediaan; kalau
+kebijakan ikut menurunkannya, angkanya bereaksi terhadap keputusan kita
+sendiri. Diukur sebelum diputuskan — Pusat 1.179/1.637 = 72,0% → opsi A
+1.178/1.625 = **72,5%**, opsi B 1.178/1.637 = 72,0%.
+
+### Diturunkan saat hitung, TIDAK PERNAH ditulis
+
+`bundlingTerblokir(peta, sebaran, areas)` menghasilkan peta
+`(bundleSku, areaId) → [komponen yang tidak disebar]`. `hitungAtp` menerimanya
+sebagai argumen; `atp_share` tidak disentuh sama sekali (ada tesnya).
+
+Kalau ditulis ke `atp_share`, begitu komponennya disebar lagi bundling-nya
+tetap "Tidak" selamanya sampai ada yang ingat mengembalikannya — dan tidak ada
+cara membedakan mana keputusan orang dan mana tulisan mesin. Dengan diturunkan,
+bundling hidup kembali **sendiri**.
+
+### Batas yang disengaja, semuanya bertes
+
+| hal | perlakuan | kenapa |
+|---|---|---|
+| komponen **"Tidak"** | memblokir | satu-satunya keputusan yang tegas |
+| komponen **"Belum diputuskan"** | TIDAK memblokir | hari ini 4 cabang kosong seluruhnya → semua bundling akan mati sekaligus. Itu kecelakaan, bukan keputusan |
+| komponen tidak terdaftar di cabang itu | TIDAK memblokir | bukan keputusan sebaran |
+| bundling yang centangnya **"Belum"** | TIDAK dipindah ke takDisebar | kalau dipindah, ia hilang dari pengingat "belum diatur" tanpa ada yang memutuskannya |
+| bundling yang centangnya **"Tidak"** | sudah keluar, tidak dihitung dua kali | `takDisebarTurunan` hanya untuk yang keluar KARENA turunan |
+| **bundling bertingkat** | tidak ditelusuri | terukur 9 Okt 2026: 0 dari 2.028 bundling. `bundlingBertingkat()` menjaga anggapan itu — kalau muncul, terlihat |
+
+`HasilArea` dapat medan baru `takDisebarTurunan`, dipisah dari `takDisebar`
+supaya "26 SKU saya set Tidak" tidak pernah terbaca sebagai "38".
+
+### Di layar
+
+Sel cabang **tetap menampilkan centang user apa adanya** — menukar labelnya
+jadi "Tidak" akan membuat orang mengira keputusannya sudah diubah, lalu
+mengklik untuk mengembalikan sesuatu yang tidak pernah berubah. Yang ditambah:
+coretan, tanda ⛔, dan tooltip yang menyebut **semua** komponen pemblokirnya
+(bukan yang pertama saja — kalau cuma satu yang dicatat, user menyebar ulang
+satu komponen lalu heran bundling-nya masih mati).
+
+Di atas tabel ada baris pemberitahuan berisi jumlah per cabang: perubahan
+pembagi yang tidak diumumkan adalah cara angka ATP berubah tanpa ada yang bisa
+menjelaskan sebabnya.
+
+Excel: lembar Ringkasan dapat kolom "— di antaranya karena komponen bundling",
+dan di lembar Stok kolom "Ikut pembagi ATP" ikut memperhitungkannya dengan
+alasan tertulis.
+
+### Poster WA ikut aturan yang sama
+
+`persenAtpPerArea()` (dipakai poster) sekarang juga memuat komposisi dan
+menerapkan `bundlingTerblokir`. Kalau hanya salah satu yang menerapkannya, dua
+angka bernama sama akan berbeda — persis kesalahan yang ditemukan user 8 Okt
+2026 (Available 69,6% vs ATP 69,8%).
+
+### Dampak saat dikodekan
+
+Sebaran baru terisi di Pusat (1.897 Ya, 26 Tidak, 806 Belum); 4 cabang lain
+masih kosong. 20 bundling Pusat tersentuh aturan, 12 di antaranya sedang "Ya",
+1 di antaranya sedang "siap". Contoh: `BDL-HANASUI-0000001678` (stok 70)
+berisi `CS-HANASUI-CERAMIDE-PROBIOTIC-CLEAR-PAD-80GR` — barang clearance yang
+memang tidak disebar. Angkanya akan jauh lebih besar begitu 4 cabang lain diisi.

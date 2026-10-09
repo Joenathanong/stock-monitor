@@ -155,6 +155,69 @@ export type Sebaran = Map<string, boolean>;
 /** Kunci peta sebaran. Satu SKU di dua area adalah DUA keputusan. */
 export const kunciSebaran = (sku: string, areaId: string) => `${areaId}\u0000${sku}`;
 
+/**
+ * Bundling yang TIDAK BISA DIJANJIKAN karena komponennya sengaja tidak disebar.
+ *
+ * KEPUTUSAN USER 9 Okt 2026, opsi A: "jika sku a saya tidak sebar ke makassar,
+ * bundling yang ada komponen sku a nya juga tidak aktif" — dan bundling itu
+ * KELUAR DARI PEMBAGI, diperlakukan sama seperti SKU yang diset Tidak.
+ *
+ * Alasan keluar-dari-pembagi, bukan dihitung-tidak-siap: ini keputusan sengaja,
+ * bukan kegagalan stok. ATP mengukur KETERSEDIAAN; kalau kebijakan ikut
+ * menurunkannya, angkanya bereaksi terhadap keputusan kita sendiri.
+ *
+ * DITURUNKAN SAAT HITUNG, TIDAK PERNAH DITULIS ke `atp_share`. Kalau ditulis,
+ * begitu komponennya disebar lagi bundling-nya tetap "Tidak" selamanya sampai
+ * ada yang ingat mengembalikannya — dan tidak ada cara membedakan mana
+ * keputusan orang dan mana tulisan mesin. Dengan diturunkan, bundling hidup
+ * kembali sendiri begitu komponennya disebar.
+ *
+ * Tiga batas yang disengaja:
+ *
+ *   - HANYA "Tidak" yang tegas yang merambat. "Belum diputuskan" TIDAK.
+ *     Kalau "Belum" ikut, hari ini 4 cabang masih kosong seluruhnya sehingga
+ *     SEMUA bundling langsung mati di sana — itu bukan keputusan, itu
+ *     kecelakaan.
+ *   - Komponen yang tidak terdaftar di cabang itu bukan keputusan sebaran,
+ *     jadi tidak memicu apa pun.
+ *   - TIDAK menelusuri berlapis. Terukur 9 Okt 2026: dari 2.028 bundling, NOL
+ *     komponen yang ternyata bundling juga. `bundlingBertingkat()` di bawah
+ *     menjaga anggapan itu — kalau suatu hari muncul, ia terlihat.
+ */
+export function bundlingTerblokir(
+  peta: PetaBundle,
+  sebaran: Sebaran,
+  areas: string[],
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const [bundleSku, komposisi] of peta) {
+    for (const a of areas) {
+      const mati = komposisi
+        .filter((k) => sebaran.get(kunciSebaran(k.itemSku, a)) === false)
+        .map((k) => k.itemSku);
+      if (mati.length) out.set(kunciSebaran(bundleSku, a), mati);
+    }
+  }
+  return out;
+}
+
+/**
+ * Komponen yang ternyata bundling juga — penelusuran berlapis BELUM didukung.
+ *
+ * Dipakai penjaga, bukan perhitungan: selama hasilnya kosong, aturan satu
+ * lapis di `bundlingTerblokir` memang cukup. Begitu tidak kosong, aturan itu
+ * akan melewatkan rantainya diam-diam — dan itu harus kelihatan, bukan
+ * ditemukan setengah tahun kemudian.
+ */
+export function bundlingBertingkat(peta: PetaBundle): string[] {
+  const bundle = new Set(peta.keys());
+  const out: string[] = [];
+  for (const [b, komposisi] of peta) {
+    for (const k of komposisi) if (bundle.has(k.itemSku)) out.push(`${b} → ${k.itemSku}`);
+  }
+  return out;
+}
+
 export type HasilArea = {
   areaId: string;
   /** Pembagi: layak ATP DAN dibagikan ke area ini. */
@@ -165,6 +228,12 @@ export type HasilArea = {
   persen: number | null;
   /** Layak ATP tapi sengaja TIDAK disebar — keluar dari pembagi. */
   takDisebar: number;
+  /**
+   * Bagian dari `takDisebar` yang keluar BUKAN karena dicentang orang,
+   * melainkan karena komponen bundling-nya tidak disebar. Dipisah supaya
+   * "26 SKU saya set Tidak" tidak pernah terbaca sebagai "38".
+   */
+  takDisebarTurunan: number;
   /** Layak ATP tapi belum ada keputusannya — keluar dari pembagi. */
   belumDiputus: number;
   /** Tidak layak ATP, dirinci sebabnya. */
@@ -192,13 +261,15 @@ export function hitungAtp(
   sebaran: Sebaran,
   ambang: number = AMBANG_ATP_BAWAAN,
   saring: SaringAktif = 'AKTIF',
+  /** Dari `bundlingTerblokir()`. Kosong = aturan turunan tidak berlaku. */
+  blokir: Map<string, string[]> = new Map(),
 ): HasilArea[] {
   const per = new Map<string, HasilArea>();
   const ambil = (areaId: string): HasilArea => {
     let h = per.get(areaId);
     if (!h) {
       h = {
-        areaId, dihitung: 0, siap: 0, persen: null, takDisebar: 0, belumDiputus: 0,
+        areaId, dihitung: 0, siap: 0, persen: null, takDisebar: 0, takDisebarTurunan: 0, belumDiputus: 0,
         ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0 },
         perKategori: Object.fromEntries(KATEGORI_ATP.map((k) => [k, { dihitung: 0, siap: 0 }])),
         kotor: 0,
@@ -214,9 +285,16 @@ export function hitungAtp(
     if (k.kotor) h.kotor++;
     if (!k.layak) { h.ditolak[k.sebab!]++; continue; }
 
-    const putusan = sebaran.get(kunciSebaran(r.sku, r.areaId));
+    const kunci = kunciSebaran(r.sku, r.areaId);
+    const putusan = sebaran.get(kunci);
     if (putusan === undefined) { h.belumDiputus++; continue; }
     if (putusan === false) { h.takDisebar++; continue; }
+
+    // Bundling yang komponennya tidak disebar. Diperiksa HANYA saat
+    // putusannya "Ya": kalau "Tidak" ia sudah keluar di atas, dan kalau
+    // "Belum" ia memang masih menunggu orang — memindahkannya ke takDisebar
+    // akan menghapusnya dari pengingat "belum diatur" tanpa ada yang memutuskan.
+    if (blokir.has(kunci)) { h.takDisebar++; h.takDisebarTurunan++; continue; }
 
     const siap = Number(r.availableQty) > ambang;
     h.dihitung++;

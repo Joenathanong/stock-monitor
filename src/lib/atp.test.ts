@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   AMBANG_ATP_BAWAAN, PRIORITAS_BRAND, brandMenang, adalahBundle, skuKotor,
   kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan, persenTeks,
-  petaBrand, skuBelumDiset, susunTurunan,
+  petaBrand, skuBelumDiset, susunTurunan, bundlingTerblokir, bundlingBertingkat,
   type BarisStokAtp, type Sebaran, type PetaBundle,
 } from './atp';
 
@@ -203,9 +203,9 @@ test('ATP keseluruhan dijumlahkan, BUKAN dirata-rata dari persen per area', () =
   // Cabang besar 300 SKU 90%, cabang kecil 2 SKU 0%.
   // Rata-rata persen = 45% (menyesatkan). Jumlah = 270/302 = 89,4%.
   const hasil = [
-    { areaId: 'Besar', dihitung: 300, siap: 270, persen: 90, takDisebar: 0, belumDiputus: 0,
+    { areaId: 'Besar', dihitung: 300, siap: 270, persen: 90, takDisebar: 0, takDisebarTurunan: 0, belumDiputus: 0,
       ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0 }, perKategori: {}, kotor: 0 },
-    { areaId: 'Kecil', dihitung: 2, siap: 0, persen: 0, takDisebar: 0, belumDiputus: 0,
+    { areaId: 'Kecil', dihitung: 2, siap: 0, persen: 0, takDisebar: 0, takDisebarTurunan: 0, belumDiputus: 0,
       ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0 }, perKategori: {}, kotor: 0 },
   ];
   const t = atpKeseluruhan(hasil);
@@ -218,7 +218,7 @@ test('ATP keseluruhan dijumlahkan, BUKAN dirata-rata dari persen per area', () =
 test('cabang berpembagi 0 tidak bisa jadi "terlemah"', () => {
   // Kalau ikut, cabang baru yang belum diisi akan selalu jadi "cabang terlemah"
   // dan menutupi cabang yang benar-benar bermasalah.
-  const kosong = { areaId: 'Bali', dihitung: 0, siap: 0, persen: null, takDisebar: 0,
+  const kosong = { areaId: 'Bali', dihitung: 0, siap: 0, persen: null, takDisebar: 0, takDisebarTurunan: 0,
     belumDiputus: 10, ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0 }, perKategori: {}, kotor: 0 };
   const isi = { ...kosong, areaId: 'Medan', dihitung: 10, siap: 7, persen: 70, belumDiputus: 0 };
   assert.equal(atpKeseluruhan([kosong, isi]).terlemah?.areaId, 'Medan');
@@ -462,4 +462,114 @@ test('qty 0 tidak membuat pembagian nol', () => {
   // percaya begitu saja — data lama di tabel bisa saja memuat 0.
   const h = susunTurunan('BDL-X', peta([['BDL-X', 'KOMP', 0]]), stok([['KOMP', 'Medan', 10]]), ['Medan']);
   assert.equal(h.turunan[0].area.Medan.muat, 10, 'qty <= 0 diperlakukan sebagai 1');
+});
+
+// --------------------------------------------------------------------------
+// Aturan turunan: komponen tidak disebar -> bundling keluar dari pembagi
+// (keputusan user 9 Okt 2026, opsi A)
+// --------------------------------------------------------------------------
+
+const petaB = (isi: [string, string, number][]): PetaBundle => {
+  const m: PetaBundle = new Map();
+  for (const [b, i, q] of isi) { const l = m.get(b) ?? []; l.push({ itemSku: i, qty: q }); m.set(b, l); }
+  return m;
+};
+
+test('komponen "Tidak" di sebuah cabang memblokir bundling DI CABANG ITU SAJA', () => {
+  const b = bundlingTerblokir(
+    petaB([['BDL-X', 'KOMP-A', 1]]),
+    sebaran([['KOMP-A', 'Makassar', false]]),
+    ['Makassar', 'Medan'],
+  );
+  assert.deepEqual(b.get(kunciSebaran('BDL-X', 'Makassar')), ['KOMP-A']);
+  assert.equal(b.has(kunciSebaran('BDL-X', 'Medan')), false, 'Medan tidak ikut terblokir');
+});
+
+test('"Belum diputuskan" TIDAK merambat — hanya "Tidak" yang tegas', () => {
+  // Kalau "Belum" ikut, 4 cabang yang checklist-nya masih kosong akan
+  // mematikan SELURUH bundling sekaligus. Itu kecelakaan, bukan keputusan.
+  const b = bundlingTerblokir(petaB([['BDL-X', 'KOMP-A', 1]]), new Map(), ['Makassar']);
+  assert.equal(b.size, 0);
+});
+
+test('komponen "Ya" tidak memblokir apa pun', () => {
+  const b = bundlingTerblokir(
+    petaB([['BDL-X', 'KOMP-A', 1]]),
+    sebaran([['KOMP-A', 'Makassar', true]]),
+    ['Makassar'],
+  );
+  assert.equal(b.size, 0);
+});
+
+test('SEMUA komponen yang memblokir disebut, bukan yang pertama saja', () => {
+  // Selnya harus bisa menjawab "komponen mana" — kalau cuma satu yang dicatat,
+  // user menyebar ulang satu komponen lalu heran bundling-nya masih mati.
+  const b = bundlingTerblokir(
+    petaB([['BDL-X', 'A', 1], ['BDL-X', 'B', 1], ['BDL-X', 'C', 1]]),
+    sebaran([['A', 'Pusat', false], ['C', 'Pusat', false], ['B', 'Pusat', true]]),
+    ['Pusat'],
+  );
+  assert.deepEqual(b.get(kunciSebaran('BDL-X', 'Pusat')), ['A', 'C']);
+});
+
+test('hitungAtp: bundling terblokir KELUAR dari pembagi, dan dihitung terpisah', () => {
+  const rows = [
+    baris({ sku: 'BDL-X', areaId: 'Pusat', availableQty: 100 }),
+    baris({ sku: 'KOMP-A', areaId: 'Pusat', availableQty: 100 }),
+    baris({ sku: 'BIASA', areaId: 'Pusat', availableQty: 100 }),
+  ];
+  const sb = sebaran([['BDL-X', 'Pusat', true], ['KOMP-A', 'Pusat', false], ['BIASA', 'Pusat', true]]);
+  const blokir = bundlingTerblokir(petaB([['BDL-X', 'KOMP-A', 1]]), sb, ['Pusat']);
+
+  const tanpa = hitungAtp(rows, sb, 5, 'AKTIF')[0];
+  assert.equal(tanpa.dihitung, 2, 'tanpa aturan: BDL-X ikut pembagi');
+  assert.equal(tanpa.takDisebarTurunan, 0);
+
+  const dengan = hitungAtp(rows, sb, 5, 'AKTIF', blokir)[0];
+  assert.equal(dengan.dihitung, 1, 'BDL-X keluar dari pembagi');
+  assert.equal(dengan.siap, 1, 'yang tersisa cuma BIASA');
+  assert.equal(dengan.takDisebar, 2, 'KOMP-A (dicentang) + BDL-X (turunan)');
+  assert.equal(dengan.takDisebarTurunan, 1, 'yang karena turunan dipisah, supaya 1 tidak terbaca 2');
+  assert.equal(dengan.persen, 100);
+});
+
+test('bundling "Belum" TIDAK dipindah ke takDisebar oleh aturan turunan', () => {
+  // Kalau dipindah, ia hilang dari pengingat "belum diatur" tanpa ada orang
+  // yang pernah memutuskannya.
+  const rows = [baris({ sku: 'BDL-X', areaId: 'Pusat', availableQty: 100 })];
+  const sb = sebaran([['KOMP-A', 'Pusat', false]]);
+  const blokir = bundlingTerblokir(petaB([['BDL-X', 'KOMP-A', 1]]), sb, ['Pusat']);
+  const h = hitungAtp(rows, sb, 5, 'AKTIF', blokir)[0];
+  assert.equal(h.belumDiputus, 1);
+  assert.equal(h.takDisebar, 0);
+  assert.equal(h.takDisebarTurunan, 0);
+});
+
+test('bundling yang sudah dicentang "Tidak" tidak dihitung dua kali', () => {
+  const rows = [baris({ sku: 'BDL-X', areaId: 'Pusat', availableQty: 100 })];
+  const sb = sebaran([['BDL-X', 'Pusat', false], ['KOMP-A', 'Pusat', false]]);
+  const blokir = bundlingTerblokir(petaB([['BDL-X', 'KOMP-A', 1]]), sb, ['Pusat']);
+  const h = hitungAtp(rows, sb, 5, 'AKTIF', blokir)[0];
+  assert.equal(h.takDisebar, 1);
+  assert.equal(h.takDisebarTurunan, 0, 'keluar karena dicentang, bukan karena turunan');
+});
+
+test('aturan turunan TIDAK menulis apa pun ke peta sebaran', () => {
+  // Inti opsi A: diturunkan saat hitung, tidak pernah mengubah keputusan orang.
+  const sb = sebaran([['KOMP-A', 'Pusat', false], ['BDL-X', 'Pusat', true]]);
+  const sebelum = JSON.stringify([...sb.entries()].sort());
+  bundlingTerblokir(petaB([['BDL-X', 'KOMP-A', 1]]), sb, ['Pusat']);
+  assert.equal(JSON.stringify([...sb.entries()].sort()), sebelum);
+  assert.equal(sb.get(kunciSebaran('BDL-X', 'Pusat')), true, 'centang bundling tetap Ya');
+});
+
+test('penjaga: belum ada bundling bertingkat (terukur 0 dari 2.028 pada 9 Okt 2026)', () => {
+  // Aturan ini satu lapis. Kalau suatu hari komponen ternyata bundling juga,
+  // rantainya akan terlewat DIAM-DIAM — jadi keadaannya dibuat terlihat.
+  assert.deepEqual(bundlingBertingkat(petaB([['BDL-X', 'KOMP-A', 1], ['BDL-Y', 'KOMP-B', 1]])), []);
+  assert.deepEqual(
+    bundlingBertingkat(petaB([['BDL-LUAR', 'BDL-DALAM', 1], ['BDL-DALAM', 'KOMP', 1]])),
+    ['BDL-LUAR → BDL-DALAM'],
+    'kalau muncul, harus terdeteksi — bukan diabaikan',
+  );
 });

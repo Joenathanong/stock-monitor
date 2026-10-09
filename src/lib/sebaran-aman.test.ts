@@ -81,16 +81,37 @@ test('jalur sinkronisasi stok tidak menyebut atp_share sama sekali', () => {
   );
 });
 
-test('pembersihan di jalur sinkronisasi hanya mengenai stock_current', () => {
+/**
+ * Model yang BOLEH dihapus barisnya di jalur sinkronisasi, berikut alasannya.
+ *
+ * Daftar ini sengaja pendek dan harus ditambah MANUAL. Tes ini pernah gagal
+ * 9 Okt 2026 saat `syncBundle` ditambahkan — dan itu memang gunanya: setiap
+ * penghapusan baru di jalur sinkronisasi harus dibaca orang dulu, bukan lolos
+ * karena polanya mirip yang sudah ada.
+ */
+const HAPUS_DIIZINKAN: Record<string, string> = {
+  // Baris stok yang tidak ada lagi di OCS. Inilah yang membuat SKU yang
+  // dihapus di OCS ikut hilang dari tampilan — diminta user.
+  stockCurrent: 'baris stok yang hilang dari OCS',
+  // Komposisi bundling yang lebih tua dari penarikan ini. Yang dihapus
+  // KOMPOSISI, bukan keputusan sebaran — dan hanya kalau penarikannya ada
+  // isinya (daftar kosong dari OCS tidak pernah menimpa apa pun).
+  bundleItem: 'baris komposisi bundling yang sudah tidak ada di OCS',
+};
+
+test('pembersihan di jalur sinkronisasi hanya mengenai model yang diizinkan', () => {
   const kode = readFileSync(join('src', 'lib', 'sync.ts'), 'utf8');
   const model = [...kode.matchAll(/(\w+)\s*\.\s*deleteMany\s*\(/g)].map((m) => m[1]);
-  const asing = model.filter((m) => m !== 'stockCurrent');
+  const asing = [...new Set(model)].filter((m) => !(m in HAPUS_DIIZINKAN));
   assert.deepEqual(
     asing,
     [],
-    'Ada deleteMany ke model lain di jalur sinkronisasi: ' + asing.join(', ')
-    + '. Pastikan itu memang dimaksudkan sebelum memperbarui daftar izin di tes ini.',
+    'Ada deleteMany ke model yang belum diizinkan di jalur sinkronisasi: ' + asing.join(', ')
+    + '. Baca dulu apa yang dihapusnya, lalu tambahkan ke HAPUS_DIIZINKAN berikut alasannya '
+    + '— jangan dilonggarkan tanpa membacanya.',
   );
+  // Penjaga atas penjaga: `atp_share` tidak boleh pernah masuk daftar izin.
+  assert.ok(!('atpShare' in HAPUS_DIIZINKAN), 'atp_share TIDAK boleh diizinkan dihapus di jalur sinkronisasi');
 });
 
 test('firstSeenAt tidak ikut ditimpa saat Refresh', () => {

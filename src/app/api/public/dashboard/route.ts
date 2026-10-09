@@ -16,6 +16,12 @@ export async function GET(req: Request) {
   const area = new URL(req.url).searchParams.get('area')?.trim() || null;
   const view = await dashboardView(area);
   const res = NextResponse.json({ ok: true, ...view });
-  res.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=1800');
+  // Layar tempel tanpa login dan tanpa tombol Refresh, jadi cache edge masih
+  // masuk akal di sini — tapi jendelanya dipersempit 9 Okt 2026. Yang lama
+  // (5 menit + 30 menit stale) berarti layar gudang bisa menampilkan angka
+  // setengah jam lalu sesudah seseorang menekan Refresh di aplikasi, dan di
+  // layar itu TIDAK ADA cara mengetahuinya. Satu menit cukup untuk menahan
+  // beban, dan tidak cukup lama untuk membuat orang salah membaca.
+  res.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
   return res;
 }

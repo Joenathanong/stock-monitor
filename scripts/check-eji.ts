@@ -1,5 +1,6 @@
 import './env';
 import { tarikStokEji, whsPemasok, bacaCookieEnv, masukEjiRinci } from '../src/lib/eji';
+import { prisma } from '../src/lib/prisma';
 
 /**
  * Uji sambungan ke stok gudang pemasok EJI. HANYA MEMBACA — tidak menulis ke
@@ -35,9 +36,26 @@ function jelaskanGalat(e: unknown): string[] {
   return [pesan];
 }
 
+/**
+ * Urutan gudang yang BENAR-BENAR dipakai produksi: pengaturan dulu, baru env.
+ *
+ * Dibaca di sini juga supaya diagnosa ini tidak pernah melaporkan urutan yang
+ * berbeda dari yang dipakai Sugest PO — laporan yang menyesatkan lebih buruk
+ * daripada tidak ada laporan. Tetap HANYA MEMBACA.
+ */
+async function urutanGudang(): Promise<{ whs: string[]; dari: string }> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: 'po_whs_order' } });
+    const nilai = String(row?.value ?? '').trim();
+    if (nilai) return { whs: whsPemasok(nilai), dari: 'pengaturan po_whs_order' };
+  } catch { /* DB belum siap — env tetap jalan */ }
+  return { whs: whsPemasok(), dari: process.env.EJI_WHS ? 'env EJI_WHS' : 'bawaan kode' };
+}
+
 async function main() {
   // Bentuk EJI_COOKIE diperiksa lebih dulu supaya salah tempel ketahuan di sini.
   bacaCookieEnv(process.env.EJI_COOKIE);
+  const { whs: daftarWhs, dari: asalWhs } = await urutanGudang();
 
   const l = await masukEjiRinci();
   console.log('\nLangkah login:');
@@ -50,8 +68,8 @@ async function main() {
     return;
   }
 
-  const r = await tarikStokEji({ cookie: l.cookie });
-  console.log(`\nGudang: ${whsPemasok().join(', ')} (urut prioritas)`);
+  const r = await tarikStokEji({ cookie: l.cookie, whs: daftarWhs });
+  console.log(`\nGudang: ${daftarWhs.join(', ')} (urut prioritas, dari ${asalWhs})`);
   console.log(`${n(r.rows.length)} baris terbaca dari ${n(r.total)} yang dilaporkan API${r.sebagian ? ' — SEBAGIAN' : ''}.\n`);
 
   const adaSaldo = r.rows.filter((x) => x.bal > 0);
@@ -67,7 +85,7 @@ async function main() {
     perWhs.set(x.supplierWhs, e);
   }
   console.log('\nPer gudang:');
-  for (const w of whsPemasok()) {
+  for (const w of daftarWhs) {
     const e = perWhs.get(w);
     console.log(`  ${w.padEnd(8)} ${e ? `${n(e.baris)} kode, total BAL ${n(e.qty)}` : 'TIDAK ADA barisnya'}`);
   }
@@ -102,4 +120,4 @@ main().catch((e) => {
   for (const baris of jelaskanGalat(e)) console.error(`  ${baris}`);
   console.error('');
   process.exitCode = 1;
-});
+}).finally(() => prisma.$disconnect());

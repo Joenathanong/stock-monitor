@@ -14,8 +14,9 @@
 import { prisma } from './prisma';
 import { toDateKeyUtc } from './dates';
 import {
-  AMBANG_ATP_BAWAAN, kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan,
+  AMBANG_ATP_BAWAAN, kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan, skuBelumDiset,
   type BarisStokAtp, type Sebaran, type HasilArea, type SebabTolak, type SaringAktif,
+  type SkuBelumDiset,
 } from './atp';
 
 /** Benar kalau tabel ATP-nya belum dibuat (db:push belum dijalankan). */
@@ -55,10 +56,11 @@ export async function muatStokAtp(): Promise<BarisAtp[]> {
   const rows = await prisma.$queryRawUnsafe<{
     sku: string; areaId: string; name: string; availableQty: number;
     isActive: number | boolean; category: string | null; sapCode: string | null;
+    firstSeenAt: Date | string | null;
     brand: string | null; brandManual: number | boolean | null;
   }[]>(
     'SELECT s.sku, s.areaId, s.name, s.availableQty, s.isActive, s.category, s.sapCode, '
-    + 'b.brand AS brand, b.manual AS brandManual '
+    + 's.firstSeenAt, b.brand AS brand, b.manual AS brandManual '
     + 'FROM stock_current s LEFT JOIN sku_brand b ON b.sku = s.sku '
     + 'ORDER BY s.sku, s.areaId',
   );
@@ -71,6 +73,7 @@ export async function muatStokAtp(): Promise<BarisAtp[]> {
       isActive: Boolean(r.isActive),
       category: r.category,
       sapCode: r.sapCode,
+      firstSeenAt: r.firstSeenAt ? new Date(r.firstSeenAt).toISOString() : '',
       brand: String(r.brand ?? ''),
       brandManual: Boolean(r.brandManual),
     }));
@@ -246,6 +249,14 @@ export type MuatAtp = {
      * dan dua hal itu butuh tindakan yang sama sekali berbeda.
      */
     lain: Record<string, 'AKTIF' | 'NONAKTIF'>;
+    /**
+     * Jumlah available SELURUH area yang barisnya tampil.
+     *
+     * Ada supaya tabel bisa diurutkan menurut stok (permintaan user 8 Okt 2026):
+     * kolom cabang nilai sortnya adalah TEKS keputusan ("Ya"/"Tidak"/"Belum"),
+     * jadi mengurutkannya tidak pernah mengurutkan angkanya.
+     */
+    stokTotal: number;
     /** Per area: keadaan SKU ini di sana. */
     area: Record<string, {
       /** true/false = sudah diputuskan; null = belum. */
@@ -269,6 +280,13 @@ export type MuatAtp = {
   saring: SaringAktif;
   /** Jumlah BARIS (sku × area) per status, untuk label tombol filter. */
   cacah: { aktif: number; nonaktif: number; semua: number };
+  /**
+   * SKU yang belum pernah diputuskan sebarannya — dasar pengingat di /atp.
+   *
+   * Dihitung dari SELURUH baris, bukan baris yang tampil: kalau ikut filter,
+   * memasang filter apa pun akan menyembunyikan pengingatnya.
+   */
+  baru: SkuBelumDiset[];
 };
 
 /**
@@ -314,7 +332,7 @@ export async function muatAtp(
     if (!b) {
       b = {
         sku: r.sku, name: r.name, brand: r.brand, brandManual: r.brandManual,
-        kategori: String(r.category ?? ''), area: {}, lain: {},
+        kategori: String(r.category ?? ''), stokTotal: 0, area: {}, lain: {},
       };
       perSku.set(r.sku, b);
     }
@@ -332,6 +350,7 @@ export async function muatAtp(
       tolak: k.layak ? null : k.sebab!,
       note: catatan.get(kunciSebaran(r.sku, r.areaId))?.note ?? '',
     };
+    b.stokTotal += r.availableQty;
   }
 
   // Tandai area yang BARISNYA ADA tapi tersaring keluar. Dibaca dari `rows`
@@ -358,6 +377,10 @@ export async function muatAtp(
   return {
     areas, sku, hasil, keseluruhan, ambang, siap, tanpaBrand, saring,
     cacah: { aktif: jumlahAktif, nonaktif: rows.length - jumlahAktif, semua: rows.length },
+    // 'AKTIF' ditulis tegas: yang perlu diputuskan hanya yang benar-benar bisa
+    // dijanjikan. Memakai `saring` akan membuat pengingatnya berubah isi tiap
+    // kali filter tampilan digeser.
+    baru: skuBelumDiset(rows, sebaran, 'AKTIF'),
   };
 }
 

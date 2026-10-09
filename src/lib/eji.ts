@@ -16,8 +16,8 @@
  *
  * Gudang: `GBJD2` ("Bitung - Gudang Barang Jadi 2") lalu `GBJD`
  * ("Bitung - Gudang Barang Jadi") — KEDUANYA diambil, dan URUTANNYA berarti:
- * GBJD2 diperiksa lebih dulu (keputusan user 2 Okt 2026). Diatur lewat `EJI_WHS`,
- * tidak dengan mengubah kode.
+ * GBJD2 diperiksa lebih dulu (keputusan user 2 Okt 2026). Diatur lewat
+ * pengaturan `po_whs_order` atau env `EJI_WHS`, tidak dengan mengubah kode.
  *
  * KREDENSIAL: hanya nama env. Nilainya diisi user di `.env` dan di Vercel, dan
  * tidak pernah ditulis ke berkas repo mana pun.
@@ -30,7 +30,8 @@
  *                                login TIDAK bisa dibaca saat sesi aktif
  *                                (mengembalikan 200 tanpa form), jadi ini
  *                                dibuat bisa diatur daripada ditebak di kode.
- *   EJI_WHS                      gudang yang diambil; bawaan "GBJD"
+ *   EJI_WHS                      gudang yang diambil; bawaan "GBJD2,GBJD".
+ *                                Pengaturan `po_whs_order` menimpa env ini.
  */
 import { isiBoxDariNama } from './receive';
 
@@ -39,13 +40,23 @@ const BASIS = process.env.EJI_BASE_URL || 'https://web.eji.co.id';
 /**
  * Gudang pemasok yang diambil, URUT PRIORITAS.
  *
- * Urutan di `EJI_WHS` BERARTI: yang pertama diperiksa lebih dulu saat Sugest PO.
+ * Urutannya BERARTI: yang pertama dihabiskan lebih dulu saat Sugest PO.
  * Keputusan user 2 Okt 2026: GBJD2 dulu, lalu GBJD — dan gudang menentukan lebih
  * dulu daripada kode (lihat `whsPriority` di openpo.ts).
+ *
+ * Tiga lapis, yang pertama ada yang menang:
+ *   1. pengaturan `po_whs_order` (halaman Pengaturan) — lewat argumen ini,
+ *      supaya modul ini tetap tanpa database;
+ *   2. env `EJI_WHS` (butuh deploy ulang);
+ *   3. bawaan `GBJD2,GBJD`.
+ *
+ * Dibuat begini 8 Okt 2026 atas permintaan user: urutan gudang akan berubah
+ * lagi di kemudian hari, jadi harus bisa diubah tanpa deploy.
  */
-export const whsPemasok = (): string[] => {
-  const dari = (process.env.EJI_WHS || 'GBJD2,GBJD')
-    .split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
+export const whsPemasok = (dariSetting?: string | string[] | null): string[] => {
+  const teks = Array.isArray(dariSetting) ? dariSetting.join(',') : (dariSetting ?? '');
+  const sumber = teks.trim() || process.env.EJI_WHS || 'GBJD2,GBJD';
+  const dari = sumber.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
   // Duplikat dibuang tapi urutan pertama dipertahankan — urutan itu prioritas.
   return [...new Set(dari)];
 };

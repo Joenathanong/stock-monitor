@@ -14,8 +14,26 @@ import { prisma } from '../src/lib/prisma';
  */
 const BATCH = 500;
 
-tarikStokEji()
-  .then(async (r) => {
+/**
+ * Urutan gudang: PENGATURAN dulu, baru env.
+ *
+ * Harus sama persis dengan yang dipakai Sugest PO, kalau tidak penarikan dan
+ * perhitungan bekerja dengan daftar gudang yang berbeda — dan selisihnya akan
+ * terbaca sebagai "gudangnya kosong", bukan sebagai salah pengaturan.
+ */
+async function urutanGudang(): Promise<string[]> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: 'po_whs_order' } });
+    return whsPemasok(row?.value ?? '');
+  } catch {
+    // Tabel pengaturan belum ada / DB belum siap — env tetap jalan.
+    return whsPemasok();
+  }
+}
+
+urutanGudang()
+  .then(async (whs) => ({ whs, r: await tarikStokEji({ whs }) }))
+  .then(async ({ whs, r }) => {
     const now = new Date();
     for (let i = 0; i < r.rows.length; i += BATCH) {
       const chunk = r.rows.slice(i, i + BATCH);
@@ -35,7 +53,7 @@ tarikStokEji()
 
     let dihapus = 0;
     if (!r.sebagian) {
-      for (const w of whsPemasok()) {
+      for (const w of whs) {
         dihapus += await prisma.$executeRawUnsafe(
           'DELETE FROM `supplier_stock` WHERE `supplierWhs` = ? AND `pulledAt` < ?', w, now,
         );
@@ -43,7 +61,7 @@ tarikStokEji()
     }
 
     console.log(
-      `\n${r.rows.length.toLocaleString('id-ID')} baris ditulis untuk gudang ${whsPemasok().join(', ')}`
+      `\n${r.rows.length.toLocaleString('id-ID')} baris ditulis untuk gudang ${whs.join(', ')} (urut prioritas)`
       + `${r.sebagian ? ' (SEBAGIAN — pembersihan dilewati supaya saldo lama tidak hilang)' : ` · ${dihapus} baris lama dihapus`}\n`,
     );
   })

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   AMBANG_ATP_BAWAAN, PRIORITAS_BRAND, brandMenang, adalahBundle, skuKotor,
   kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan, persenTeks,
-  petaBrand,
+  petaBrand, skuBelumDiset,
   type BarisStokAtp, type Sebaran,
 } from './atp';
 
@@ -293,4 +293,64 @@ test('petaBrand: prioritas bisa diganti tanpa mengubah kode', () => {
     ['NCO', 'Hanasui'],
   );
   assert.equal(h.brand.get('X'), 'NCO');
+});
+
+// --------------------------------------------------------------------------
+// skuBelumDiset — pengingat "produk baru belum diset di list ATP" (8 Okt 2026)
+// --------------------------------------------------------------------------
+
+const brs = (sku: string, areaId: string, o: Partial<BarisStokAtp> = {}): BarisStokAtp =>
+  baris({ sku, areaId, category: 'Sku', isActive: true, availableQty: 10, ...o });
+
+test('skuBelumDiset: SKU tanpa keputusan di semua area terlapor', () => {
+  const rows = [brs('A', 'Pusat'), brs('A', 'Medan'), brs('B', 'Pusat')];
+  const sebaran: Sebaran = new Map([[kunciSebaran('B', 'Pusat'), false]]);
+  const h = skuBelumDiset(rows, sebaran);
+  assert.deepEqual(h.map((x) => x.sku), ['A']);
+  assert.deepEqual(h[0].areas, ['Medan', 'Pusat'], 'area dirapikan & diurutkan');
+});
+
+test('skuBelumDiset: SATU keputusan saja sudah membuat SKU-nya hilang dari daftar', () => {
+  // "Tidak" pun keputusan. Daftar ini harus bisa mengosongkan dirinya sendiri,
+  // kalau tidak ia jadi peringatan yang selalu menyala lalu diabaikan.
+  const rows = [brs('A', 'Pusat'), brs('A', 'Medan')];
+  for (const nilai of [true, false]) {
+    const sebaran: Sebaran = new Map([[kunciSebaran('A', 'Medan'), nilai]]);
+    assert.deepEqual(skuBelumDiset(rows, sebaran), [], `putusan ${nilai} di satu area`);
+  }
+});
+
+test('skuBelumDiset: yang nonaktif atau di luar kategori TIDAK diminta diputuskan', () => {
+  const rows = [
+    brs('A', 'Pusat', { isActive: false }),
+    brs('B', 'Pusat', { category: 'Lain' }),
+    brs('C', 'Pusat'),
+  ];
+  assert.deepEqual(skuBelumDiset(rows, new Map()).map((x) => x.sku), ['C']);
+});
+
+test('skuBelumDiset: terbaru di atas, yang tanpa tanggal paling bawah', () => {
+  const rows = [
+    brs('LAMA', 'Pusat', { firstSeenAt: '2026-01-01T00:00:00.000Z' }),
+    brs('BARU', 'Pusat', { firstSeenAt: '2026-10-07T00:00:00.000Z' }),
+    brs('KOSONG', 'Pusat'),
+  ];
+  assert.deepEqual(skuBelumDiset(rows, new Map()).map((x) => x.sku), ['BARU', 'LAMA', 'KOSONG']);
+});
+
+test('skuBelumDiset: firstSeenAt yang dipakai PALING AWAL dari barisnya', () => {
+  // Satu SKU bisa muncul di Pusat bulan lalu dan di Medan kemarin. "Terlihat
+  // sejak" harus menjawab kapan ia mulai ada, bukan kapan cabang terakhir ikut.
+  const rows = [
+    brs('A', 'Medan', { firstSeenAt: '2026-10-07T00:00:00.000Z' }),
+    brs('A', 'Pusat', { firstSeenAt: '2026-09-01T00:00:00.000Z' }),
+  ];
+  assert.equal(skuBelumDiset(rows, new Map())[0].firstSeenAt, '2026-09-01T00:00:00.000Z');
+});
+
+test('skuBelumDiset: daftarnya tidak terpengaruh ambang maupun jumlah stok', () => {
+  // Stok 0 tetap perlu diputuskan — justru itu yang paling perlu, karena
+  // "disebar tapi kosong" adalah angka yang menurunkan ATP.
+  const rows = [brs('A', 'Pusat', { availableQty: 0 })];
+  assert.deepEqual(skuBelumDiset(rows, new Map()).map((x) => x.sku), ['A']);
 });

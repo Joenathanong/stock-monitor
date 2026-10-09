@@ -61,6 +61,17 @@ export const DEFAULT_SETTINGS = {
   price_source: 'MIN',          // MIN | MAX | AVG dari SalePrice antar marketplace
   price_refresh_hours: 12,      // harga master jarang berubah; jangan tarik tiap Refresh
 
+  // --- Sugest PO (gudang pemasok EJI) ---
+  // Urutan gudang BERARTI: yang pertama dihabiskan dulu, baru pindah ke
+  // berikutnya. Dulu hanya bisa diubah lewat env `EJI_WHS` (butuh deploy);
+  // sejak 8 Okt 2026 bisa diubah dari halaman Pengaturan. Kosong = pakai env.
+  po_whs_order: 'GBJD2,GBJD',
+  // Toleransi pembulatan karton (keputusan user 8 Okt 2026): boleh melewati
+  // batas DOI max maksimal N karton, DAN hanya kalau satu kartonnya tidak
+  // lebih dari `po_lipat_maks` x kebutuhan. 0 = tanpa toleransi (batas keras).
+  po_toleransi_ctn: 1,
+  po_lipat_maks: 2,
+
   // --- Poster WhatsApp (/wa) — satu gambar berisi 5 area; ukurannya `KANVAS` ---
   // Blok mana yang ikut digambar. Dimatikan = kartunya lebih lega, bukan kosong:
   // tata letak poster menyesuaikan sendiri.
@@ -107,6 +118,15 @@ export type DoiSettings = {
   /** Tarik barang dalam perjalanan dari OCS? Bawaan: ya. */
   transitEnabled: boolean;
   transitRefreshHours: number;
+  /**
+   * Gudang pemasok EJI, URUT PRIORITAS — yang pertama dihabiskan dulu.
+   * Kosong = pakai env `EJI_WHS`, lalu bawaan di `eji.ts`.
+   */
+  poWhsOrder: string[];
+  /** Berapa karton boleh melewati batas DOI max. 0 = batas keras. */
+  poToleransiCtn: number;
+  /** Toleransi hanya berlaku bila isi 1 karton <= N x kebutuhan. 0 = tanpa syarat. */
+  poLipatMaks: number;
   salesSyncLookbackDays: number;
   salesIncludeReady: boolean;
   salesIncludeReturn: boolean;
@@ -175,6 +195,9 @@ export function toDoiSettings(raw: SettingsMap = {}): DoiSettings {
     priceRefreshHours: Math.max(0, num(raw, 'price_refresh_hours')),
     transitEnabled: bool(raw, 'transit_enabled'),
     transitRefreshHours: Math.max(0, num(raw, 'transit_refresh_hours')),
+    poWhsOrder: str(raw, 'po_whs_order').split(',').map((v) => v.trim().toUpperCase()).filter(Boolean),
+    poToleransiCtn: Math.max(0, Math.trunc(num(raw, 'po_toleransi_ctn'))),
+    poLipatMaks: Math.max(0, num(raw, 'po_lipat_maks')),
     salesSyncLookbackDays: Math.max(1, num(raw, 'sales_sync_lookback_days')),
     salesIncludeReady: bool(raw, 'sales_include_ready'),
     salesIncludeReturn: bool(raw, 'sales_include_return'),

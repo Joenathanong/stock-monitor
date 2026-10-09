@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hitungBaris, hitungSemua, urutKemendesakan, type BarisOpenPo, type KodeSumber } from './openpo';
+import { hitungBaris, hitungSemua, urutKemendesakan, urutanAbc, type BarisOpenPo, type KodeSumber } from './openpo';
 
 /** Kode sumber: prioritas 1 = 122 (wadah IEG), prioritas 2 = 120 (wadah EJI). */
 const k = (sapCode: string, priority: number, perCtn: number, saldo: number): KodeSumber =>
@@ -318,11 +318,24 @@ test('karton melewati max TAPI DOI tipis → tetap dikirim, dan ditandai', () =>
   assert.match(r.keterangan, /tetap dikirim/);
 });
 
-test('maxQty membulatkan TURUN kalau masih ada karton yang masuk', () => {
-  // Kebutuhan 350 (DI BAWAH max, supaya yang diuji benar-benar aturan max),
-  // karton 144, max 400 -> bulat naik = 3 ctn (432) lewat max;
-  // yang masuk = floor(400/144) = 2 ctn = 288.
+test('toleransi 1 karton: kebutuhan DIPENUHI walau melewati DOI max sedikit', () => {
+  // KEPUTUSAN USER 8 Okt 2026. Kebutuhan 350, karton 144, max 400.
+  // Bulat naik = 3 ctn = 432 -> lewat 32 pcs dari batas 400, kurang dari satu
+  // karton, dan 144 <= 2x350. Jadi dikirim penuh, bukan 288 (kurang 62).
   const r = hitungBaris(satuSumber({ need: 350, perCtn: 144, saldo: 100000, maxQty: 400 }));
+  assert.equal(r.qtyTotal, 432);
+  assert.equal(r.ctnTotal, 3);
+  assert.equal(r.kurang, 0, 'kebutuhan terpenuhi, tidak ada yang tertinggal');
+  assert.equal(r.alasan, 'TOLERANSI_DOI_MAX');
+  assert.match(r.keterangan, /lebih 32 pcs dari batas 400/, 'kelebihannya disebut, tidak disembunyikan');
+});
+
+test('toleransi dimatikan (po_toleransi_ctn = 0) → batas DOI max jadi keras lagi', () => {
+  // Perilaku lama masih bisa didapat dari Pengaturan, bukan hilang.
+  const r = hitungBaris(
+    satuSumber({ need: 350, perCtn: 144, saldo: 100000, maxQty: 400 }),
+    { toleransiCtn: 0 },
+  );
   assert.equal(r.qtyTotal, 288);
   assert.equal(r.ctnTotal, 2);
   assert.equal(r.alasan, 'DIBATASI_DOI_MAX');
@@ -330,11 +343,45 @@ test('maxQty membulatkan TURUN kalau masih ada karton yang masuk', () => {
   assert.match(r.keterangan, /DOI max \(batas 400 pcs\)/);
 });
 
+test('toleransi TIDAK berlaku kalau kartonnya lebih dari 2x kebutuhan', () => {
+  // Syarat kedua yang menahan kasus Naturgo: 1000 pcs/karton untuk kebutuhan
+  // 50 bukan "lewat sedikit", itu 20x. Toleransi berapa pun tidak menolongnya.
+  const r = hitungBaris(
+    satuSumber({ need: 50, perCtn: 1000, saldo: 300000, maxQty: 400 }),
+    { toleransiCtn: 5 },
+  );
+  assert.equal(r.qtyTotal, 0);
+  assert.equal(r.alasan, 'KARTON_LEBIH_DARI_MAX');
+  assert.match(r.keterangan, /di luar toleransi 2x/);
+});
+
+test('toleransi jatahnya PER BARIS, bukan per kode', () => {
+  // Dua kode, masing-masing butuh dibulatkan naik. Kalau jatahnya per kode,
+  // keduanya ikut lewat batas dan kelebihan jadi dua karton.
+  const r = hitungBaris({
+    groupKey: 'G', sku: 'SKU', name: 'X', areaId: 'PUSAT',
+    need: 200, status: 'OK', doi: 20, maxQty: 100,
+    kode: [
+      { sapCode: 'A', priority: 1, perCtn: 30, saldo: 60 },    // 2 ctn = 60
+      { sapCode: 'B', priority: 2, perCtn: 50, saldo: 10000 },
+    ],
+  });
+  // plafon = max(100, 200) = 200. A: ingin ceil(200/30)=7 tapi stok 2 -> 60.
+  // B: sisa 140 -> ingin 3 ctn (150); masuk plafon floor(140/50)=2 (100);
+  // jatah toleransi 1 -> 3 ctn = 150. Total 210, lewat 10 dari plafon 200.
+  assert.equal(r.qtyTotal, 210);
+  assert.equal(r.alasan, 'TOLERANSI_DOI_MAX');
+  assert.match(r.keterangan, /1 karton/, 'satu karton saja, bukan dua');
+});
+
 test('kalau plafon berasal dari KEBUTUHAN, keterangannya tidak boleh bilang "DOI max <angka>"', () => {
   // need 500 > maxQty 400 -> plafon = 500, hasilnya 3 ctn = 432 pcs, yang
   // JELAS di atas 400. Versi pertama perbaikan ini menulis "agar tidak
   // melewati DOI max (batas 400 pcs)" untuk hasil 432 — pesan yang berbohong.
-  const r = hitungBaris(satuSumber({ need: 500, perCtn: 144, saldo: 100000, maxQty: 400 }));
+  const r = hitungBaris(
+    satuSumber({ need: 500, perCtn: 144, saldo: 100000, maxQty: 400 }),
+    { toleransiCtn: 0 },   // yang diuji di sini PESANNYA, jadi toleransi dimatikan
+  );
   assert.equal(r.qtyTotal, 432);
   assert.equal(r.alasan, 'DIBATASI_DOI_MAX');
   assert.doesNotMatch(r.keterangan, /melewati DOI max \(batas 400 pcs\)/);
@@ -361,4 +408,55 @@ test('maxQty tidak berlaku kalau isi karton tidak diketahui', () => {
   });
   assert.equal(r.alasan, 'TANPA_ISI_KARTON', 'jalur pcs tidak menebak karton maupun plafon');
   assert.equal(r.qtyTotal, 50);
+});
+
+// ---------------------------------------------------------------------------
+// Urutan pelayanan saldo: kemendesakan dulu, ABC pemecah seri (8 Okt 2026)
+// ---------------------------------------------------------------------------
+
+const brsAbc = (o: { sku: string; status?: string; abc?: string; doi?: number; need?: number }): BarisOpenPo => ({
+  groupKey: o.sku, sku: o.sku, name: o.sku, areaId: 'PUSAT',
+  need: o.need ?? 100, status: o.status ?? 'OK', doi: o.doi ?? 20, abc: o.abc,
+  kode: [],
+});
+
+test('ABC mengurutkan DI DALAM status yang sama', () => {
+  const urut = [
+    brsAbc({ sku: 'C1', status: 'LOW', abc: 'C' }),
+    brsAbc({ sku: 'A1', status: 'LOW', abc: 'A' }),
+    brsAbc({ sku: 'B1', status: 'LOW', abc: 'B' }),
+  ].sort(urutKemendesakan).map((r) => r.sku);
+  assert.deepEqual(urut, ['A1', 'B1', 'C1']);
+});
+
+test('kelas C yang CRITICAL tetap dilayani sebelum kelas A yang aman', () => {
+  // Inilah sebabnya ABC ditaruh SESUDAH status, bukan sebelumnya. Kalau
+  // dibalik, barang pelan akan dibiarkan benar-benar kosong di cabang.
+  const urut = [
+    brsAbc({ sku: 'AMAN-A', status: 'OK', abc: 'A' }),
+    brsAbc({ sku: 'KRITIS-C', status: 'CRITICAL', abc: 'C' }),
+  ].sort(urutKemendesakan).map((r) => r.sku);
+  assert.deepEqual(urut, ['KRITIS-C', 'AMAN-A']);
+});
+
+test('kelas yang belum ada ditaruh paling akhir, bukan dianggap A', () => {
+  assert.equal(urutanAbc('A'), 0);
+  assert.equal(urutanAbc('c'), 2, 'huruf kecil tetap terbaca');
+  assert.equal(urutanAbc(''), 9);
+  assert.equal(urutanAbc(undefined), 9);
+  assert.equal(urutanAbc('Z'), 9);
+  const urut = [
+    brsAbc({ sku: 'TANPA', status: 'LOW' }),
+    brsAbc({ sku: 'C1', status: 'LOW', abc: 'C' }),
+  ].sort(urutKemendesakan).map((r) => r.sku);
+  assert.deepEqual(urut, ['C1', 'TANPA']);
+});
+
+test('ABC sama → DOI terkecil, lalu kebutuhan terbesar (urutan lama tetap)', () => {
+  const urut = [
+    brsAbc({ sku: 'DOI-9', status: 'LOW', abc: 'A', doi: 9 }),
+    brsAbc({ sku: 'DOI-2', status: 'LOW', abc: 'A', doi: 2 }),
+    brsAbc({ sku: 'DOI-2-BESAR', status: 'LOW', abc: 'A', doi: 2, need: 500 }),
+  ].sort(urutKemendesakan).map((r) => r.sku);
+  assert.deepEqual(urut, ['DOI-2-BESAR', 'DOI-2', 'DOI-9']);
 });

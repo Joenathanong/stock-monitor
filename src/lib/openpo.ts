@@ -35,6 +35,34 @@
 export const STATUS_TIPIS = new Set(['CRITICAL', 'LOW']);
 
 /**
+ * Toleransi pembulatan karton — KEPUTUSAN USER 8 Okt 2026.
+ *
+ * Masalahnya: kebutuhan hampir tidak pernah pas sekelipatan karton, jadi
+ * "full karton" selalu menabrak salah satu dari dua batas. Membulatkan TURUN
+ * berarti barang dikirim kurang padahal gudang punya; membulatkan NAIK tanpa
+ * batas pernah menyarankan 1000 pcs untuk kebutuhan 50 (Naturgo).
+ *
+ * Yang disetujui user:
+ *   "boleh melebihi Aman maksimal 1 karton, DAN karton <= 2x kebutuhan"
+ *
+ * Dua syarat, keduanya harus terpenuhi:
+ *   `ctn`    — berapa karton boleh melewati batas DOI max. 0 = batas keras.
+ *   `lipat`  — toleransi hanya berlaku bila isi 1 karton <= lipat x kebutuhan.
+ *              Inilah yang menahan kasus Naturgo: 1000 > 2 x 50, jadi tidak
+ *              ditoleransi dan tetap dilaporkan untuk diputuskan orang.
+ *
+ * Bisa diubah dari halaman Pengaturan (`po_toleransi_ctn`, `po_lipat_maks`).
+ */
+export const TOLERANSI_BAWAAN = { ctn: 1, lipat: 2 } as const;
+
+export type OpsiPo = {
+  /** Berapa karton boleh melewati batas DOI max. Bawaan 1. */
+  toleransiCtn?: number;
+  /** Isi 1 karton maksimal N x kebutuhan agar boleh ditoleransi. Bawaan 2. 0 = tanpa syarat. */
+  lipatMaks?: number;
+};
+
+/**
  * Satu SUMBER barang = satu kode SAP di satu gudang pemasok.
  *
  * Sejak 2 Okt 2026 ada dua gudang (GBJD2 dan GBJD), jadi satu kode SAP bisa
@@ -83,6 +111,19 @@ export type BarisOpenPo = {
   status: string;
   /** DOI acuan — dipakai mengurutkan kemendesakan saat saldo terbatas. */
   doi: number | null;
+  /**
+   * Kelas ABC dari mesin DOI (`assignAbc`): 'A' | 'B' | 'C'. Kosong = belum ada.
+   *
+   * KEPUTUSAN USER 8 Okt 2026: ABC jadi PEMECAH SERI, bukan penentu utama.
+   * Kemendesakan tetap di depan — SKU kelas C yang sudah CRITICAL tidak boleh
+   * kehilangan kartonnya ke SKU kelas A yang masih aman. Di dalam status yang
+   * sama, kelas A dilayani lebih dulu.
+   *
+   * Angkanya dihitung ulang tiap kali mesin DOI jalan, dari penjualan jendela
+   * Opsi 1 — jadi kelas sebuah SKU ikut berubah sendiri kalau penjualannya
+   * berubah. Tidak ada yang perlu dipelihara tangan.
+   */
+  abc?: string;
   /** Kode sumber, urutan bebas: modul ini yang mengurutkannya menurut priority. */
   kode: KodeSumber[];
   /**
@@ -111,6 +152,7 @@ export type AlasanPo =
   | 'TIDAK_PERLU'        // kebutuhan ≤ 0
   | 'TANPA_ISI_KARTON'   // isi karton tidak diketahui → dikirim apa adanya
   | 'DIBATASI_DOI_MAX'   // dibulatkan TURUN supaya tidak melewati DOI max
+  | 'TOLERANSI_DOI_MAX'  // dibulatkan NAIK dan melewati batas, masih dalam toleransi
   | 'KARTON_LEBIH_DARI_MAX'; // 1 karton saja sudah melewati DOI max
 
 /** Berapa yang diambil dari satu kode. */
@@ -165,7 +207,7 @@ const labelSumber = (k: { sapCode: string; supplierWhs?: string }) =>
   (k.supplierWhs ? `${k.supplierWhs}/${k.sapCode}` : k.sapCode);
 
 /** Hitung saran untuk SATU baris. Murni, tidak menyentuh apa pun di luar. */
-export function hitungBaris(b: BarisOpenPo): HasilOpenPo {
+export function hitungBaris(b: BarisOpenPo, opsi: OpsiPo = {}): HasilOpenPo {
   const need = bulat(b.need);
   const kode = urutKode(b.kode ?? []);
   const totalSaldo = kode.reduce((a, k) => a + k.saldo, 0);
@@ -218,21 +260,37 @@ export function hitungBaris(b: BarisOpenPo): HasilOpenPo {
   // min dan DOI max tidak boleh saling mengunci sampai tidak ada yang dikirim.
   const plafon = adaBatas ? Math.max(maxQty, need) : Infinity;
 
+  // Toleransi pembulatan (lihat TOLERANSI_BAWAAN). Jatahnya PER BARIS, bukan
+  // per kode: "melebihi maksimal 1 karton" berarti satu karton untuk seluruh
+  // baris, bukan satu karton untuk setiap kode yang ikut dipakai.
+  const toleransiCtn = Math.max(0, Math.trunc(opsi.toleransiCtn ?? TOLERANSI_BAWAAN.ctn));
+  const lipatMaks = Math.max(0, Number(opsi.lipatMaks ?? TOLERANSI_BAWAAN.lipat));
+  let jatahToleransi = adaBatas ? toleransiCtn : 0;
+
   const ambil: AmbilKode[] = [];
   let sisa = need;
-  let dibatasi = false;   // pernah dibulatkan TURUN karena plafon
+  let dibatasi = false;    // pernah dibulatkan TURUN karena plafon
+  let ditoleransi = 0;     // karton yang sengaja dibiarkan melewati plafon
   for (const k of kode) {
     if (sisa <= 0 || k.perCtn <= 0) continue;
     const sudah = ambil.reduce((a, x) => a + x.qty, 0);
     const naik = Math.ceil(sisa / k.perCtn);               // "full box", bulat naik
     const adaStok = Math.floor(k.saldo / k.perCtn);        // yang benar-benar ada
+    const inginkan = Math.min(naik, adaStok);              // tanpa plafon, sebanyak ini
     // Karton yang masih masuk plafon. Kalau bulat-naik melewatinya, pakai yang
     // masih masuk — itulah "bulat TURUN" yang dimaksud.
     const masukPlafon = plafon === Infinity
       ? naik
       : Math.floor(Math.max(0, plafon - sudah) / k.perCtn);
-    const ctn = Math.min(naik, adaStok, masukPlafon);
-    if (ctn < Math.min(naik, adaStok)) dibatasi = true;
+    let ctn = Math.min(inginkan, masukPlafon);
+    // Kurang dari yang dibutuhkan HANYA karena plafon? Pakai jatah toleransi —
+    // tapi cuma kalau kartonnya tidak jauh lebih besar dari kebutuhan.
+    if (ctn < inginkan && jatahToleransi > 0) {
+      const bolehLipat = lipatMaks <= 0 || k.perCtn <= lipatMaks * need;
+      const tambah = bolehLipat ? Math.min(jatahToleransi, inginkan - ctn) : 0;
+      if (tambah > 0) { ctn += tambah; jatahToleransi -= tambah; ditoleransi += tambah; }
+    }
+    if (ctn < inginkan) dibatasi = true;
     if (ctn <= 0) continue;
     const qty = ctn * k.perCtn;
     ambil.push({ sapCode: k.sapCode, supplierWhs: k.supplierWhs, perCtn: k.perCtn, ctn, qty });
@@ -257,6 +315,19 @@ export function hitungBaris(b: BarisOpenPo): HasilOpenPo {
           ? `Dibulatkan turun agar tidak melewati DOI max (batas ${maxQty} pcs) — ${rinci}`
           : `Dibulatkan turun agar tidak melebihi kebutuhan ${need} pcs sebanyak 1 karton `
             + `(DOI max ${maxQty} pcs lebih kecil dari kebutuhan, jadi kebutuhan yang dipakai) — ${rinci}`,
+      };
+    }
+    // Dibulatkan NAIK melewati batas, tapi masih dalam toleransi yang
+    // disetujui user. Dilaporkan terang-terangan — angka yang melewati DOI max
+    // tidak boleh muncul tanpa alasan yang tertulis.
+    if (cukup && ditoleransi > 0) {
+      const lewat = adaBatas ? Math.max(0, total - maxQty) : 0;
+      return {
+        ...dasar, ambil, qtyTotal: total, ctnTotal, kurang: 0,
+        alasan: 'TOLERANSI_DOI_MAX',
+        keterangan: `Dibulatkan naik ${ditoleransi} karton melewati DOI max`
+          + (lewat > 0 ? ` (lebih ${lewat} pcs dari batas ${maxQty})` : '')
+          + ` — masih dalam toleransi ${toleransiCtn} karton — ${rinci}`,
       };
     }
     return {
@@ -296,7 +367,9 @@ export function hitungBaris(b: BarisOpenPo): HasilOpenPo {
       ...dasar, kurang: need,
       alasan: 'KARTON_LEBIH_DARI_MAX',
       keterangan: `TIDAK dikirim: karton terkecil ${muat.perCtn} pcs = ${lipat}x kebutuhan `
-        + `${need} pcs dan melewati DOI max (${maxQty} pcs). Putuskan manual.`,
+        + `${need} pcs dan melewati DOI max (${maxQty} pcs)`
+        + (lipatMaks > 0 ? `, di luar toleransi ${lipatMaks}x` : '')
+        + '. Putuskan manual.',
     };
   }
 
@@ -320,13 +393,26 @@ export function hitungBaris(b: BarisOpenPo): HasilOpenPo {
 /**
  * Urutan pelayanan saat saldo pemasok diperebutkan beberapa kota.
  *
- * Paling mendesak didahulukan: CRITICAL, lalu LOW, lalu DOI terkecil. Tanpa
- * urutan yang tegas, kota yang kebetulan diproses duluan akan memborong stok
- * dan kota yang hampir kosong tidak kebagian.
+ * Paling mendesak didahulukan: CRITICAL, lalu LOW, lalu KELAS ABC, lalu DOI
+ * terkecil, lalu kebutuhan terbesar. Tanpa urutan yang tegas, kota yang
+ * kebetulan diproses duluan akan memborong stok dan kota yang hampir kosong
+ * tidak kebagian.
+ *
+ * ABC disisipkan 8 Okt 2026 atas permintaan user — SESUDAH status, bukan
+ * sebelumnya. Urutan itu yang membuat "dahulukan barang laris" tidak berubah
+ * jadi "biarkan barang pelan kosong di cabang": kelas C yang sudah CRITICAL
+ * tetap dilayani sebelum kelas A yang masih aman.
  */
 const PRIORITAS: Record<string, number> = { CRITICAL: 0, LOW: 1 };
+
+/** Urutan kelas ABC; kelas yang belum ada ditaruh paling akhir, bukan dianggap A. */
+const PRIORITAS_ABC: Record<string, number> = { A: 0, B: 1, C: 2 };
+export const urutanAbc = (abc?: string) =>
+  PRIORITAS_ABC[String(abc ?? '').trim().toUpperCase()] ?? 9;
+
 export const urutKemendesakan = (a: BarisOpenPo, b: BarisOpenPo) =>
   (PRIORITAS[a.status] ?? 9) - (PRIORITAS[b.status] ?? 9)
+  || urutanAbc(a.abc) - urutanAbc(b.abc)
   || (a.doi ?? Infinity) - (b.doi ?? Infinity)
   || b.need - a.need;
 
@@ -349,7 +435,7 @@ export type RingkasOpenPo = {
  * ke dua kota sekaligus — kesalahan yang baru ketahuan saat barang tidak cukup
  * di gudang. Kuncinya kode SAP, bukan kota: satu kode melayani semua kota.
  */
-export function hitungSemua(rows: BarisOpenPo[]): { hasil: HasilOpenPo[]; ringkas: RingkasOpenPo } {
+export function hitungSemua(rows: BarisOpenPo[], opsi: OpsiPo = {}): { hasil: HasilOpenPo[]; ringkas: RingkasOpenPo } {
   const sisa = new Map<string, number>();
   for (const r of rows) {
     for (const k of r.kode ?? []) {
@@ -361,7 +447,7 @@ export function hitungSemua(rows: BarisOpenPo[]): { hasil: HasilOpenPo[]; ringka
   const hasil: HasilOpenPo[] = [];
   for (const r of [...rows].sort(urutKemendesakan)) {
     const kode = (r.kode ?? []).map((k) => ({ ...k, saldo: sisa.get(kunciSaldo(k)) ?? bulat(k.saldo) }));
-    const h = hitungBaris({ ...r, kode });
+    const h = hitungBaris({ ...r, kode }, opsi);
     for (const a of h.ambil) {
       const kk = kunciSaldo(a);
       sisa.set(kk, Math.max(0, (sisa.get(kk) ?? 0) - a.qty));

@@ -101,3 +101,40 @@ test('nama area dicocokkan tanpa peduli spasi dan besar-kecil huruf', () => {
   const h = susunImpor([{ sku: 'A', 'yogyakarta': 'Ya' }], ['Yogyakarta'], DIKENAL, new Map());
   assert.deepEqual(h.putusan, [{ sku: 'A', areaId: 'Yogyakarta', dibagikan: true }]);
 });
+
+test('kolom stok di berkas unduhan DIABAIKAN, dan tidak dianggap kolom asing', () => {
+  // Lembar Sebaran sejak 8 Okt 2026 memuat "Stok Pusat"/"Stok total" supaya
+  // sebaran bisa ditentukan sambil melihat angkanya. Kolom itu keterangan:
+  // mengubahnya di Excel tidak boleh mengubah apa pun, dan tidak boleh muncul
+  // sebagai "kolom yang diabaikan" — itu tanda berkasnya salah, dan berkas ini
+  // kita sendiri yang menulis.
+  const h = susunImpor(
+    [{ sku: 'A', nama: 'X', kategori: 'Sku', brand: 'Hanasui', stoktotal: 120, pusat: 'Ya', stokpusat: 100, medan: 'Tidak', stokmedan: 20 }],
+    AREAS, DIKENAL, new Map(),
+  );
+  assert.deepEqual(h.kolomAsing, [], 'kolom stok tidak dilaporkan');
+  assert.deepEqual(h.masalah, [], 'angka di kolom stok tidak jadi "isi tidak dikenali"');
+  assert.equal(h.putusan.length, 2, 'hanya dua kolom cabang yang jadi keputusan');
+  assert.equal(h.ringkas.jadiYa, 1);
+  assert.equal(h.ringkas.jadiTidak, 1);
+});
+
+test('kolom yang BENAR-BENAR asing tetap dilaporkan', () => {
+  // Penjaga kolom stok tidak boleh melebar jadi "abaikan apa saja".
+  const h = susunImpor(
+    [{ sku: 'A', pusat: 'Ya', catatangudang: 'cek dulu' }],
+    AREAS, DIKENAL, new Map(),
+  );
+  assert.deepEqual(h.kolomAsing, ['catatangudang']);
+});
+
+test('cabang yang namanya diawali "Stok" tetap terbaca sebagai cabang', () => {
+  // petaArea diperiksa lebih dulu, jadi penjaga kolom stok tidak menelan
+  // cabang yang namanya kebetulan begitu.
+  const h = susunImpor(
+    [{ sku: 'A', stokholm: 'Ya' }],
+    ['Stokholm'], DIKENAL, new Map(),
+  );
+  assert.deepEqual(h.kolomAsing, []);
+  assert.deepEqual(h.putusan, [{ sku: 'A', areaId: 'Stokholm', dibagikan: true }]);
+});

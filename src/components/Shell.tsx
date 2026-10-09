@@ -32,6 +32,7 @@ const LINKS: Item[] = [
   { href: '/transit', label: 'Stok Dalam Perjalanan', module: 'Master Data', icon: 'truck', group: 'Master data' },
   { href: '/sku-master', label: 'Lead Time & SKU', module: 'Master Data', icon: 'clock', group: 'Master data' },
   { href: '/phase-out', label: 'Phase Out', module: 'Master Data', icon: 'sunset', group: 'Master data' },
+  { href: '/rekap', label: 'Rekap Harian', module: 'Data Sumber', icon: 'table', group: 'Data' },
   { href: '/sales', label: 'Data Penjualan', module: 'Data Sumber', icon: 'chart', group: 'Data' },
   { href: '/riwayat', label: 'Riwayat Proses', module: 'Sistem', icon: 'clock', group: 'Sistem' },
   { href: '/settings', label: 'Pengaturan', module: 'Sistem', icon: 'cog', admin: true, group: 'Sistem' },

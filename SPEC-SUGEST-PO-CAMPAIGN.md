@@ -817,3 +817,104 @@ CATATAN PENTING untuk nanti: keberhasilan ini bergantung pada tambalan yang
 dipasang DI DALAM halaman WhatsApp Web, dan versinya dipin lewat
 `WA_WEB_VERSION`. Kalau suatu hari `/doi` gagal lagi setelah update, yang
 pertama dicurigai adalah WhatsApp Web berubah — bukan kode bot.
+
+## 12. Keputusan 8 Okt 2026 — toleransi karton, urutan gudang, ABC
+
+Tiga hal diputuskan user dalam satu percakapan, dan ketiganya sudah dikodekan
+di `src/lib/openpo.ts`, `src/lib/eji.ts`, `src/lib/settings.ts` (43 tes lolos).
+
+### 12.1 Toleransi pembulatan karton — DISETUJUI
+
+> "boleh melebihi Aman maksimal 1 karton, DAN karton ≤ 2× need"
+
+Kebutuhan hampir tidak pernah pas sekelipatan karton, jadi "full karton" selalu
+menabrak salah satu batas. Dua syarat, **keduanya** harus terpenuhi:
+
+| syarat | pengaturan | bawaan |
+|---|---|---|
+| boleh melewati batas DOI max sebanyak N karton | `po_toleransi_ctn` | 1 |
+| hanya bila isi 1 karton ≤ N × kebutuhan | `po_lipat_maks` | 2 |
+
+Jatah toleransinya **per baris**, bukan per kode SAP — "melebihi 1 karton"
+berarti satu karton untuk seluruh baris, bukan satu karton untuk tiap kode yang
+ikut dipakai.
+
+Akibat nyata (ada tesnya):
+
+| kasus | sebelum | sesudah |
+|---|---|---|
+| need 350, karton 144, max 400 | 2 ctn = 288, **kurang 62** (`DIBATASI_DOI_MAX`) | 3 ctn = 432, kurang 0 (`TOLERANSI_DOI_MAX`, keterangan menyebut "lebih 32 pcs dari batas 400") |
+| need 50, karton 1000, max 400 (Naturgo) | TIDAK dikirim | **TIDAK dikirim** — 1000 > 2×50, di luar toleransi; tetap dilaporkan untuk diputuskan orang |
+| `po_toleransi_ctn = 0` | — | perilaku batas keras yang lama, masih bisa didapat dari Pengaturan |
+
+Alasan syarat kedua harus ada: tanpa `po_lipat_maks`, "lewat maksimal 1 karton"
+akan meloloskan karton 1000 pcs untuk kebutuhan 50 — karena 600 pcs
+kelebihannya memang kurang dari satu karton. Satu syarat saja tidak cukup.
+
+### 12.2 Urutan gudang jadi PENGATURAN, bukan env — DIMINTA USER
+
+> "ingat ada 2 gudang GBJD dan GBJD2? … Bisa berikan setting agar bisa diubah?
+> karena kedepan akan ke GBJD2 Dulu baru GBJD."
+
+Catatan untuk riwayat: **urutannya sudah GBJD2 dulu sejak 2 Okt 2026** (lihat
+Batch 3b) — `.env` memuat `EJI_WHS=GBJD2,GBJD` dan bawaan di kode pun begitu.
+Jadi yang diminta bukan perubahan urutan, melainkan **caranya diubah**.
+
+Sekarang tiga lapis, yang pertama ada yang menang:
+
+```
+1. pengaturan `po_whs_order`   (halaman Pengaturan, tanpa deploy)
+2. env `EJI_WHS`               (butuh deploy ulang)
+3. bawaan kode `GBJD2,GBJD`
+```
+
+`whsPemasok(dariSetting?)` menerima string atau array; kosong/null jatuh ke env.
+`scripts/sync-supplier-stock.ts` dan `scripts/check-eji.ts` **membaca pengaturan
+yang sama** — kalau tidak, penarikan dan perhitungan bekerja dengan daftar
+gudang yang berbeda, dan selisihnya akan terbaca sebagai "gudangnya kosong"
+bukan sebagai salah pengaturan. `check:eji` mencetak urutannya **berikut
+asalnya** (pengaturan / env / bawaan).
+
+### 12.3 ABC masuk Sugest PO — sebagai PEMECAH SERI
+
+> "saya mau ABC ini juga ada pada Sugest PO. Jadi urutan item pada Saran PO juga
+> akan di sort menurut ABC"
+
+Dipilih user dari tiga opsi: **kemendesakan dulu, ABC pemecah seri.**
+
+```
+urutan pelayanan saldo pemasok:
+  status (CRITICAL → LOW → sisanya)
+  → kelas ABC (A → B → C → belum ada kelas)
+  → DOI terkecil
+  → kebutuhan terbesar
+```
+
+ABC disisipkan **sesudah** status, dan itu yang penting: kalau dibalik, SKU
+kelas C yang sudah CRITICAL akan kehilangan kartonnya ke SKU kelas A yang masih
+aman — "dahulukan barang laris" berubah jadi "biarkan barang pelan kosong di
+cabang". Ada tesnya: `kelas C yang CRITICAL tetap dilayani sebelum kelas A yang
+aman`.
+
+Kelas yang belum ada ditaruh **paling akhir**, bukan dianggap A
+(`urutanAbc('') === 9`).
+
+### 12.4 ABC memang dinamis — dijawab, tidak perlu diubah
+
+Pertanyaan user: "ABC analisis pada /monitoring setingannya apakah sudah
+dinamis? jika ada perubahan angka penjualan apakah akan menyesuaikan?"
+
+Ya. `assignAbc()` di `src/lib/doi.ts` dijalankan **setiap kali mesin DOI jalan**
+(cron 07.30 dan tiap Refresh), dan tidak ada kelas yang disimpan permanen:
+
+- peringkatnya dari `sales90` — penjualan sepanjang jendela Opsi 1;
+- totalnya dihitung ulang, lalu share & kumulatifnya;
+- ambangnya dari pengaturan `abc_a_pct` (70) dan `abc_b_pct` (90);
+- hanya SKU aktif yang menentukan batas kelas — yang EXCLUDED dan PHASE_OUT
+  dikeluarkan lebih dulu, supaya tidak menggeser ambang 70/90 dan menurunkan
+  kelas produk yang masih dijual;
+- `sales90 <= 0` → selalu C, apa pun posisinya.
+
+Jadi penjualan naik → kelas bisa naik, tanpa ada yang perlu disetel. Kelas
+tiap hari ikut tersimpan di `doi_snapshot.abcClass`, jadi riwayatnya tidak
+berubah ketika kelas hari ini berubah.

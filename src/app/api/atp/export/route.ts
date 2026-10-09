@@ -115,13 +115,23 @@ export async function GET(req: Request) {
         ...filterTeks,
         'Kosong = BELUM DIPUTUSKAN (bukan "tidak"). Keduanya di luar pembagi, '
           + 'tapi hanya yang kosong masih menunggu orang memutuskan.',
+        'Kolom "Stok <cabang>" dan "Stok total" hanya keterangan — isinya diabaikan '
+          + 'saat berkas ini diunggah lagi. Yang dibaca hanya kolom bernama cabang.',
       ],
       columns: [
         { header: 'SKU', key: 'sku', width: 34 },
         { header: 'Nama', key: 'name', width: 46 },
         { header: 'Kategori', key: 'kat', width: 11 },
         { header: 'Brand', key: 'brand', width: 12 },
-        ...data.areas.map((a) => ({ header: a, key: `a_${a}`, width: 13 })),
+        { header: 'Stok total', key: 'stok', width: 11 },
+        // Keputusan dan stoknya BERDAMPINGAN per cabang (permintaan user 8 Okt
+        // 2026): sebaran ditentukan di Excel, dan menentukannya tanpa melihat
+        // stok cabang itu berarti menebak. Kolom "Stok ..." hanya untuk dibaca —
+        // importer melewatinya, jadi mengubahnya di Excel tidak mengubah apa pun.
+        ...data.areas.flatMap((a) => [
+          { header: a, key: `a_${a}`, width: 13 },
+          { header: `Stok ${a}`, key: `s_${a}`, width: 11 },
+        ]),
       ],
       rows: baris.map((s) => {
         const r: Record<string, unknown> = {
@@ -129,10 +139,12 @@ export async function GET(req: Request) {
           name: s.name,
           kat: s.kategori,
           brand: s.brand || '(tanpa brand)',
+          stok: s.stokTotal,
         };
         for (const a of data.areas) {
           const x = s.area[a];
           r[`a_${a}`] = !x ? '' : x.dibagikan === null ? '' : x.dibagikan ? 'Ya' : 'Tidak';
+          r[`s_${a}`] = x ? x.availableQty : '';
         }
         return r;
       }),

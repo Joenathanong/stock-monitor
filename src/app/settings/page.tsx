@@ -121,6 +121,22 @@ const groupsFor = (v: Record<string, string>, areas: AreaRow[] = []): { title: s
     ],
   },
   {
+    title: 'Sugest PO — gudang pemasok & pembulatan karton',
+    fields: [
+      { key: 'po_whs_order', label: 'Urutan gudang pemasok', type: 'text',
+        hint: 'Dipisah koma, dan URUTANNYA BERARTI: gudang pertama dihabiskan dulu, baru pindah ke berikutnya. '
+          + 'Mis. GBJD2,GBJD = cek GBJD2 dulu; GBJD,GBJD2 = sebaliknya. Gudang menentukan lebih dulu daripada kode SAP, '
+          + 'jadi kode 120 dari gudang pertama bisa terpakai walau 122 masih ada di gudang kedua. '
+          + 'Kosongkan untuk memakai env EJI_WHS.' },
+      { key: 'po_toleransi_ctn', label: 'Boleh melewati DOI max (karton)', type: 'number',
+        hint: 'Kebutuhan hampir tidak pernah pas sekelipatan karton. 1 = boleh dibulatkan naik walau melewati batas '
+          + 'DOI max sebanyak satu karton, supaya kebutuhan terpenuhi penuh. 0 = batas keras, kekurangannya dilaporkan.' },
+      { key: 'po_lipat_maks', label: 'Toleransi hanya bila karton ≤ N× kebutuhan', type: 'number',
+        hint: 'Penjaga kasus karton raksasa: isi 1000 pcs/karton untuk kebutuhan 50 pcs itu 20× — bukan "lewat sedikit". '
+          + 'Di luar batas ini barisnya TIDAK dikirim otomatis, tapi dilaporkan untuk diputuskan orang. 0 = tanpa syarat.' },
+    ],
+  },
+  {
     title: 'Phase out',
     fields: [
       { key: 'exclude_phase_out', label: 'Keluarkan SKU phase out dari DOI total & kelas ABC', type: 'bool' },

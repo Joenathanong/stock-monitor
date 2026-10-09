@@ -62,6 +62,19 @@ export type HasilImpor = {
 /** Nama kolom dinormalkan sama seperti di xlsx.ts, supaya "Pusat " cocok. */
 const normal = (s: string) => s.toLowerCase().replace(/[\s_\-.]/g, '');
 
+/** Kolom keterangan di lembar unduhan — bukan keputusan, bukan kolom asing. */
+const KOLOM_KETERANGAN = new Set(['sku', 'nama', 'brand', 'kategori']);
+
+/**
+ * Kolom stok ("Stok Pusat", "Stok total") — dibaca manusia, diabaikan mesin.
+ *
+ * Dicocokkan dengan nama yang SUDAH dinormalkan (`stokpusat`, `stoktotal`),
+ * sesuai cara `readSheet` membentuk kuncinya. `petaArea` diperiksa LEBIH DULU,
+ * jadi cabang yang namanya kebetulan diawali "Stok" tetap terbaca sebagai
+ * cabang — penjaga ini hanya mengenai kolom yang bukan cabang mana pun.
+ */
+const kolomStok = (k: string) => /^stok/.test(k);
+
 /**
  * Susun daftar perubahan dari baris Excel.
  *
@@ -107,9 +120,18 @@ export function susunImpor(
     }
 
     for (const [kolom, isi] of Object.entries(row)) {
-      if (kolom === 'sku' || kolom === 'nama' || kolom === 'brand' || kolom === 'kategori') continue;
+      if (KOLOM_KETERANGAN.has(kolom)) continue;
       const areaId = petaArea.get(kolom);
-      if (!areaId) { kolomAsing.add(kolom); continue; }
+      if (!areaId) {
+        // Kolom stok ikut diunduh supaya sebaran bisa ditentukan sambil melihat
+        // angkanya, tapi ia INFORMASI — bukan sesuatu yang bisa diubah dari
+        // Excel. Dilewati diam-diam, bukan dilaporkan sebagai kolom asing:
+        // kolom asing adalah tanda berkasnya salah, dan kolom yang kita sendiri
+        // yang menulis tidak boleh memunculkan tanda itu.
+        if (kolomStok(kolom)) continue;
+        kolomAsing.add(kolom);
+        continue;
+      }
 
       const nilai = bacaSel(isi);
       if (nilai === 'ASING') {

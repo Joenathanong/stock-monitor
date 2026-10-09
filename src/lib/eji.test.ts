@@ -104,6 +104,22 @@ test('gudang pemasok: bawaan GBJD2 dulu lalu GBJD, dan urutannya PRIORITAS', () 
   }
 });
 
+test('pengaturan po_whs_order MENIMPA env — bisa diubah tanpa deploy', () => {
+  // Permintaan user 8 Okt 2026: urutan gudang akan dibalik lagi nanti, jadi
+  // harus bisa diubah dari halaman Pengaturan, bukan cuma dari env.
+  const asli = process.env.EJI_WHS;
+  try {
+    process.env.EJI_WHS = 'GBJD2,GBJD';
+    assert.deepEqual(whsPemasok('GBJD,GBJD2'), ['GBJD', 'GBJD2'], 'pengaturan menang');
+    assert.deepEqual(whsPemasok(['gbjd', 'gbjd2']), ['GBJD', 'GBJD2'], 'array juga diterima');
+    assert.deepEqual(whsPemasok('  '), ['GBJD2', 'GBJD'], 'pengaturan kosong → jatuh ke env');
+    assert.deepEqual(whsPemasok(null), ['GBJD2', 'GBJD'], 'null → jatuh ke env');
+    assert.equal(prioritasWhs('GBJD', whsPemasok('GBJD,GBJD2')), 0);
+  } finally {
+    if (asli === undefined) delete process.env.EJI_WHS; else process.env.EJI_WHS = asli;
+  }
+});
+
 test('gudang di luar daftar ditaruh paling akhir, bukan dianggap prioritas 0', () => {
   assert.equal(prioritasWhs('GXXX', ['GBJD2', 'GBJD']), 99);
 });

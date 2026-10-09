@@ -16,6 +16,8 @@ type SelArea = {
 type BarisSku = {
   sku: string; name: string; brand: string; brandManual: boolean;
   kategori: string;
+  /** Total available seluruh cabang — kolom "Stok total" yang bisa diurutkan. */
+  stokTotal: number;
   area: Record<string, SelArea>;
   /** Area yang barisnya ada tapi tersaring keluar oleh filter status. */
   lain?: Record<string, 'AKTIF' | 'NONAKTIF'>;
@@ -32,7 +34,11 @@ type Resp = {
   ambang: number; siap: boolean; tanpaBrand: string[]; pesan: string;
   saring: Saring;
   cacah: { aktif: number; nonaktif: number; semua: number };
+  baru: SkuBaru[];
 };
+
+/** SKU yang belum punya satu pun keputusan sebaran — isi pengingat. */
+type SkuBaru = { sku: string; name: string; kategori: string; areas: string[]; firstSeenAt: string };
 
 type Pratinjau = {
   barisDibaca: number;
@@ -89,6 +95,11 @@ export default function AtpPage() {
   const [kategori, setKategori] = useState('ALL');
   const [cari, setCari] = useState('');
   const [hanyaBelum, setHanyaBelum] = useState(false);
+  // Pengingat SKU baru. `tutupBaru` hanya menutup untuk kunjungan ini — TIDAK
+  // disimpan: kalau disimpan, SKU baru berikutnya tidak akan pernah terlihat
+  // lagi oleh orang yang pernah menutupnya sekali.
+  const [tutupBaru, setTutupBaru] = useState(false);
+  const [hanyaBaru, setHanyaBaru] = useState(false);
   // Perubahan ditahan dulu, baru disimpan sekali. 375 SKU x 6 cabang = 2.250
   // sel; menyimpan tiap klik berarti 2.250 permintaan saat pengisian awal, dan
   // satu yang gagal di tengah meninggalkan keadaan separuh tanpa ada yang tahu
@@ -114,18 +125,22 @@ export default function AtpPage() {
     return r.area[a]?.dibagikan ?? null;
   };
 
+  const baruList = data?.baru ?? [];
+  const setBaru = useMemo(() => new Set(baruList.map((b) => b.sku)), [data]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const lolosFilter = (r: BarisSku) => {
     if (kategori !== 'ALL' && r.kategori !== kategori) return false;
     if (brand !== 'ALL' && (r.brand || '(tanpa brand)') !== brand) return false;
     const q = cari.trim().toLowerCase();
     if (q && !r.sku.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q)) return false;
     if (hanyaBelum && !areas.some((a) => r.area[a] && nilai(r, a) === null)) return false;
+    if (hanyaBaru && !setBaru.has(r.sku)) return false;
     return true;
   };
 
   const baris = useMemo(
     () => (data?.sku ?? []).filter(lolosFilter),
-    [data, brand, kategori, cari, hanyaBelum, ubah], // eslint-disable-line react-hooks/exhaustive-deps
+    [data, brand, kategori, cari, hanyaBelum, hanyaBaru, ubah], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   function putar(r: BarisSku, a: string) {
@@ -262,6 +277,14 @@ export default function AtpPage() {
         </button>
       )),
     },
+    {
+      // Angka, BUKAN teks: kolom cabang nilai sortnya "Ya"/"Tidak"/"Belum",
+      // jadi sebelum ini tidak ada satu pun kolom yang bisa mengurutkan stok.
+      key: 'stok', label: 'Stok total', get: (r) => r.stokTotal,
+      type: 'number', align: 'right', mono: true, width: 104,
+      title: 'Jumlah available seluruh cabang yang barisnya tampil. Bisa diurutkan & difilter (mis. "< 5").',
+      render: (r) => <span className="mono">{fmt(r.stokTotal)}</span>,
+    },
     ...areas.map((a): Column<BarisSku> => ({
       key: `a_${a}`,
       label: a,
@@ -318,6 +341,23 @@ export default function AtpPage() {
         );
       },
     })),
+    // Satu kolom angka per cabang, supaya stok tiap cabang bisa DIURUTKAN dan
+    // DIFILTER sendiri ("Pusat < 5" + sel Ya = janji yang tidak bisa dipenuhi).
+    // Chip di kolom cabang tetap menampilkan angkanya untuk dibaca cepat; yang
+    // ini untuk diurutkan. Sembunyikan lewat tombol kolom di toolbar tabel
+    // kalau tabelnya terasa lebar.
+    ...areas.map((a): Column<BarisSku> => ({
+      key: `s_${a}`,
+      label: `Stok ${a}`,
+      get: (r) => (r.area[a] ? r.area[a].availableQty : null),
+      type: 'number', align: 'right', mono: true, width: 108, prio: 'p3',
+      title: `Available ${a} (pcs). Kosong = SKU ini tidak ada barisnya di ${a}.`,
+      render: (r) => {
+        const sel = r.area[a];
+        if (!sel) return <span className="empty">—</span>;
+        return <span className={`mono ${sel.siap ? '' : 'text-muted'}`}>{fmt(sel.availableQty)}</span>;
+      },
+    })),
   ], [areas, ubah, editBrand, ambang]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const k = data?.keseluruhan;
@@ -337,6 +377,104 @@ export default function AtpPage() {
         </div>
         <RefreshButton withStock onDone={reload} />
       </div>
+
+      {/*
+        Pengingat SKU baru (permintaan user 8 Okt 2026).
+
+        Modal, bukan cuma banner, untuk kemunculan PERTAMA tiap kunjungan: SKU
+        yang belum diputuskan tidak ikut pembagi ATP, jadi produk baru yang
+        terlewat membuat ATP% terlihat bagus justru karena barangnya tidak
+        dihitung. Itu kesalahan yang tidak menimbulkan gejala apa pun di layar,
+        jadi harus menghalangi sekali.
+
+        Sesudah ditutup, banner-nya TETAP ada — ditutup bukan berarti selesai.
+      */}
+      {data?.siap && baruList.length > 0 && !tutupBaru ? (
+        <div
+          className="sheet-backdrop"
+          role="dialog" aria-modal="true" aria-labelledby="judul-sku-baru"
+        >
+          {/*
+            Memakai `.sheet` milik aplikasi, BUKAN latar rakitan sendiri.
+            Kejadian 9 Okt 2026: versi pertama memasang latar dari token
+            `--surface` — nama itu TIDAK ADA (yang benar `--bg-surface`), dan
+            nilai yang tidak sah bukannya diabaikan melainkan membatalkan latar
+            dari kelas `.card`, jadi popup-nya TEMBUS PANDANG. `.sheet` memakai
+            token yang benar, z-index yang benar, dan di lebar 360px (PDT)
+            berubah jadi bottom sheet. Dijaga oleh `token-css.test.ts`.
+          */}
+          <div className="sheet">
+            <div className="sheet-head">
+              <div>
+                <div id="judul-sku-baru" className="card-title">
+                  {fmt(baruList.length)} SKU belum diatur sebarannya
+                </div>
+                <div className="mt-1 text-[13px] text-label">
+                  Produk ini ada di stok OCS tapi <b>belum pernah diputuskan</b> disebar ke mana.
+                  Selama belum diputuskan, SKU-nya <b>tidak ikut pembagi ATP</b> — jadi angka ATP
+                  sekarang belum memperhitungkannya.
+                </div>
+              </div>
+              <button className="btn btn-sm" onClick={() => setTutupBaru(true)} aria-label="Tutup">✕</button>
+            </div>
+            <div className="sheet-body">
+              <div className="max-h-64 overflow-auto rounded-control border">
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="text-left text-muted">
+                      <th className="px-2 py-1">SKU</th>
+                      <th className="px-2 py-1">Kategori</th>
+                      <th className="px-2 py-1">Cabang</th>
+                      <th className="px-2 py-1">Terlihat sejak</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {baruList.slice(0, 50).map((b) => (
+                      <tr key={b.sku} className="border-t">
+                        <td className="px-2 py-1 mono">{b.sku}</td>
+                        <td className="px-2 py-1">{b.kategori}</td>
+                        <td className="px-2 py-1">{b.areas.join(', ')}</td>
+                        <td className="px-2 py-1 mono">{b.firstSeenAt ? b.firstSeenAt.slice(0, 10) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {baruList.length > 50 ? (
+                <div className="text-[12px] text-muted">
+                  50 teratas yang ditampilkan (terbaru di atas) — {fmt(baruList.length - 50)} lagi ada di tabel.
+                </div>
+              ) : null}
+            </div>
+            <div className="sheet-foot">
+              <button
+                className="btn btn-primary"
+                onClick={() => { setHanyaBaru(true); setTutupBaru(true); }}
+              >
+                Atur sekarang — filter ke {fmt(baruList.length)} SKU ini
+              </button>
+              <button className="btn" onClick={() => setTutupBaru(true)}>Nanti</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {data?.siap && baruList.length > 0 ? (
+        <Alert tone="warn">
+          <b>{fmt(baruList.length)} SKU belum diatur sebarannya</b> dan karena itu belum ikut
+          pembagi ATP.{' '}
+          <button className="underline" onClick={() => setHanyaBaru(true)}>Filter ke SKU tersebut</button>
+          {baruList.length <= 8 ? <> — {baruList.map((b) => b.sku).join(', ')}</> : null}
+        </Alert>
+      ) : null}
+
+      {hanyaBaru ? (
+        <Alert tone="info">
+          Tabel sedang dibatasi ke <b>{fmt(baruList.length)} SKU yang belum diatur</b>. Tombol
+          borongan di bawah juga hanya mengenai SKU ini.{' '}
+          <button className="underline" onClick={() => setHanyaBaru(false)}>Tampilkan semua lagi</button>
+        </Alert>
+      ) : null}
 
       {error ? <Alert tone="error">{error}</Alert> : null}
       {data && !data.siap ? (
@@ -368,12 +506,12 @@ export default function AtpPage() {
         <div className="card-title mb-2">Per cabang</div>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {(data?.hasil ?? []).map((h) => (
-            <div key={h.areaId} className="rounded border border-[var(--line)] p-2">
+            <div key={h.areaId} className="rounded border border-[var(--border)] p-2">
               <div className="flex items-baseline justify-between">
                 <b className="text-[13px]">{h.areaId}</b>
                 <span className="font-mono text-[15px]">{persenTeks(h.persen)}</span>
               </div>
-              <div className="mt-1 h-1.5 w-full rounded bg-[var(--line)]">
+              <div className="mt-1 h-1.5 w-full rounded bg-[var(--border)]">
                 <div className="h-1.5 rounded bg-[var(--c1)]" style={{ width: `${h.persen ?? 0}%` }} />
               </div>
               <div className="mt-1 text-[11px] text-label">
@@ -439,7 +577,7 @@ export default function AtpPage() {
           <a className="btn" href={unduh}>Unduh Excel</a>
         </div>
 
-        <div className="mt-3 border-t border-[var(--line)] pt-3">
+        <div className="mt-3 border-t border-[var(--border)] pt-3">
           <div className="card-title mb-1">Ubah lewat Excel</div>
           <div className="text-[12px] text-label">
             Unduh dulu lewat tombol di atas, atur kolom cabang di lembar <b>Sebaran</b>
@@ -479,7 +617,7 @@ export default function AtpPage() {
           ) : null}
 
           {pratinjau ? (
-            <div className="mt-2 rounded border border-[var(--line)] p-2">
+            <div className="mt-2 rounded border border-[var(--border)] p-2">
               <div className="text-[12px] text-label">
                 {fmt(pratinjau.barisDibaca)} baris dibaca. {pratinjau.pesan}
               </div>
@@ -531,7 +669,7 @@ export default function AtpPage() {
           ) : null}
         </div>
 
-        <div className="mt-3 border-t border-[var(--line)] pt-3">
+        <div className="mt-3 border-t border-[var(--border)] pt-3">
           <div className="text-[12px]">
             Berlaku ke <b>{fmt(baris.length)} SKU yang lolos filter di atas</b>.
           </div>
@@ -552,7 +690,7 @@ export default function AtpPage() {
                 <button className="btn btn-sm" onClick={() => borongan(a, true)}>Semua disebar</button>
                 <button className="btn btn-sm" onClick={() => borongan(a, false)}>Semua tidak</button>
                 <button className="btn btn-sm" onClick={() => borongan(a, null)}>Kosongkan</button>
-                {a === null ? <span className="h-px w-full bg-[var(--line)]" /> : null}
+                {a === null ? <span className="h-px w-full bg-[var(--border)]" /> : null}
               </div>
             ))}
           </div>

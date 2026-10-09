@@ -764,3 +764,165 @@ terisi** (dihitung 1.659, takDisebar 4, belum 0); empat cabang lain masih kosong
 (belum 1.566). Konsekuensi yang disengaja: cabang yang belum diisi menampilkan
 **0 / 0** dan **"—"**. Itu jujur — belum ada yang diputuskan, jadi belum ada yang
 bisa dijanjikan.
+
+## Perubahan 8 Okt 2026 (lanjutan) — stok bisa diurutkan, refresh aman, pengingat SKU baru
+
+### 1. Kolom stok bisa diurutkan & ikut Excel
+
+Masalahnya: angka stok memang sudah tampil di tiap sel cabang, tapi nilai
+sort/filter kolom cabang adalah **teks keputusannya** (`Ya` / `Tidak` / `Belum`),
+jadi tidak ada satu pun kolom yang bisa mengurutkan angka.
+
+Ditambahkan di `/atp`:
+
+| kolom | isi |
+|---|---|
+| `Stok total` | jumlah available seluruh cabang yang barisnya tampil |
+| `Stok <cabang>` | available cabang itu, satu kolom per cabang (prio p3, bisa disembunyikan dari toolbar tabel) |
+
+Keduanya `type: 'number'`, jadi filter kolom bisa dipakai angka — mis. `Stok
+Pusat < 5` digabung sel `Ya` memunculkan janji yang tidak bisa dipenuhi.
+
+Di Excel, lembar **Sebaran** sekarang memuat `Stok total` dan `Stok <cabang>`
+**berdampingan** dengan kolom keputusannya: sebaran ditentukan di Excel, dan
+menentukannya tanpa melihat stok cabang itu berarti menebak.
+
+Kolom stok itu **keterangan, bukan masukan**. `susunImpor` melewatinya diam-diam
+(bukan melaporkannya sebagai "kolom asing" — kolom asing adalah tanda berkasnya
+salah, dan kolom ini kita sendiri yang menulis). `petaArea` diperiksa lebih dulu,
+jadi cabang yang namanya kebetulan diawali "Stok" tetap terbaca sebagai cabang.
+Lembar **Stok** (bentuk panjang) tidak berubah — ia sudah memuat qty sejak awal.
+
+### 2. Refresh OCS TIDAK menghapus sebaran — dibuktikan, lalu dikunci
+
+Pertanyaan user: "saat saya tarik ulang data ocs (refresh), semua perubahan saya
+apakah akan hilang? perubahan hanya berlaku jika sku di delete, ada create baru,
+dan perubahan quantity. untuk sebaran jangan sampai berubah."
+
+Jawabannya **tidak hilang**, dan alasannya struktural — bukan kebetulan:
+
+| tabel | apa yang dilakukan Refresh |
+|---|---|
+| `stock_current` | ditulis ulang; baris yang hilang dari OCS **dihapus** |
+| `stock_daily` | baris hari ini ditimpa; hari lain tidak disentuh |
+| `atp_share` (sebaran) | **tidak disentuh sama sekali** |
+
+Jadi yang berubah persis tiga hal yang diminta user: SKU hilang dari OCS →
+barisnya hilang dari tampilan; SKU baru → barisnya muncul; qty berubah → angkanya
+berubah. Keputusan sebaran tetap, karena kuncinya `(sku, areaId)` di tabel
+sendiri. Satu-satunya `DELETE FROM atp_share` ada di `simpanSebaran()`, dan itu
+jalan hanya ketika **orang** menekan "Kosongkan" atau mengirim sel kosong lewat
+Excel.
+
+Catatan yang disengaja: SKU yang hilang dari OCS meninggalkan baris `atp_share`
+yatim. Itu **tidak dibersihkan** — kalau SKU-nya kembali, keputusannya ikut
+kembali, dan barisnya tidak merugikan apa pun karena tampilan selalu menjoin ke
+`stock_current`.
+
+Sifat ini dikunci di `src/lib/sebaran-aman.test.ts` (4 tes):
+
+1. tidak ada penghapusan `atp_share` di luar `atp-store.ts`;
+2. `src/lib/sync.ts` tidak menyebut `atp_share` sama sekali;
+3. `deleteMany` di jalur sinkronisasi hanya mengenai `stockCurrent`;
+4. `firstSeenAt` **tidak** ada di blok `ON DUPLICATE KEY UPDATE`.
+
+Tes keempat menjaga poin berikutnya: tanpa itu, "terlihat sejak" akan jadi
+tanggal hari ini untuk semua SKU setiap kali Refresh jalan.
+
+### 3. Pengingat SKU baru yang belum diatur sebarannya
+
+Definisinya: **SKU layak ATP yang belum punya SATU PUN keputusan sebaran di area
+mana pun** (`skuBelumDiset()` di `src/lib/atp.ts`).
+
+Sengaja BUKAN "firstSeenAt < N hari":
+
+- SKU yang sudah lama ada tapi belum pernah diputuskan juga merusak angka ATP,
+  dan tidak boleh hilang dari pengingat hanya karena sudah lama diabaikan;
+- begitu diputuskan — **Ya maupun Tidak** — SKU-nya langsung berhenti muncul.
+  Jadi daftarnya mengosongkan dirinya sendiri, dan tidak bisa jadi peringatan
+  yang selalu menyala lalu diabaikan orang.
+
+`firstSeenAt` tetap dibawa, tapi hanya untuk mengurutkan (terbaru di atas) dan
+memberi tahu sejak kapan — bukan untuk menyaring.
+
+Di layar: **modal** sekali per kunjungan (memuat 50 teratas: SKU, kategori,
+cabang, terlihat sejak) dengan tombol "Atur sekarang" yang memfilter tabel ke
+SKU tersebut; sesudah ditutup, **banner tetap ada** — ditutup bukan berarti
+selesai. Penutupannya tidak disimpan: kalau disimpan, SKU baru berikutnya tidak
+akan pernah terlihat lagi oleh orang yang pernah menutupnya sekali.
+
+Kenapa harus menghalangi sekali: SKU yang belum diputuskan **tidak ikut pembagi
+ATP**, jadi produk baru yang terlewat membuat ATP% terlihat bagus justru karena
+barangnya tidak dihitung — kesalahan yang tidak menimbulkan gejala apa pun di
+layar.
+
+Daftarnya dihitung dari **seluruh** baris dengan saringan `'AKTIF'` tegas, bukan
+dari baris yang tampil: kalau ikut filter tampilan, memasang filter apa pun akan
+menyembunyikan pengingatnya.
+
+### 4. Halaman baru: Rekap Harian (`/rekap`)
+
+Permintaan user: "menu untuk menampilkan data stock dan penjualan harian, bisa
+back date ke tanggal yang kita tentukan."
+
+Sumbernya dua tabel yang kuncinya memuat TANGGAL — `stock_daily` dan
+`sales_daily` — bukan `stock_current` (tabel itu memang "sekarang": ditimpa tiap
+Refresh dan barisnya dihapus kalau SKU-nya hilang, jadi ia tidak punya masa
+lalu). Keduanya ditulis `ON DUPLICATE KEY UPDATE`, jadi menarik ulang hari yang
+sama memperbarui baris hari itu — bukan menambah baris, bukan menyentuh hari
+lain.
+
+`susunRekap()` menggabungkan keduanya dengan **gabungan luar DUA arah**: SKU
+yang terjual hari itu tapi stoknya sudah nol dan barisnya hilang dari potret
+akan lenyap kalau digabung dari sisi stok saja — padahal justru itu baris yang
+paling ingin dilihat. `stok: null` (tidak ada di potret) dibedakan dari
+`stok: 0` (tercatat kosong).
+
+Baris KESELURUHAN menghitung **SKU unik lintas cabang**, bukan menjumlahkan
+kolom per area: satu SKU di lima cabang bukan lima SKU, dan kesalahan itu tidak
+pernah terlihat salah secara aritmetika.
+
+Kotak "Terjual padahal kosong" menyorot hari yang **menurunkan ADS** dan
+membuat DOI terlihat lebih aman daripada kenyataannya.
+
+**Batas yang disebut di halamannya, bukan dibiarkan jadi selisih yang
+membingungkan:** `stock_daily` hanya merekam `category = 'Sku'` (lihat
+`syncStock`), sementara ATP menghitung Sku + Bundle + Gimmick. Jadi jumlah SKU
+di `/rekap` lebih kecil daripada di `/atp`. Kalau Bundle & Gimmick mau ikut
+punya riwayat harian, `WHERE category = 'Sku'` di `syncStock` perlu dibuang —
+itu menaikkan `stock_daily` dari ±1.900 jadi ±8.300 baris per hari, dan **tidak
+bisa dibuat ulang ke belakang**, jadi menunggu keputusan user.
+
+### 5. Popup tembus pandang — satu nama token yang salah (9 Okt 2026)
+
+Dilaporkan user: "pop up nya transparan?". Benar, dan sebabnya satu baris:
+
+```tsx
+style={{ background: 'var(--surface)' }}   // nama itu TIDAK ADA; yang benar --bg-surface
+```
+
+Yang membuatnya berbahaya bukan "warnanya tidak muncul". Custom property yang
+tidak terdefinisi **tidak diabaikan** browser — ia jadi *invalid at
+computed-value time*, yang berarti `unset`, dan untuk `background-color` itu
+**transparent**. Jadi deklarasi itu bukan gagal diam-diam: ia MEMBATALKAN latar
+yang sudah benar dari kelas `.card`. Hasilnya elemen yang kelihatan sengaja
+transparan, bukan rusak — bentuk kesalahan yang tidak dicurigai saat kode dibaca
+ulang.
+
+Diperbaiki dengan memakai sheet milik aplikasi sendiri, bukan latar rakitan:
+`.sheet-backdrop` / `.sheet` / `.sheet-head` / `.sheet-body` / `.sheet-foot` —
+nama generik yang ditambahkan ke aturan `.wa-*` yang sudah ada (satu aturan
+untuk keduanya; kalau disalin jadi dua blok, salah satunya akan tertinggal saat
+yang lain diperbaiki). Dapat gratis: token yang benar, `--z-modal` yang benar,
+`--overlay` yang ikut tema Morning/Evening, dan **di lebar 360px (PDT Zebra)
+berubah jadi bottom sheet** — dialog di tengah terlalu sempit di sana.
+
+Tes yang sama ikut menemukan kesalahan LAIN yang sudah lama ada: `--line`
+dipakai di 6 tempat di `/atp` padahal tidak pernah didefinisikan, jadi
+border-nya selama ini dirender sebagai `currentColor` — ikut warna teks tanpa
+ada yang sadar. Semuanya diganti ke `--border`.
+
+Penjaga: `src/lib/token-css.test.ts` — setiap `var(--nama)` tanpa fallback harus
+menunjuk token yang benar-benar didefinisikan di `src`. `var(--nama, cadangan)`
+dikecualikan, karena menulis cadangan berarti penulisnya memang tahu tokennya
+bisa tidak ada.

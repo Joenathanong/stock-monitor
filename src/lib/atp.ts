@@ -60,6 +60,16 @@ export type BarisStokAtp = {
   isActive: boolean;
   category?: string | null;
   sapCode?: string | null;
+  /** Nama produk — hanya untuk ditampilkan di daftar SKU baru. */
+  name?: string;
+  /**
+   * Kapan baris ini PERTAMA terlihat di OCS (`stock_current.firstSeenAt`).
+   *
+   * Dipakai `skuBelumDiset` untuk mengurutkan yang paling baru di atas. Kolomnya
+   * TIDAK ikut di `ON DUPLICATE KEY UPDATE` milik syncStock, jadi Refresh tidak
+   * menyetelnya ulang — itu yang membuatnya bisa dipercaya sebagai "sejak kapan".
+   */
+  firstSeenAt?: string | null;
 };
 
 /**
@@ -234,6 +244,66 @@ export function hitungAtp(
  * cabang baru yang punya 3, sehingga angka keseluruhan bisa bergerak tajam
  * hanya karena satu cabang kecil.
  */
+/** Satu SKU yang belum punya keputusan sebaran sama sekali. */
+export type SkuBelumDiset = {
+  sku: string;
+  name: string;
+  kategori: string;
+  /** Area tempat SKU ini ada barisnya — inilah yang perlu diputuskan. */
+  areas: string[];
+  /** Paling awal dari `firstSeenAt` barisnya. '' = tidak diketahui. */
+  firstSeenAt: string;
+};
+
+/**
+ * SKU yang BELUM pernah diputuskan sebarannya di area mana pun.
+ *
+ * Inilah definisi "produk baru yang belum diset di daftar ATP" (permintaan user
+ * 8 Okt 2026). Sengaja TIDAK memakai "firstSeenAt < N hari":
+ *
+ *   - SKU yang sudah 3 bulan ada tapi belum pernah diputuskan juga tetap
+ *     merusak angka ATP, dan tidak boleh hilang dari pengingat hanya karena
+ *     sudah lama diabaikan;
+ *   - begitu user memutuskan — Ya MAUPUN Tidak — SKU-nya langsung berhenti
+ *     muncul. Jadi daftarnya mengosongkan dirinya sendiri dan tidak bisa jadi
+ *     peringatan yang selalu menyala lalu diabaikan.
+ *
+ * `firstSeenAt` tetap dibawa, tapi hanya untuk MENGURUTKAN (terbaru di atas)
+ * dan memberi tahu sejak kapan — bukan untuk menyaring.
+ *
+ * SKU tanpa satu pun baris area tidak dihitung: `Object.values([]).every(...)`
+ * itu `true`, jadi tanpa penjaga ini baris hampa akan ikut terlapor sebagai
+ * "belum diset".
+ *
+ * Yang dibaca `rows` penuh, BUKAN baris yang sudah disaring tampilan — kalau
+ * tidak, memasang filter apa pun akan menyembunyikan pengingatnya.
+ */
+export function skuBelumDiset(
+  rows: BarisStokAtp[],
+  sebaran: Sebaran,
+  saring: SaringAktif = 'AKTIF',
+): SkuBelumDiset[] {
+  const per = new Map<string, SkuBelumDiset & { adaPutusan: boolean }>();
+  for (const r of rows) {
+    if (!kelayakan(r, saring).layak) continue;   // nonaktif / di luar kategori tidak perlu diputuskan
+    let e = per.get(r.sku);
+    if (!e) {
+      e = { sku: r.sku, name: String(r.name ?? ''), kategori: String(r.category ?? ''), areas: [], firstSeenAt: '', adaPutusan: false };
+      per.set(r.sku, e);
+    }
+    if (!e.name && r.name) e.name = String(r.name);
+    e.areas.push(r.areaId);
+    const f = String(r.firstSeenAt ?? '');
+    if (f && (!e.firstSeenAt || f < e.firstSeenAt)) e.firstSeenAt = f;
+    if (sebaran.get(kunciSebaran(r.sku, r.areaId)) !== undefined) e.adaPutusan = true;
+  }
+  return [...per.values()]
+    .filter((e) => !e.adaPutusan && e.areas.length > 0)
+    .map(({ adaPutusan, ...e }) => ({ ...e, areas: [...new Set(e.areas)].sort((a, b) => a.localeCompare(b)) }))
+    // Terbaru di atas; yang tanggalnya tidak diketahui paling bawah.
+    .sort((a, b) => (b.firstSeenAt || '').localeCompare(a.firstSeenAt || '') || a.sku.localeCompare(b.sku));
+}
+
 export function atpKeseluruhan(hasil: HasilArea[]): {
   dihitung: number; siap: number; persen: number | null; terlemah: HasilArea | null;
 } {

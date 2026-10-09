@@ -1197,3 +1197,61 @@ masih kosong. 20 bundling Pusat tersentuh aturan, 12 di antaranya sedang "Ya",
 1 di antaranya sedang "siap". Contoh: `BDL-HANASUI-0000001678` (stok 70)
 berisi `CS-HANASUI-CERAMIDE-PROBIOTIC-CLEAR-PAD-80GR` — barang clearance yang
 memang tidak disebar. Angkanya akan jauh lebih besar begitu 4 cabang lain diisi.
+
+## Kolom Phase Out di /atp (9 Okt 2026)
+
+Permintaan user: satu kolom phase out di `/atp`, datanya dari halaman
+`/phase-out` — yaitu tabel `phase_out` yang sama, bukan salinan.
+
+### Aturan pencocokan dipindah ke satu tempat
+
+Phase out dicocokkan dua jalur: **lewat SKU dulu, baru lewat 6 digit terakhir
+kode SAP**. Baris SKU lebih khusus — satu baris SAP bisa mengenai beberapa SKU
+sekaligus karena satu barang dipelihara dengan dua kode yang hanya beda 4
+karakter di depan.
+
+Aturan itu sebelumnya hanya hidup di `compute.ts`. Menyalinnya ke `atp-store.ts`
+berarti dua tempat yang bisa berbeda diam-diam, dan gejalanya cuma *"kenapa SKU
+ini phase out di satu layar tapi tidak di layar lain"* — tanpa galat apa pun.
+Jadi dipindah jadi `pencocokPhaseOut()` di `src/lib/phase-out.ts`, dan
+`compute.ts` ikut memakainya.
+
+`phase-out.test.ts` menjaga dua hal: aturannya sendiri (SKU menang atas SAP,
+`sapKey` null tidak pernah cocok dengan entri bernilai kosong, matchType asing
+diabaikan) dan bahwa **kedua** pemakainya memanggil fungsi itu, bukan menulis
+`matchType === 'SAP'` sendiri.
+
+### Yang ditampilkan
+
+Kolom `Phase Out` ditaruh sesudah `Stok total`, bukan di antara Kategori/Brand
+di belakang: halaman ini tempat orang memutuskan **sebaran**, dan produk yang
+sedang dihabiskan biasanya tidak perlu disebar lagi. Kalau terasa ramai,
+tinggal digeser atau disembunyikan lewat tombol Kolom.
+
+Nilai sort/filter-nya **teks statusnya** ("Jual habis", "Lewat 12 hari"), bukan
+kode mentah — supaya bisa difilter dengan kata yang terbaca di sel. Chip jadi
+merah bila sudah melewati target habis. Tooltip memuat disposisi, target habis
+berikut sisa/kelebihan harinya, tanggal berlaku, SKU pengganti, dan alasan.
+
+`lewatHari` dihitung di **server**, bukan di layar: layar yang dibuka tengah
+malam dan layar yang dibuka pagi harus memberi angka yang sama, dan "hari ini"
+di browser bisa berbeda zona waktu dari WIB.
+
+Phase out **tidak per area** — ia sifat produknya, bukan keputusan cabang. Jadi
+satu nilai per SKU, bukan per sel.
+
+### Keadaan datanya saat dikerjakan
+
+190 baris phase out, **semuanya `matchType: SAP`** (tidak ada baris SKU); 71 di
+antaranya mengenai SKU yang punya stok. Mesin DOI menandai 75 SKU phase out di
+Pusat, jadi pencocokannya memang bekerja.
+
+Konsekuensi yang perlu diketahui: karena semua baris dicocokkan lewat kode SAP,
+yang tertandai praktis hanya kategori **Sku** — Bundle & Gimmick umumnya tidak
+punya `sapCode` di `stock_current`. Itu benar secara arti: bundling bukan
+produk yang di-phase-out; yang di-phase-out komponennya, dan itu sudah terlihat
+di baris rincian Turunan Bundling. Kalau nanti bundling mau ikut ditandai
+karena komponennya phase out, itu aturan baru yang terpisah.
+
+Excel: lembar Sebaran dapat kolom "Phase out" (keterangan saja — importer
+melewatinya, sama seperti kolom Stok dan Turunan).

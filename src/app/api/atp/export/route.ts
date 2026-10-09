@@ -120,8 +120,8 @@ export async function GET(req: Request) {
         ...filterTeks,
         'Kosong = BELUM DIPUTUSKAN (bukan "tidak"). Keduanya di luar pembagi, '
           + 'tapi hanya yang kosong masih menunggu orang memutuskan.',
-        'Kolom "Stok <cabang>", "Stok total" dan "Turunan" hanya keterangan — isinya '
-          + 'diabaikan saat berkas ini diunggah lagi. Yang dibaca hanya kolom bernama cabang.',
+        'Kolom "Stok <cabang>", "Stok total", "Turunan" dan "Phase out" hanya keterangan — '
+          + 'isinya diabaikan saat berkas ini diunggah lagi. Yang dibaca hanya kolom bernama cabang.',
       ],
       columns: [
         // Urutan disamakan dengan layar (permintaan user 9 Okt 2026):
@@ -130,6 +130,7 @@ export async function GET(req: Request) {
         // sama; dua urutan berbeda untuk data yang sama bikin salah kolom.
         { header: 'SKU', key: 'sku', width: 34 },
         { header: 'Turunan', key: 'turunan', width: 9 },
+        { header: 'Phase out', key: 'phaseout', width: 16 },
         { header: 'Stok total', key: 'stok', width: 11 },
         // Kolom "Stok ..." hanya untuk DIBACA — importer melewatinya, jadi
         // mengubahnya di Excel tidak mengubah apa pun. Ada supaya sebaran bisa
@@ -146,6 +147,10 @@ export async function GET(req: Request) {
         const r: Record<string, unknown> = {
           sku: s.sku,
           turunan: s.turunan.n || '',
+          phaseout: !s.phaseOut ? ''
+            : s.phaseOut.lewatHari !== null && s.phaseOut.lewatHari > 0
+              ? `LEWAT ${s.phaseOut.lewatHari} hari (${s.phaseOut.dispositionLabel})`
+              : s.phaseOut.dispositionLabel + (s.phaseOut.targetOutDate ? ` s/d ${s.phaseOut.targetOutDate}` : ''),
           name: s.name,
           kat: s.kategori,
           brand: s.brand || '(tanpa brand)',

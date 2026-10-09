@@ -64,10 +64,27 @@ export async function POST(req: Request) {
   const b = (await req.json().catch(() => null)) as { putusan?: unknown[] } | null;
   const masuk = Array.isArray(b?.putusan) ? b!.putusan : null;
   if (!masuk || !masuk.length) return fail('Kirim `putusan`: daftar { sku, areaId, dibagikan }');
-  // Batas ini bukan hiasan: 375 SKU x 6 cabang = 2.250 keputusan, dan pengisian
-  // borongan "semua brand ini di semua cabang" memang sebesar itu. Batasnya
-  // dipasang di atas kebutuhan nyata, bukan di bawahnya.
-  if (masuk.length > 5000) return fail('Terlalu banyak sekaligus (maks 5.000 keputusan)');
+  // Batas per PERMINTAAN, bukan batas pekerjaan.
+  //
+  // Angka lamanya 5.000 dengan alasan "375 SKU x 6 cabang = 2.250, dipasang di
+  // atas kebutuhan nyata". Alasan itu kedaluwarsa 8 Okt 2026 ketika Bundle &
+  // Gimmick ikut dihitung: sekarang 1.664 SKU aktif x 5 cabang = 8.320, dan
+  // dengan non-aktif 2.729 x 5 = 13.645. Jadi "Semua disebar" di "Semua cabang"
+  // DITOLAK — sesudah user menekan konfirmasi dan menunggu, dengan seluruh
+  // pekerjaannya masih menggantung. Dilaporkan user 9 Okt 2026.
+  //
+  // Yang benar bukan menaikkan angkanya sampai muat apa pun: satu permintaan
+  // tetap punya batas 60 detik. Halamannya sekarang MEMECAH sendiri jadi
+  // potongan 2.000 dan mengirim berurutan, jadi batas ini kembali ke peran
+  // aslinya — penjaga ukuran satu permintaan, bukan penghalang pekerjaan.
+  const MAKS = 5000;
+  if (masuk.length > MAKS) {
+    return fail(
+      `Satu permintaan maksimal ${MAKS.toLocaleString('id-ID')} keputusan (dikirim ${masuk.length.toLocaleString('id-ID')}). `
+      + 'Halaman ATP memecahnya otomatis — kalau pesan ini muncul di layar, '
+      + 'muat ulang halamannya supaya memakai versi terbaru.',
+    );
+  }
 
   const putusan: SatuPutusan[] = masuk.map((x) => {
     const r = (x ?? {}) as Record<string, unknown>;
@@ -90,6 +107,21 @@ export async function POST(req: Request) {
   });
 
   const u = new URL(req.url);
+  // `ringkas=1` melewati pembacaan ulang seluruh matriks ATP.
+  //
+  // Jawaban lengkapnya ratusan KB dan ±460 ms — wajar untuk satu kali simpan,
+  // tapi saat halaman mengirim 5 potongan berurutan itu berarti 5 kali
+  // pekerjaan yang 4 di antaranya langsung dibuang. Potongan terakhir tetap
+  // meminta yang lengkap, jadi layar tetap menyegarkan dirinya sekali.
+  if (u.searchParams.get('ringkas') === '1') {
+    return json(safe({
+      ok: true,
+      ...h,
+      pesan: h.gagal.length
+        ? `${h.tersimpan} keputusan disimpan, ${h.gagal.length} gagal.`
+        : `${h.tersimpan} keputusan disimpan${h.dihapus ? `, ${h.dihapus} dikosongkan` : ''}.`,
+    }));
+  }
   return json(safe({
     ok: true,
     ...h,

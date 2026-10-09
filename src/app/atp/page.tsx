@@ -31,9 +31,19 @@ type RingkasTurunan = {
   adaNonaktif: boolean;
 };
 
+/** Keterangan phase out satu SKU. null = bukan phase out. */
+type PhaseOutSku = {
+  disposition: string; dispositionLabel: string;
+  targetOutDate: string; effectiveDate: string;
+  replacementSku: string; reason: string;
+  /** negatif = masih ada sisa waktu, positif = SUDAH LEWAT target. */
+  lewatHari: number | null;
+};
+
 type BarisSku = {
   sku: string; name: string; brand: string; brandManual: boolean;
   kategori: string;
+  phaseOut: PhaseOutSku | null;
   /** Total available seluruh cabang — kolom "Stok total" yang bisa diurutkan. */
   stokTotal: number;
   /** Turunan bundling — tampilan saja; komposisinya milik OCS. */
@@ -226,20 +236,81 @@ export default function AtpPage() {
     });
   }
 
+  /**
+   * Berapa keputusan per permintaan. Server membatasi 5.000; 2.000 memberi
+   * ruang dan membuat tiap potongan selesai jauh di bawah batas 60 detik.
+   */
+  const KELOMPOK_SIMPAN = 2000;
+
+  /**
+   * Simpan perubahan — DIPECAH jadi beberapa permintaan.
+   *
+   * Dulu satu permintaan untuk semuanya, dan itu menabrak batas server begitu
+   * Bundle & Gimmick ikut dihitung: "Semua disebar" di "Semua cabang" sekarang
+   * 8.320 keputusan (13.645 dengan non-aktif), sementara batasnya 5.000. User
+   * menekan konfirmasi, menunggu, lalu ditolak — dengan seluruh pekerjaannya
+   * masih menggantung. Dilaporkan 9 Okt 2026.
+   *
+   * Dua hal yang dijaga di sini:
+   *
+   *   1. Potongan yang SUDAH tersimpan dibuang dari `ubah` segera. Jadi kalau
+   *      potongan ke-3 gagal, menekan Simpan lagi hanya mengirim sisanya —
+   *      bukan mengulang dari nol, dan bukan pula menulis ulang yang sudah
+   *      masuk.
+   *   2. Kegagalan di tengah DILAPORKAN apa adanya ("3.800 dari 8.320
+   *      tersimpan"). Menyembunyikannya akan meninggalkan keadaan separuh yang
+   *      tidak diketahui siapa pun.
+   */
   async function simpan() {
     if (!ubah.size) return;
     setBusy(true);
+    const semua = [...ubah.entries()];
+    let tersimpan = 0;
+    let dihapus = 0;
+    let nGagal = 0;
     try {
-      const putusan = [...ubah.entries()].map(([k, dibagikan]) => {
-        const [areaId, sku] = k.split('\u0000');
-        return { sku, areaId, dibagikan };
+      for (let i = 0; i < semua.length; i += KELOMPOK_SIMPAN) {
+        const potong = semua.slice(i, i + KELOMPOK_SIMPAN);
+        const terakhir = i + KELOMPOK_SIMPAN >= semua.length;
+        if (semua.length > KELOMPOK_SIMPAN) {
+          setMsg({ tone: 'ok', text: `Menyimpan ${fmt(i + potong.length)} dari ${fmt(semua.length)} keputusan…` });
+        }
+        const putusan = potong.map(([k, dibagikan]) => {
+          const [areaId, sku] = k.split('\u0000');
+          return { sku, areaId, dibagikan };
+        });
+        // Potongan terakhir meminta jawaban LENGKAP supaya layar menyegarkan
+        // dirinya sekali; yang di tengah `ringkas=1` — jawaban penuhnya
+        // ratusan KB dan akan langsung dibuang.
+        const r = await postJson(`/api/atp?ambang=${ambang}${terakhir ? '' : '&ringkas=1'}`, { putusan });
+        if (!r?.ok) throw new Error(r?.error || 'Penyimpanan ditolak server');
+        tersimpan += Number(r.tersimpan ?? 0);
+        dihapus += Number(r.dihapus ?? 0);
+        nGagal += (r.gagal?.length ?? 0);
+        // Dibuang SESUDAH berhasil, bukan sebelum: kalau dibuang di depan dan
+        // permintaannya gagal, perubahannya hilang tanpa pernah tersimpan.
+        setUbah((prev) => {
+          const n = new Map(prev);
+          for (const [k] of potong) n.delete(k);
+          return n;
+        });
+      }
+      setMsg({
+        tone: nGagal ? 'warn' : 'ok',
+        text: `${fmt(tersimpan)} keputusan disimpan`
+          + (dihapus ? `, ${fmt(dihapus)} dikosongkan` : '')
+          + (nGagal ? `, ${fmt(nGagal)} gagal.` : '.'),
       });
-      const r = await postJson(`/api/atp?ambang=${ambang}`, { putusan });
-      setMsg({ tone: r.gagal?.length ? 'warn' : 'ok', text: r.pesan });
-      setUbah(new Map());
       reload();
     } catch (e) {
-      setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) });
+      const sisa = semua.length - tersimpan - dihapus;
+      setMsg({
+        tone: 'error',
+        text: `${e instanceof Error ? e.message : String(e)} — `
+          + `${fmt(tersimpan + dihapus)} dari ${fmt(semua.length)} sudah tersimpan, `
+          + `sisanya (${fmt(Math.max(0, sisa))}) masih tertahan di layar. Tekan Simpan lagi untuk melanjutkan.`,
+      });
+      reload();
     } finally { setBusy(false); }
   }
 
@@ -548,6 +619,51 @@ export default function AtpPage() {
       type: 'number', align: 'right', mono: true, width: 104,
       title: 'Jumlah available seluruh cabang yang barisnya tampil. Bisa diurutkan & difilter (mis. "< 5").',
       render: (r) => <span className="mono">{fmt(r.stokTotal)}</span>,
+    },
+    {
+      /*
+        Phase out (permintaan user 9 Okt 2026) — dari tabel yang sama dengan
+        halaman /phase-out, dicocokkan dengan aturan yang SAMA dengan mesin DOI
+        (SKU dulu, lalu 6 digit terakhir kode SAP).
+
+        Ditaruh di depan, bukan di antara Kategori/Brand di belakang: halaman
+        ini tempat orang memutuskan SEBARAN, dan produk yang sedang dihabiskan
+        biasanya tidak perlu disebar lagi. Kalau terlalu ramai, tinggal digeser
+        atau disembunyikan lewat tombol Kolom.
+
+        Nilai sort/filter-nya TEKS statusnya supaya bisa difilter dengan kata
+        yang terbaca di sel ("Lewat", "Jual habis"), bukan kode mentah.
+      */
+      key: 'phaseout', label: 'Phase Out', width: 130,
+      get: (r) => (!r.phaseOut ? '' : r.phaseOut.lewatHari !== null && r.phaseOut.lewatHari > 0
+        ? `Lewat ${r.phaseOut.lewatHari} hari`
+        : r.phaseOut.dispositionLabel),
+      title: 'Produk yang sedang dihabiskan, dari halaman Phase Out. '
+        + 'Kosong = bukan phase out. Angka merah = sudah melewati target habis.',
+      render: (r) => {
+        const po = r.phaseOut;
+        if (!po) return <span className="empty">—</span>;
+        const lewat = po.lewatHari !== null && po.lewatHari > 0;
+        const sisa = po.lewatHari !== null && po.lewatHari <= 0 ? -po.lewatHari : null;
+        return (
+          <span
+            className={`chip ${lewat ? 'chip-bad' : ''}`}
+            title={
+              `${po.dispositionLabel}\n`
+              + (po.targetOutDate
+                ? `Target habis: ${po.targetOutDate}`
+                  + (lewat ? ` — LEWAT ${po.lewatHari} hari` : sisa !== null ? ` — sisa ${sisa} hari` : '')
+                  + '\n'
+                : 'Target habis: belum ditentukan\n')
+              + (po.effectiveDate ? `Berlaku sejak: ${po.effectiveDate}\n` : '')
+              + (po.replacementSku ? `Pengganti: ${po.replacementSku}\n` : '')
+              + (po.reason ? `Alasan: ${po.reason}` : '')
+            }
+          >
+            {lewat ? `Lewat ${po.lewatHari} hr` : po.dispositionLabel}
+          </span>
+        );
+      },
     },
     // Keputusan dan stok BERDAMPINGAN per cabang (permintaan user 9 Okt 2026):
     // Makassar, Stok Makassar, Medan, Stok Medan, dst. Dulu semua kolom

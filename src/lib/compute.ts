@@ -6,7 +6,7 @@
 import { prisma } from './prisma';
 import { DEFAULT_SETTINGS, longestWindow, toDoiSettings, type DoiSettings, type SettingsMap } from './settings';
 import { assignAbc, computeSku, summarize, type DoiResult, type HealthSummary } from './doi';
-import { sapKey } from './phase-out';
+import { pencocokPhaseOut } from './phase-out';
 import { buildExclusionMap } from './exclusion';
 import { AREA_GABUNGAN, labelArea } from './areas';
 import { ambangDoi } from './area-master';
@@ -191,8 +191,10 @@ export async function computeAll(area: string, now = new Date()): Promise<Comput
     replacementSku: r.replacementSku,
     disposition: r.disposition,
   });
-  const poBySku = new Map(phaseOutRows.filter((r) => r.matchType === 'SKU').map((r) => [r.matchValue, toEntry(r)]));
-  const poBySap = new Map(phaseOutRows.filter((r) => r.matchType === 'SAP').map((r) => [r.matchValue, toEntry(r)]));
+  // Aturannya di `phase-out.ts`, bukan di sini — halaman ATP memakai yang sama.
+  // Disalin = dua tempat yang bisa berbeda diam-diam, dan gejalanya cuma
+  // "kenapa SKU ini phase out di satu layar tapi tidak di layar lain".
+  const cocokPo = pencocokPhaseOut(phaseOutRows, toEntry);
 
   const rows = stock.map((st) => {
     const m = master.get(st.sku);
@@ -207,7 +209,7 @@ export async function computeAll(area: string, now = new Date()): Promise<Comput
         transitQty: transit.get(st.sku) ?? 0,
         leadTimeDays: m?.leadTimeDays ?? null,
         isExcluded: m?.isExcluded ?? false,
-        phaseOut: poBySku.get(st.sku) ?? poBySap.get(sapKey(st.sapCode) ?? '\u0000') ?? null,
+        phaseOut: cocokPo(st.sku, st.sapCode),
         salesByDate: sales.salesBySku.get(st.sku) ?? {},
         firstSalesDate: sales.firstBySku.get(st.sku) ?? null,
         stockoutDates: stockouts.get(st.sku),

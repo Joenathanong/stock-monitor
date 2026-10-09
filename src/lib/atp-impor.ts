@@ -63,7 +63,7 @@ export type HasilImpor = {
 const normal = (s: string) => s.toLowerCase().replace(/[\s_\-.]/g, '');
 
 /** Kolom keterangan di lembar unduhan — bukan keputusan, bukan kolom asing. */
-const KOLOM_KETERANGAN = new Set(['sku', 'nama', 'brand', 'kategori', 'turunan']);
+const KOLOM_KETERANGAN = new Set(['sku', 'nama', 'brand', 'kategori', 'turunan', 'phaseout']);
 
 /**
  * Kolom stok ("Stok Pusat", "Stok total") — dibaca manusia, diabaikan mesin.

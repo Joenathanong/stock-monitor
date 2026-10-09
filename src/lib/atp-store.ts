@@ -12,7 +12,8 @@
  * DOI/stock di berkas ini — itu syarat yang user tetapkan 7 Okt 2026.
  */
 import { prisma } from './prisma';
-import { toDateKeyUtc } from './dates';
+import { toDateKeyUtc, todayKey, diffDays } from './dates';
+import { pencocokPhaseOut, DISPOSITION_LABEL, type Disposition } from './phase-out';
 import {
   AMBANG_ATP_BAWAAN, kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan, skuBelumDiset,
   susunTurunan, bundlingTerblokir,
@@ -103,6 +104,75 @@ export async function muatKomposisiBundle(): Promise<{ peta: PetaBundle; siap: b
     if (tabelBelumAda(e)) return { peta: new Map(), siap: false, nBundle: 0 };
     throw e;
   }
+}
+
+/** Keterangan phase out satu SKU — hanya untuk ditampilkan di /atp. */
+export type PhaseOutSku = {
+  /** 'SELL_DOWN' | 'RETURN_VENDOR' | 'WRITE_OFF' | 'BUNDLING' */
+  disposition: string;
+  dispositionLabel: string;
+  /** Target habis (YYYY-MM-DD). '' = belum ditentukan. */
+  targetOutDate: string;
+  effectiveDate: string;
+  replacementSku: string;
+  reason: string;
+  /**
+   * Selisih hari terhadap target: negatif = masih ada sisa waktu,
+   * positif = SUDAH LEWAT target. null bila target belum ditentukan.
+   */
+  lewatHari: number | null;
+};
+
+/**
+ * Peta SKU → phase out, memakai aturan pencocokan yang SAMA dengan mesin DOI.
+ *
+ * Dua jalur (SKU dulu, lalu 6 digit terakhir kode SAP) ada di
+ * `pencocokPhaseOut` — tidak disalin ke sini. Lihat alasannya di sana.
+ *
+ * Tabelnya tidak punya penjaga "belum ada" seperti atp_share karena `phase_out`
+ * sudah lama ada; kalau toh gagal dibaca, halaman tetap jalan tanpa kolomnya.
+ */
+export async function muatPhaseOut(
+  rows: BarisAtp[],
+): Promise<Map<string, PhaseOutSku>> {
+  const out = new Map<string, PhaseOutSku>();
+  let daftar: {
+    matchType: string; matchValue: string; disposition: string;
+    targetOutDate: Date | null; effectiveDate: Date | null;
+    replacementSku: string | null; reason: string | null;
+  }[];
+  try {
+    daftar = await prisma.phaseOut.findMany();
+  } catch {
+    return out;
+  }
+  if (!daftar.length) return out;
+
+  const hari = todayKey();
+  const cocok = pencocokPhaseOut(daftar, (r) => {
+    const target = r.targetOutDate ? toDateKeyUtc(r.targetOutDate) : '';
+    return {
+      disposition: r.disposition,
+      dispositionLabel: DISPOSITION_LABEL[r.disposition as Disposition] ?? r.disposition,
+      targetOutDate: target,
+      effectiveDate: r.effectiveDate ? toDateKeyUtc(r.effectiveDate) : '',
+      replacementSku: r.replacementSku ?? '',
+      reason: r.reason ?? '',
+      // Dihitung SEKALI di sini, bukan di layar: layar yang dibuka tengah
+      // malam dan layar yang dibuka pagi harus memberi angka yang sama, dan
+      // "hari ini" di browser bisa berbeda zona waktu dari WIB.
+      lewatHari: target ? diffDays(target, hari) : null,
+    } satisfies PhaseOutSku;
+  });
+
+  // Satu baris per SKU; satu SKU bisa punya beberapa baris stok (per area),
+  // tapi phase out TIDAK per area — ia sifat produknya.
+  for (const r of rows) {
+    if (out.has(r.sku)) continue;
+    const po = cocok(r.sku, r.sapCode);
+    if (po) out.set(r.sku, po);
+  }
+  return out;
 }
 
 /** Keputusan sebaran dari `atp_share`. Tidak ada baris = belum diputuskan. */
@@ -284,6 +354,13 @@ export type MuatAtp = {
      */
     stokTotal: number;
     /**
+     * Phase out produk ini — null bila bukan phase out.
+     *
+     * BUKAN per area: phase out itu sifat produknya, bukan keputusan cabang.
+     * Dicocokkan dengan aturan yang SAMA dengan mesin DOI (`pencocokPhaseOut`).
+     */
+    phaseOut: PhaseOutSku | null;
+    /**
      * Turunan bundling — HANYA untuk ditampilkan (permintaan user 9 Okt 2026).
      * `n: 0` berarti bukan bundle, atau komposisinya belum ditarik dari OCS.
      */
@@ -349,6 +426,9 @@ export async function muatAtp(
   const [rows, { sebaran, siap }, catatan, bundle] = await Promise.all([
     muatStokAtp(), muatSebaran(), muatCatatanSebaran(), muatKomposisiBundle(),
   ]);
+  // Butuh `rows` lebih dulu (dicocokkan lewat sapCode), jadi tidak bisa ikut
+  // Promise.all di atas.
+  const phaseOut = await muatPhaseOut(rows);
 
   // Peta stok per SKU per area, dibangun SEKALI dari baris yang memang sudah
   // dibaca di atas. Turunan bundling membacanya dari sini, jadi fitur itu tidak
@@ -394,6 +474,7 @@ export async function muatAtp(
       b = {
         sku: r.sku, name: r.name, brand: r.brand, brandManual: r.brandManual,
         kategori: String(r.category ?? ''), stokTotal: 0,
+        phaseOut: phaseOut.get(r.sku) ?? null,
         turunan: susunTurunan(r.sku, bundle.peta, stokPerSku, areas),
         area: {}, lain: {},
       };

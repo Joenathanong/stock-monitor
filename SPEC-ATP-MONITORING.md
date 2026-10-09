@@ -1054,3 +1054,77 @@ data yang sama adalah cara orang salah kolom. Kolom `Turunan` ikut masuk
 Lembar baru **Turunan** (bentuk panjang: satu baris per komponen per cabang,
 bukan matriks — 14 komponen akan melebar tak terkendali) memuat qty, stok,
 status, bisa-dibentuk, penanda pembatas, dan angka OCS berdampingan.
+
+## Geser kolom & tata letak per akun (9 Okt 2026)
+
+Permintaan user: "Buat agar table bisa dipindah (geser) … saat sudah pindah dan
+save, maka posisi itu yang akan diingat di login selanjutnya."
+
+Dikerjakan di `DataGrid`, bukan hanya di `/atp` — komponennya dipakai semua
+halaman, jadi memperbaikinya di satu tempat memberi kemampuan yang sama ke
+seluruh tabel.
+
+### Dua cara menggeser, dan kenapa harus dua
+
+| cara | di mana |
+|---|---|
+| tarik-lepas kepala kolom (ada gagang `⠿`) | desktop |
+| ▲▼ per kolom di menu **Kolom** | semua, TERMASUK PDT |
+
+PDT Zebra TC21/22/26 (lebar CSS 360px) tidak punya tarik-lepas. Tanpa ▲▼,
+fitur geser kolom cuma bisa dipakai orang yang memegang mouse — padahal tabel
+ini dibaca di gudang. Daftar di menu Kolom mengikuti **urutan yang sedang
+berlaku**, bukan urutan yang ditulis halaman; kalau tidak, menekan ▲ membuat
+barisnya melompat ke tempat lain di daftar itu sendiri.
+
+Tarik-lepas memakai DnD bawaan browser, BUKAN pointer events seperti gagang
+resize. Dua alasan: klik untuk mengurutkan tetap jalan (klik tanpa gerakan bukan
+drag), dan gagang resize memanggil `preventDefault` di `pointerdown` sehingga
+menariknya tidak ikut memindahkan kolom.
+
+### Dua lapis penyimpanan
+
+| lapis | kapan ditulis | lingkup |
+|---|---|---|
+| `localStorage` | otomatis, tiap perubahan | satu browser di satu komputer |
+| tabel `user_pref` | **hanya saat "Simpan tampilan" ditekan** | satu PENGGUNA, semua perangkat |
+
+Pemuatannya localStorage dulu (tersedia seketika, tidak ada kedipan), lalu akun
+menimpanya kalau ada. Akun menang karena ia pilihan yang SENGAJA disimpan
+orangnya, sementara localStorage bisa jadi sisa coba-coba.
+
+Yang disimpan ke akun: urutan kolom, lebar, kolom tersembunyi, urutan sort.
+**Filter sengaja TIDAK ikut** — filter itu pertanyaan sesaat ("stok < 5"), bukan
+tata letak. Menyimpannya ke akun berarti besok pagi orangnya membuka tabel yang
+sudah tersaring dan mengira datanya hilang.
+
+`Reset tampilan` menghapus **keduanya**. Tanpa itu, Reset lalu muat ulang akan
+memunculkan kembali tata letak yang baru saja dibuang — dan yang dicurigai orang
+adalah tombol Resetnya, bukan dua tempat penyimpanan.
+
+### Kolom baru tidak boleh hilang gara-gara tata letak lama
+
+Ini jebakan utamanya, dan sudah hampir kejadian: kolom **Turunan Bundling**
+ditambahkan 9 Okt 2026, sehari sesudah kolom stok per cabang. Kalau urutan
+tersimpan diterapkan apa adanya, setiap orang yang pernah menekan Simpan akan
+melihat kolom baru itu **menumpuk di ujung kanan** — atau lebih buruk, tidak
+melihatnya sama sekali — dan menyimpulkan fiturnya tidak jadi dibuat.
+
+Jadi `ordered` menyisipkan kolom yang tidak dikenal **persis di tempat halaman
+menulisnya**: tepat sesudah kolom dikenal terakhir sebelum dia. Kolom baru
+muncul di posisi yang dimaksud perancangnya, tanpa menghapus tata letak orang.
+
+### Tabel `user_pref`
+
+Generik — `(userId, prefKey, value TEXT)`, kunci `(userId, prefKey)` — bukan
+kolom-kolom tata letak, karena bentuk tata letak akan berubah setiap kali
+DataGrid dapat kemampuan baru, dan kalau dipecah jadi kolom setiap kemampuan
+baru butuh migrasi skema.
+
+`/api/pref` (GET/PUT/DELETE) **tidak** butuh `canWrite`: ini tata letak milik
+pemakainya sendiri, bukan data perusahaan — peran "Lihat saja" pun berhak
+merapikan tabelnya. Dua pembatasan supaya endpoint ini tidak jadi tempat
+penyimpanan bebas untuk apa pun yang dikirim klien: `key` harus cocok
+`grid:<id>`, dan `value` maksimal 8 KB serta harus JSON yang sah. Tabel yang
+belum di-`db:push` dijawab sebagai "tidak ada", bukan galat — tabelnya tetap
+jalan dengan localStorage.

@@ -508,6 +508,33 @@ model SkuBrand {
   @@map("sku_brand")
 }
 
+/// Preferensi tampilan per PENGGUNA — mis. urutan & lebar kolom sebuah tabel.
+///
+/// Kenapa di server, bukan cukup localStorage (9 Okt 2026): permintaan user
+/// adalah "saat sudah pindah dan save, posisi itu yang akan diingat di LOGIN
+/// SELANJUTNYA". localStorage hanya mengikat ke satu browser di satu komputer —
+/// login dari PDT gudang atau laptop lain akan mengembalikan tata letak bawaan,
+/// dan itu persis yang diminta supaya tidak terjadi.
+///
+/// `value` disimpan sebagai TEKS JSON, bukan kolom-kolom terpisah: isinya tata
+/// letak tabel (urutan kolom, lebar, kolom tersembunyi, urutan sort) yang
+/// bentuknya akan berubah setiap kali DataGrid dapat kemampuan baru. Kalau
+/// dipecah jadi kolom, setiap kemampuan baru butuh migrasi skema.
+///
+/// `prefKey` dibatasi polanya di API (`grid:<id>`), jadi tabel ini tidak bisa
+/// dipakai menyimpan data sembarangan dari klien.
+model UserPref {
+  /// `uid` dari sesi login.
+  userId    String   @db.VarChar(40)
+  prefKey   String   @db.VarChar(80)
+  /// JSON. Dibatasi ukurannya di API supaya tabel ini tidak bisa digemukkan.
+  value     String   @db.Text
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@id([userId, prefKey])
+  @@map("user_pref")
+}
+
 /// Komposisi bundling — SKU turunan dari sebuah bundle.
 ///
 /// Sumbernya `GET /MasterData/GetBundleStock` di OCS (dibongkar 9 Okt 2026 dari

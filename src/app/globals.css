@@ -383,6 +383,24 @@ body {
 .grid-pop h4 { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-label); margin: 0 0 8px; font-weight: 600; }
 .grid-pop .hint { font-size: 11px; color: var(--ink-label); margin: 6px 0; }
 .grid-menu { position: fixed; min-width: 200px; max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-grid); box-shadow: var(--shadow-1); padding: 6px; z-index: var(--z-tooltip); font-size: 13px; }
+/* ---- Geser kolom (tarik-lepas di kepala tabel), 9 Okt 2026 ---- */
+/* Gagang tarik. Sengaja redup: ia petunjuk, bukan tombol — yang diklik orang
+   tetap label kolomnya untuk mengurutkan. */
+.grid-grip { flex: none; cursor: grab; color: var(--ink-muted); font-size: 11px; line-height: 1; user-select: none; }
+.grid-grip:active { cursor: grabbing; }
+.dgrid th:hover .grid-grip { color: var(--ink-label); }
+/* Kolom yang sedang ditarik diredupkan; yang akan ditempati diberi garis
+   sisipan di tepi KIRI — itu posisi tempat kolomnya akan jatuh. */
+.dgrid th.is-drag { opacity: .45; }
+.dgrid th.is-over { box-shadow: inset 3px 0 0 var(--c1); }
+.grid-menu-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grid-menu-move {
+  flex: none; width: 24px; height: 24px; border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--bg-surface); color: var(--ink-label); font-size: 10px; line-height: 1; cursor: pointer;
+}
+.grid-menu-move:hover:not(:disabled) { background: var(--bg-hover); color: var(--ink); }
+.grid-menu-move:disabled { opacity: .35; cursor: default; }
+
 .grid-menu label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--r-sm); cursor: pointer; min-height: var(--tap); }
 .grid-menu label:hover { background: var(--bg-hover); }
 /* .grid-toast dihapus — DataGrid memakai satu antrean toast yang sama (Toast.tsx). */

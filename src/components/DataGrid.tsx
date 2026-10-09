@@ -49,7 +49,17 @@ const OP_SHORT: Record<Op, string> = { eq: '=', ne: '≠', contains: '≈', star
 
 export type Filter = { op: Op; value: string; value2?: string };
 type SortEntry = { key: string; dir: 'asc' | 'desc' };
-type Saved = { widths?: Record<string, number>; sort?: SortEntry[]; filters?: Record<string, Filter>; hidden?: string[] };
+type Saved = {
+  widths?: Record<string, number>;
+  sort?: SortEntry[];
+  filters?: Record<string, Filter>;
+  hidden?: string[];
+  /**
+   * Urutan kolom menurut `key`. Kolom yang TIDAK ada di daftar ini (kolom baru
+   * yang ditambahkan sesudah tata letak disimpan) tidak hilang — lihat `ordered`.
+   */
+  order?: string[];
+};
 
 export type DataGridProps<T> = {
   id: string;
@@ -128,6 +138,15 @@ export function DataGrid<T>(props: DataGridProps<T>) {
   const [sort, setSort] = useState<SortEntry[]>([]);
   const [filters, setFilters] = useState<Record<string, Filter>>({});
   const [hidden, setHidden] = useState<string[]>([]);
+  // Urutan kolom. Kosong = pakai urutan yang ditulis halamannya.
+  const [order, setOrder] = useState<string[]>([]);
+  // Tata letak yang disimpan ke AKUN (bukan cuma browser ini). Tiga keadaan,
+  // dan ketiganya perlu terlihat: belum tahu, sedang menyimpan, sudah/ gagal.
+  const [simpan, setSimpan] = useState<'' | 'kirim' | 'ok' | 'gagal'>('');
+  const [adaDiAkun, setAdaDiAkun] = useState(false);
+  // Geser kolom dengan tarik-lepas di kepala tabel.
+  const [tarik, setTarik] = useState<string | null>(null);
+  const [atas, setAtas] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [page, setPage] = useState(0);
   const [pop, setPop] = useState<{ key: string; x: number; y: number; draft: Filter } | null>(null);
@@ -143,25 +162,127 @@ export function DataGrid<T>(props: DataGridProps<T>) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // ---- persistensi tampilan
+  //
+  // DUA LAPIS, dan keduanya perlu:
+  //
+  //   localStorage  otomatis, per BROWSER. Menjaga tabel tetap seperti yang
+  //                 ditinggalkan saat pindah halaman atau menyegarkan.
+  //   akun (server) hanya saat "Simpan tampilan" DITEKAN, per PENGGUNA.
+  //                 Inilah yang diminta user 9 Okt 2026: "posisi itu yang akan
+  //                 diingat di login selanjutnya" — termasuk dari PDT atau
+  //                 laptop lain, yang tidak bisa dijawab localStorage.
+  //
+  // Urutan pemuatan: localStorage dulu (tersedia seketika, tidak ada kedipan),
+  // lalu akun menimpanya kalau ada. Akun menang karena ia pilihan yang SENGAJA
+  // disimpan orangnya, sementara localStorage bisa jadi sisa coba-coba.
+  const terapkan = useCallback((s: Saved) => {
+    if (s.widths && Object.keys(s.widths).length) { setWidths(s.widths); setFill(false); }
+    if (s.sort) setSort(s.sort);
+    if (s.filters) setFilters(s.filters);
+    if (s.hidden) setHidden(s.hidden);
+    if (s.order) setOrder(s.order);
+  }, []);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(storeKey);
-      if (raw) {
-        const s = JSON.parse(raw) as Saved;
-        if (s.widths && Object.keys(s.widths).length) { setWidths(s.widths); setFill(false); }
-        if (s.sort) setSort(s.sort);
-        if (s.filters) setFilters(s.filters);
-        if (s.hidden) setHidden(s.hidden);
-      }
+      if (raw) terapkan(JSON.parse(raw) as Saved);
     } catch { /* ignore */ }
     setLoaded(true);
-  }, [storeKey]);
+  }, [storeKey, terapkan]);
+
+  useEffect(() => {
+    let hidup = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/pref?key=grid:${encodeURIComponent(id)}`);
+        if (!r.ok) return;                     // belum login / tabel belum ada
+        const j = await r.json() as { value?: string | null };
+        if (!hidup || !j?.value) return;
+        setAdaDiAkun(true);
+        terapkan(JSON.parse(j.value) as Saved);
+      } catch { /* tata letak bukan hal yang boleh menggagalkan halaman */ }
+    })();
+    return () => { hidup = false; };
+  }, [id, terapkan]);
+
   useEffect(() => {
     if (!loaded) return;
-    try { localStorage.setItem(storeKey, JSON.stringify({ widths, sort, filters, hidden } satisfies Saved)); } catch { /* ignore */ }
-  }, [loaded, storeKey, widths, sort, filters, hidden]);
+    try { localStorage.setItem(storeKey, JSON.stringify({ widths, sort, filters, hidden, order } satisfies Saved)); } catch { /* ignore */ }
+  }, [loaded, storeKey, widths, sort, filters, hidden, order]);
 
-  const visibleCols = useMemo(() => columns.filter((c) => !hidden.includes(c.key)), [columns, hidden]);
+  /** Simpan tata letak sekarang ke AKUN. Filter sengaja TIDAK ikut — lihat di bawah. */
+  async function simpanKeAkun() {
+    setSimpan('kirim');
+    try {
+      // `filters` tidak disertakan dengan sengaja: filter itu pertanyaan sesaat
+      // ("tampilkan stok < 5"), bukan tata letak. Menyimpannya ke akun berarti
+      // besok pagi orangnya membuka tabel yang sudah tersaring dan mengira
+      // datanya hilang.
+      const value = JSON.stringify({ widths, sort, hidden, order } satisfies Saved);
+      const r = await fetch('/api/pref', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: `grid:${id}`, value }),
+      });
+      if (!r.ok) throw new Error('gagal');
+      setAdaDiAkun(true);
+      setSimpan('ok');
+      setTimeout(() => setSimpan(''), 2500);
+    } catch {
+      setSimpan('gagal');
+      setTimeout(() => setSimpan(''), 4000);
+    }
+  }
+
+  /**
+   * Kolom menurut urutan pilihan pemakai.
+   *
+   * Kolom yang TIDAK ada di `order` tidak boleh hilang dan tidak boleh menumpuk
+   * di belakang: itu kolom BARU yang ditambahkan sesudah tata letak disimpan —
+   * dan kalau ia menumpuk di ujung, fitur baru akan "tidak muncul" bagi semua
+   * orang yang pernah menekan Simpan. Kejadian nyata yang dicegah: kolom
+   * "Turunan Bundling" ditambahkan 9 Okt 2026, sehari sesudah kolom stok.
+   *
+   * Jadi kolom tak dikenal disisipkan PERSIS di tempat halaman menulisnya —
+   * tepat sesudah kolom dikenal terakhir sebelum dia.
+   */
+  const ordered = useMemo(() => {
+    if (!order.length) return columns;
+    const pos = new Map(order.map((k, i) => [k, i]));
+    let terakhir = -1;
+    let sisip = 0;
+    const berkunci = columns.map((c) => {
+      const p = pos.get(c.key);
+      if (p === undefined) { sisip += 1; return { c, k: terakhir + sisip / 1000 }; }
+      terakhir = p; sisip = 0;
+      return { c, k: p };
+    });
+    return berkunci.sort((a, b) => a.k - b.k).map((x) => x.c);
+  }, [columns, order]);
+
+  const visibleCols = useMemo(() => ordered.filter((c) => !hidden.includes(c.key)), [ordered, hidden]);
+
+  /** Pindahkan satu kolom ke posisi kolom lain. Menyimpan SELURUH urutan, termasuk yang disembunyikan. */
+  const pindahKolom = useCallback((dari: string, ke: string) => {
+    if (dari === ke) return;
+    const urut = ordered.map((c) => c.key);
+    const i = urut.indexOf(dari);
+    const j = urut.indexOf(ke);
+    if (i < 0 || j < 0) return;
+    urut.splice(j, 0, ...urut.splice(i, 1));
+    setOrder(urut);
+  }, [ordered]);
+
+  /** Geser satu langkah. Ini jalan masuk untuk PDT/HP, yang tidak punya tarik-lepas. */
+  const geserKolom = useCallback((key: string, arah: -1 | 1) => {
+    const urut = ordered.map((c) => c.key);
+    const i = urut.indexOf(key);
+    const j = i + arah;
+    if (i < 0 || j < 0 || j >= urut.length) return;
+    [urut[i], urut[j]] = [urut[j], urut[i]];
+    setOrder(urut);
+  }, [ordered]);
   const colMap = useMemo(() => new Map(columns.map((c) => [c.key, c])), [columns]);
 
   // ---- pipeline: preFilter → cari global → filter kolom → sort
@@ -293,8 +414,13 @@ export function DataGrid<T>(props: DataGridProps<T>) {
   const totalW = visibleCols.reduce((a, c) => a + colW(c), 0);
 
   function resetView() {
-    setWidths({}); setSort([]); setFilters({}); setHidden([]); setFill(true);
+    setWidths({}); setSort([]); setFilters({}); setHidden([]); setOrder([]); setFill(true);
     try { localStorage.removeItem(storeKey); } catch { /* ignore */ }
+    // Hapus juga yang di AKUN. Tanpa ini, Reset lalu muat ulang akan
+    // memunculkan kembali tata letak yang baru saja dibuang — dan yang
+    // dicurigai orang adalah tombol Resetnya, bukan dua tempat penyimpanan.
+    setAdaDiAkun(false);
+    fetch(`/api/pref?key=grid:${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => { /* ignore */ });
   }
 
   // ---- popover filter & menu kolom: tutup dengan ESC / klik luar
@@ -348,8 +474,20 @@ export function DataGrid<T>(props: DataGridProps<T>) {
             <option value="">Urutkan…</option>
             {columns.filter((c) => !c.noSort).flatMap((c) => [<option key={c.key + 'a'} value={`${c.key}:asc`}>{c.label} ▲</option>, <option key={c.key + 'd'} value={`${c.key}:desc`}>{c.label} ▼</option>])}
           </select>
+          <button
+            className="btn btn-sm"
+            onClick={simpanKeAkun}
+            disabled={simpan === 'kirim'}
+            title={'Ingat urutan & lebar kolom untuk akun ini — ikut terpakai saat login berikutnya, '
+              + 'termasuk dari komputer atau PDT lain. Filter TIDAK disimpan.'}
+          >
+            {simpan === 'kirim' ? 'Menyimpan…' : simpan === 'ok' ? 'Tersimpan ✓' : simpan === 'gagal' ? 'Gagal — coba lagi' : 'Simpan tampilan'}
+          </button>
           {toolbarExtra}
-          <span className="grid-count">{nfmt.format(processed.length)} entries{processed.length !== rows.length ? ` dari ${nfmt.format(rows.length)}` : ''}</span>
+          <span className="grid-count">
+            {adaDiAkun ? <span className="mr-2" title="Tata letak tabel ini diambil dari akun Anda">tata letak: akun</span> : null}
+            {nfmt.format(processed.length)} entries{processed.length !== rows.length ? ` dari ${nfmt.format(rows.length)}` : ''}
+          </span>
         </div>
       ) : null}
       {activeFilters.length ? (
@@ -372,9 +510,31 @@ export function DataGrid<T>(props: DataGridProps<T>) {
               {visibleCols.map((c) => {
                 const s = sort.find((x) => x.key === c.key);
                 return (
-                  <th key={c.key} className={`${c.align === 'right' || c.type === 'number' ? 'num' : ''} ${c.prio ?? ''} ${c.sticky ? 'sticky-col' : ''}`}
-                    aria-sort={s ? (s.dir === 'asc' ? 'ascending' : 'descending') : 'none'} title={c.title}>
+                  <th key={c.key}
+                    className={`${c.align === 'right' || c.type === 'number' ? 'num' : ''} ${c.prio ?? ''} ${c.sticky ? 'sticky-col' : ''}`
+                      + `${tarik === c.key ? ' is-drag' : ''}${atas === c.key && tarik && tarik !== c.key ? ' is-over' : ''}`}
+                    aria-sort={s ? (s.dir === 'asc' ? 'ascending' : 'descending') : 'none'} title={c.title}
+                    /*
+                      Tarik-lepas pakai DnD bawaan browser, bukan pointer events
+                      seperti gagang resize. Dua alasan: klik untuk mengurutkan
+                      tetap jalan (klik tanpa gerakan bukan drag), dan gagang
+                      resize memanggil preventDefault di pointerdown sehingga
+                      menariknya TIDAK ikut memindahkan kolom.
+                    */
+                    draggable
+                    onDragStart={(e) => { setTarik(c.key); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', c.key); } catch { /* Safari lama */ } }}
+                    onDragOver={(e) => { if (tarik) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
+                    onDragEnter={() => { if (tarik) setAtas(c.key); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const dari = tarik || (() => { try { return e.dataTransfer.getData('text/plain'); } catch { return ''; } })();
+                      if (dari) pindahKolom(dari, c.key);
+                      setTarik(null); setAtas(null);
+                    }}
+                    onDragEnd={() => { setTarik(null); setAtas(null); }}
+                  >
                     <div className="grid-th-inner">
+                      <span className="grid-grip hidden md:inline" aria-hidden="true" title="Tarik untuk memindahkan kolom">⠿</span>
                       {c.noSort ? <span className="grid-th-btn">{c.label}</span> : (
                         <button type="button" className="grid-th-btn" onClick={(e) => clickSort(c.key, e.shiftKey)} title={`${c.title ?? c.label} — klik untuk mengurutkan, Shift+klik bertingkat`}>{c.label}</button>
                       )}
@@ -457,14 +617,31 @@ export function DataGrid<T>(props: DataGridProps<T>) {
 
       {menu ? (
         <div className="grid-menu" style={{ left: menu.x, top: menu.y }} role="menu" aria-label="Kolom yang tampil">
-          {columns.map((c) => (
+          {/*
+            Daftarnya mengikuti URUTAN yang sedang berlaku, bukan urutan yang
+            ditulis halaman — kalau tidak, memindahkan kolom lewat ▲▼ akan
+            membuat barisnya melompat ke tempat lain di daftar ini.
+
+            ▲▼ ada karena PDT Zebra (lebar 360px) tidak punya tarik-lepas:
+            tanpa ini, fitur geser kolom hanya bisa dipakai orang yang memegang
+            mouse — dan tabel ini justru dibaca di gudang.
+          */}
+          {ordered.map((c, i) => (
             <label key={c.key}>
               <input type="checkbox" checked={!hidden.includes(c.key)} onChange={(e) => setHidden((h) => (e.target.checked ? h.filter((k) => k !== c.key) : [...h, c.key]))} />
-              {c.label}
+              <span className="grid-menu-label">{c.label}</span>
+              <button type="button" className="grid-menu-move" disabled={i === 0}
+                onClick={(e) => { e.preventDefault(); geserKolom(c.key, -1); }}
+                aria-label={`Pindahkan ${c.label} ke kiri`} title="Ke kiri">▲</button>
+              <button type="button" className="grid-menu-move" disabled={i === ordered.length - 1}
+                onClick={(e) => { e.preventDefault(); geserKolom(c.key, 1); }}
+                aria-label={`Pindahkan ${c.label} ke kanan`} title="Ke kanan">▼</button>
             </label>
           ))}
-          <div className="mt-1 border-t pt-1" style={{ borderColor: 'var(--border-subtle)' }}>
+          <div className="mt-1 space-y-1 border-t pt-1" style={{ borderColor: 'var(--border-subtle)' }}>
+            <button className="btn btn-sm w-full" onClick={() => { void simpanKeAkun(); setMenu(null); }}>Simpan tampilan ke akun</button>
             <button className="btn btn-sm w-full" onClick={() => { resetView(); setMenu(null); }}>Reset tampilan</button>
+            <div className="px-1 text-[11px] text-muted">Reset juga menghapus tata letak yang tersimpan di akun.</div>
           </div>
         </div>
       ) : null}

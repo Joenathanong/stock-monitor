@@ -115,27 +115,32 @@ export async function GET(req: Request) {
         ...filterTeks,
         'Kosong = BELUM DIPUTUSKAN (bukan "tidak"). Keduanya di luar pembagi, '
           + 'tapi hanya yang kosong masih menunggu orang memutuskan.',
-        'Kolom "Stok <cabang>" dan "Stok total" hanya keterangan — isinya diabaikan '
-          + 'saat berkas ini diunggah lagi. Yang dibaca hanya kolom bernama cabang.',
+        'Kolom "Stok <cabang>", "Stok total" dan "Turunan" hanya keterangan — isinya '
+          + 'diabaikan saat berkas ini diunggah lagi. Yang dibaca hanya kolom bernama cabang.',
       ],
       columns: [
+        // Urutan disamakan dengan layar (permintaan user 9 Okt 2026):
+        // SKU, Turunan, Stok total, lalu cabang & stoknya BERDAMPINGAN, dan
+        // Nama/Kategori/Brand di belakang. Berkas ini dan layar harus terbaca
+        // sama; dua urutan berbeda untuk data yang sama bikin salah kolom.
         { header: 'SKU', key: 'sku', width: 34 },
-        { header: 'Nama', key: 'name', width: 46 },
-        { header: 'Kategori', key: 'kat', width: 11 },
-        { header: 'Brand', key: 'brand', width: 12 },
+        { header: 'Turunan', key: 'turunan', width: 9 },
         { header: 'Stok total', key: 'stok', width: 11 },
-        // Keputusan dan stoknya BERDAMPINGAN per cabang (permintaan user 8 Okt
-        // 2026): sebaran ditentukan di Excel, dan menentukannya tanpa melihat
-        // stok cabang itu berarti menebak. Kolom "Stok ..." hanya untuk dibaca —
-        // importer melewatinya, jadi mengubahnya di Excel tidak mengubah apa pun.
+        // Kolom "Stok ..." hanya untuk DIBACA — importer melewatinya, jadi
+        // mengubahnya di Excel tidak mengubah apa pun. Ada supaya sebaran bisa
+        // ditentukan sambil melihat stok cabangnya, bukan menebak.
         ...data.areas.flatMap((a) => [
           { header: a, key: `a_${a}`, width: 13 },
           { header: `Stok ${a}`, key: `s_${a}`, width: 11 },
         ]),
+        { header: 'Nama', key: 'name', width: 46 },
+        { header: 'Kategori', key: 'kat', width: 11 },
+        { header: 'Brand', key: 'brand', width: 12 },
       ],
       rows: baris.map((s) => {
         const r: Record<string, unknown> = {
           sku: s.sku,
+          turunan: s.turunan.n || '',
           name: s.name,
           kat: s.kategori,
           brand: s.brand || '(tanpa brand)',
@@ -189,6 +194,59 @@ export async function GET(req: Request) {
       }).filter(Boolean) as Record<string, unknown>[]),
     },
   ];
+
+  // Lembar keempat: komposisi bundling, bentuk PANJANG (satu baris per
+  // komponen per cabang). Sengaja bukan matriks: terukur 9 Okt 2026 sebuah
+  // bundle bisa punya 14 komponen, jadi matriks komponen x cabang akan
+  // melebar tak terkendali dan tidak bisa di-pivot.
+  //
+  // Hanya SKU yang punya turunan yang masuk — kalau tidak, 73% barisnya bundle
+  // tanpa komposisi dan lembar ini jadi daftar baris kosong.
+  const barisTurunan = baris.filter((s) => s.turunan.n > 0);
+  if (barisTurunan.length) {
+    lembar.push({
+      nama: 'Turunan',
+      catatan: [
+        `Komposisi bundling — ${tgl}. Dari OCS /master/bundle; HANYA keterangan, tidak bisa diunggah balik.`,
+        ...filterTeks,
+        '"Bisa dibentuk" = floor(stok komponen / qty per bundle), dan angka bundle-nya '
+          + 'adalah yang TERKECIL antar komponen — satu komponen habis berarti bundle tidak bisa dijanjikan.',
+        'Angka itu HITUNGAN KAMI, bukan angka OCS. Kolom "Stok bundle (OCS)" adalah angka '
+          + 'yang dipakai menghitung ATP. Kalau keduanya beda, itu informasi — bukan salah satunya salah.',
+      ],
+      columns: [
+        { header: 'Bundle SKU', key: 'bsku', width: 34 },
+        { header: 'Nama bundle', key: 'bname', width: 46 },
+        { header: 'Komponen SKU', key: 'isku', width: 34 },
+        { header: 'Nama komponen', key: 'iname', width: 40 },
+        { header: 'Qty per bundle', key: 'qty', width: 14 },
+        { header: 'Cabang', key: 'area', width: 14 },
+        { header: 'Stok komponen', key: 'istok', width: 14 },
+        { header: 'Status komponen', key: 'status', width: 16 },
+        { header: 'Bisa dibentuk', key: 'muat', width: 13 },
+        { header: 'Pembatas cabang ini', key: 'pembatas', width: 22 },
+        { header: 'Bundle bisa dibentuk', key: 'bmuat', width: 20 },
+        { header: 'Stok bundle (OCS)', key: 'bstok', width: 18 },
+      ],
+      rows: barisTurunan.flatMap((s) => s.turunan.turunan.flatMap((k) => data.areas.map((a) => {
+        const x = k.area[a];
+        return {
+          bsku: s.sku,
+          bname: s.name,
+          isku: k.itemSku,
+          iname: k.name,
+          qty: k.qty,
+          area: a,
+          istok: x?.stok === null || x?.stok === undefined ? 'tidak terdaftar' : x.stok,
+          status: x?.aktif === null || x?.aktif === undefined ? 'tidak terdaftar' : x.aktif ? 'aktif' : 'NONAKTIF',
+          muat: x?.muat === null || x?.muat === undefined ? '' : x.muat,
+          pembatas: s.turunan.pembatas[a] === k.itemSku ? 'YA' : '',
+          bmuat: s.turunan.muat[a] === null || s.turunan.muat[a] === undefined ? 'tidak diketahui' : s.turunan.muat[a],
+          bstok: s.area[a] ? s.area[a].availableQty : '',
+        };
+      }))),
+    });
+  }
 
   const buffer = await writeWorkbook(lembar);
   const tandaBrand = brand === 'ALL' ? '' : `-${brand.replace(/[^A-Za-z0-9]+/g, '')}`;

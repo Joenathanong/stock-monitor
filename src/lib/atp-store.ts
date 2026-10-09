@@ -15,15 +15,16 @@ import { prisma } from './prisma';
 import { toDateKeyUtc } from './dates';
 import {
   AMBANG_ATP_BAWAAN, kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan, skuBelumDiset,
+  susunTurunan,
   type BarisStokAtp, type Sebaran, type HasilArea, type SebabTolak, type SaringAktif,
-  type SkuBelumDiset,
+  type SkuBelumDiset, type PetaBundle, type RingkasTurunan,
 } from './atp';
 
 /** Benar kalau tabel ATP-nya belum dibuat (db:push belum dijalankan). */
 function tabelBelumAda(e: unknown): boolean {
   const m = e instanceof Error ? e.message : String(e);
   // Apostrof dihindari di regex — lihat catatan sama di sku-link-store.ts.
-  return /atp_share|atp_daily|sku_brand/i.test(m)
+  return /atp_share|atp_daily|sku_brand|bundle_item/i.test(m)
     && /doesn.t exist|does not exist|Unknown table|P2021/i.test(m);
 }
 
@@ -77,6 +78,31 @@ export async function muatStokAtp(): Promise<BarisAtp[]> {
       brand: String(r.brand ?? ''),
       brandManual: Boolean(r.brandManual),
     }));
+}
+
+/**
+ * Komposisi bundling dari `bundle_item` — bundleSku -> daftar komponen.
+ *
+ * Tabel belum ada BUKAN galat: halaman ATP harus tetap terbuka supaya user bisa
+ * membaca "jalankan db:push", sama seperti `muatSebaran()`. Kolom turunannya
+ * yang akan kosong, bukan halamannya.
+ */
+export async function muatKomposisiBundle(): Promise<{ peta: PetaBundle; siap: boolean; nBundle: number }> {
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ bundleSku: string; itemSku: string; qty: number }[]>(
+      'SELECT bundleSku, itemSku, qty FROM bundle_item ORDER BY bundleSku, itemSku',
+    );
+    const peta: PetaBundle = new Map();
+    for (const r of rows) {
+      const list = peta.get(r.bundleSku) ?? [];
+      list.push({ itemSku: r.itemSku, qty: Number(r.qty ?? 1) });
+      peta.set(r.bundleSku, list);
+    }
+    return { peta, siap: true, nBundle: peta.size };
+  } catch (e) {
+    if (tabelBelumAda(e)) return { peta: new Map(), siap: false, nBundle: 0 };
+    throw e;
+  }
 }
 
 /** Keputusan sebaran dari `atp_share`. Tidak ada baris = belum diputuskan. */
@@ -257,6 +283,11 @@ export type MuatAtp = {
      * jadi mengurutkannya tidak pernah mengurutkan angkanya.
      */
     stokTotal: number;
+    /**
+     * Turunan bundling — HANYA untuk ditampilkan (permintaan user 9 Okt 2026).
+     * `n: 0` berarti bukan bundle, atau komposisinya belum ditarik dari OCS.
+     */
+    turunan: RingkasTurunan;
     /** Per area: keadaan SKU ini di sana. */
     area: Record<string, {
       /** true/false = sudah diputuskan; null = belum. */
@@ -280,6 +311,10 @@ export type MuatAtp = {
   saring: SaringAktif;
   /** Jumlah BARIS (sku × area) per status, untuk label tombol filter. */
   cacah: { aktif: number; nonaktif: number; semua: number };
+  /** false = tabel `bundle_item` belum ada; kolom Turunan harus bilang begitu. */
+  bundleSiap: boolean;
+  /** Berapa bundle yang komposisinya tersimpan — untuk dilaporkan di layar. */
+  bundleTersimpan: number;
   /**
    * SKU yang belum pernah diputuskan sebarannya — dasar pengingat di /atp.
    *
@@ -303,9 +338,23 @@ export async function muatAtp(
   /** Baris mana yang DITAMPILKAN di tabel. Tidak mengubah persennya. */
   saring: SaringAktif = 'AKTIF',
 ): Promise<MuatAtp> {
-  const [rows, { sebaran, siap }, catatan] = await Promise.all([
-    muatStokAtp(), muatSebaran(), muatCatatanSebaran(),
+  const [rows, { sebaran, siap }, catatan, bundle] = await Promise.all([
+    muatStokAtp(), muatSebaran(), muatCatatanSebaran(), muatKomposisiBundle(),
   ]);
+
+  // Peta stok per SKU per area, dibangun SEKALI dari baris yang memang sudah
+  // dibaca di atas. Turunan bundling membacanya dari sini, jadi fitur itu tidak
+  // menambah satu pun kueri stok — yang ditambah cuma satu bacaan bundle_item.
+  //
+  // Dibangun dari `rows` PENUH, bukan dari baris yang tersaring tampilan: sebuah
+  // komponen bisa nonaktif (karena itu tersaring keluar) dan justru itu yang
+  // perlu terlihat di daftar turunan.
+  const stokPerSku = new Map<string, Map<string, { availableQty: number; isActive: boolean; name: string }>>();
+  for (const r of rows) {
+    let per = stokPerSku.get(r.sku);
+    if (!per) { per = new Map(); stokPerSku.set(r.sku, per); }
+    per.set(r.areaId, { availableQty: r.availableQty, isActive: r.isActive, name: r.name });
+  }
 
   const areas = [...new Set(rows.map((r) => r.areaId))].filter(Boolean).sort((a, b) => a.localeCompare(b));
 
@@ -332,7 +381,9 @@ export async function muatAtp(
     if (!b) {
       b = {
         sku: r.sku, name: r.name, brand: r.brand, brandManual: r.brandManual,
-        kategori: String(r.category ?? ''), stokTotal: 0, area: {}, lain: {},
+        kategori: String(r.category ?? ''), stokTotal: 0,
+        turunan: susunTurunan(r.sku, bundle.peta, stokPerSku, areas),
+        area: {}, lain: {},
       };
       perSku.set(r.sku, b);
     }
@@ -377,6 +428,8 @@ export async function muatAtp(
   return {
     areas, sku, hasil, keseluruhan, ambang, siap, tanpaBrand, saring,
     cacah: { aktif: jumlahAktif, nonaktif: rows.length - jumlahAktif, semua: rows.length },
+    bundleSiap: bundle.siap,
+    bundleTersimpan: bundle.nBundle,
     // 'AKTIF' ditulis tegas: yang perlu diputuskan hanya yang benar-benar bisa
     // dijanjikan. Memakai `saring` akan membuat pengingatnya berubah isi tiap
     // kali filter tampilan digeser.

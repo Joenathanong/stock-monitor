@@ -138,3 +138,15 @@ test('cabang yang namanya diawali "Stok" tetap terbaca sebagai cabang', () => {
   assert.deepEqual(h.kolomAsing, []);
   assert.deepEqual(h.putusan, [{ sku: 'A', areaId: 'Stokholm', dibagikan: true }]);
 });
+
+test('kolom Turunan di lembar unduhan juga diabaikan, bukan dianggap asing', () => {
+  // Ditambahkan 9 Okt 2026 bersamaan dengan kolom Turunan Bundling. Kolom yang
+  // KITA tulis sendiri tidak boleh memunculkan tanda "berkasnya salah".
+  const h = susunImpor(
+    [{ sku: 'A', turunan: 3, stoktotal: 10, pusat: 'Ya', medan: '' }],
+    AREAS, DIKENAL, new Map(),
+  );
+  assert.deepEqual(h.kolomAsing, []);
+  assert.deepEqual(h.masalah, [], 'angka 3 di kolom Turunan tidak jadi "isi tidak dikenali"');
+  assert.deepEqual(h.putusan, [{ sku: 'A', areaId: 'Pusat', dibagikan: true }]);
+});

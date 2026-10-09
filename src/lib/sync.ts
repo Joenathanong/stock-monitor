@@ -5,7 +5,7 @@
  * supaya halaman tetap cepat walaupun OCS sedang lambat atau mati.
  */
 import { prisma } from './prisma';
-import { fetchProductPrices, fetchStock, fetchSalesForDate, fetchReceiveDocs, fetchReceiveLines, demandStatusCodes, ALL_STATUS_CODES, type OcsSalesRow } from './ocs';
+import { fetchProductPrices, fetchStock, fetchSalesForDate, fetchReceiveDocs, fetchReceiveLines, fetchBundleStock, mapBundleItems, demandStatusCodes, ALL_STATUS_CODES, type OcsSalesRow } from './ocs';
 import { mapReceive, type OcsReceiveLine } from './receive';
 import { petaArea, areaAktifDb } from './area-store';
 import { sapKey } from './phase-out';
@@ -52,7 +52,7 @@ export async function releaseLock(name: string, owner: string) {
 
 export const lockOwner = () => `${process.env.VERCEL ? 'vercel' : 'local'}:${process.pid}:${Date.now()}`;
 
-export async function startLog(kind: 'STOCK' | 'SALES' | 'COMPUTE', trigger: string) {
+export async function startLog(kind: 'STOCK' | 'SALES' | 'COMPUTE' | 'BUNDLE', trigger: string) {
   return prisma.syncLog.create({ data: { kind, trigger, status: 'running' } });
 }
 
@@ -395,6 +395,89 @@ export async function syncTransit(
         : `${hasil.transit.length} baris dari ${docs.length} dokumen (${dariCache} dari cache) · ${dihapus} baris lama dihapus`),
     durationMs: Date.now() - t0,
   };
+}
+
+// ------------------------------------------------- komposisi bundling (ATP)
+
+/**
+ * Tarik komposisi bundling OCS ke `bundle_item`.
+ *
+ * TIDAK ikut tombol Refresh. Komposisi bundling itu master data yang jarang
+ * berubah, payloadnya 2,5 MB, dan Refresh sudah punya pekerjaan yang harus
+ * selesai dalam 60 detik. Jadi penarikannya: tombol sendiri di /atp, cron ATP,
+ * atau `npm run sync:bundle`.
+ *
+ * Pembersihan baris lama dikerjakan dengan `pulledAt < now` SETELAH penulisan,
+ * dan HANYA kalau penulisannya ada isinya — persis pola `sync:supplier`. Kalau
+ * penarikan menjawab daftar kosong (OCS sedang aneh, atau respons berubah
+ * bentuk), menghapus berdasarkan daftar kosong akan menghapus SELURUH komposisi
+ * dan kolom Turunan jadi kosong tanpa ada yang tahu sebabnya.
+ */
+export type BundleSyncResult = SyncResult & { bundle?: number; komponen?: number };
+
+export async function syncBundle(
+  budgetMs = 45_000,
+  refreshHours = 12,
+  force = false,
+): Promise<BundleSyncResult> {
+  const t0 = Date.now();
+  const owner = lockOwner();
+  if (!(await acquireLock('bundle', owner))) {
+    return { ok: true, skipped: true, rows: 0, message: 'Penarikan bundling lain sedang berjalan', durationMs: 0 };
+  }
+  const log = await startLog('BUNDLE', 'manual');
+  try {
+    if (!force && refreshHours > 0) {
+      // Baris PALING TUA, bukan paling baru — pelajaran dari bug transit
+      // `desc` 8 Okt 2026: satu baris yang baru ditulis membuat seluruh tabel
+      // tampak segar dan mengunci penarikan berikutnya.
+      const terlama = await prisma.bundleItem.findFirst({
+        orderBy: { pulledAt: 'asc' }, select: { pulledAt: true },
+      });
+      if (terlama && Date.now() - terlama.pulledAt.getTime() < refreshHours * 3_600_000) {
+        await finishLog(log.id, 'ok', 0);
+        return { ok: true, skipped: true, rows: 0, message: 'Komposisi bundling masih segar', durationMs: Date.now() - t0 };
+      }
+    }
+
+    const mentah = await fetchBundleStock(Math.min(40_000, budgetMs));
+    const items = mapBundleItems(mentah);
+    if (!items.length) {
+      await finishLog(log.id, 'ok', 0);
+      return {
+        ok: true, rows: 0, bundle: 0, komponen: 0,
+        message: `OCS menjawab ${mentah.length} bundle tapi 0 komponen terbaca — `
+          + 'komposisi lama DIPERTAHANKAN, tidak ditimpa daftar kosong.',
+        durationMs: Date.now() - t0,
+      };
+    }
+
+    const now = new Date();
+    for (let i = 0; i < items.length; i += BATCH) {
+      const chunk = items.slice(i, i + BATCH);
+      const ph = chunk.map(() => '(?,?,?,?,?)').join(',');
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO bundle_item (bundleSku, itemSku, qty, name, pulledAt) VALUES ${ph}
+         ON DUPLICATE KEY UPDATE qty=VALUES(qty), name=VALUES(name), pulledAt=VALUES(pulledAt)`,
+        ...chunk.flatMap((x) => [x.bundleSku, x.itemSku, x.qty, x.name, now]),
+      );
+    }
+    const dihapus = await prisma.bundleItem.deleteMany({ where: { pulledAt: { lt: now } } });
+
+    const nBundle = new Set(items.map((x) => x.bundleSku)).size;
+    await finishLog(log.id, 'ok', items.length);
+    return {
+      ok: true, rows: items.length, bundle: nBundle, komponen: items.length,
+      message: `${nBundle} bundle, ${items.length} baris komponen; ${dihapus.count} baris lama dihapus`,
+      durationMs: Date.now() - t0,
+    };
+  } catch (err) {
+    const pesan = err instanceof Error ? err.message : String(err);
+    await finishLog(log.id, 'error', 0, pesan);
+    return { ok: false, rows: 0, message: pesan, durationMs: Date.now() - t0 };
+  } finally {
+    await releaseLock('bundle', owner);
+  }
 }
 
 // ---------------------------------------------------------------- stok

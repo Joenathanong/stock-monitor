@@ -421,7 +421,7 @@ model AuditLog {
 
 model SyncLog {
   id         BigInt    @id @default(autoincrement())
-  kind       String    @db.VarChar(16) // STOCK | SALES | COMPUTE
+  kind       String    @db.VarChar(16) // STOCK | SALES | COMPUTE | BUNDLE
   trigger    String    @default("cron") @db.VarChar(20)
   startedAt  DateTime  @default(now())
   finishedAt DateTime?
@@ -506,6 +506,47 @@ model SkuBrand {
 
   @@index([brand])
   @@map("sku_brand")
+}
+
+/// Komposisi bundling — SKU turunan dari sebuah bundle.
+///
+/// Sumbernya `GET /MasterData/GetBundleStock` di OCS (dibongkar 9 Okt 2026 dari
+/// halaman /master/bundle, bukan ditebak). Bentuk responsnya:
+///
+///   { BundleSku, BundleName, TotalQty, TotalAvailableQty,
+///     Stocks: [{ AreaId, AvailableQty }],
+///     Items:  [{ SellerSku, SellerSkuQty, TotalAvailableQty,
+///                Stocks: [{ AreaId, AvailableQty }] }] }
+///
+/// Terukur saat dibongkar: 2.029 bundle, 6.040 baris komponen, rata-rata 2,98
+/// komponen, PALING BANYAK 14, paling sedikit 1, dan tidak ada satu pun bundle
+/// tanpa komponen. `SellerSkuQty` sampai 10. Area yang muncul persis 5 cabang
+/// kita. Payload 2,5 MB, 2,4 detik.
+///
+/// YANG DISIMPAN HANYA KOMPOSISINYA — qty per bundle. `Items[].Stocks` dan
+/// `TotalAvailableQty` SENGAJA TIDAK disimpan: stok per SKU per area sudah ada
+/// di `stock_current`, yang ditarik tiap Refresh. Menyimpannya dua kali berarti
+/// dua angka bernama sama yang bisa berbeda umur, dan yang akan dicurigai user
+/// adalah perhitungannya — bukan dua sumbernya. Status aktif komponen juga
+/// dibaca dari `stock_current.isActive`, bukan dari sini.
+///
+/// Komposisi bundling itu master data yang jarang berubah, jadi TIDAK ditarik
+/// tiap Refresh (lihat `bundle_refresh_hours`).
+model BundleItem {
+  /// SKU bundle-nya — sama persis dengan `stock_current.sku` berkategori Bundle.
+  bundleSku String   @db.VarChar(120)
+  /// SKU komponennya. Bisa Sku maupun Gimmick.
+  itemSku   String   @db.VarChar(120)
+  /// Berapa pcs komponen ini per satu bundle (`SellerSkuQty`).
+  qty       Int      @default(1)
+  /// Nama bundle dari OCS — disimpan supaya bundle yang TIDAK ada di
+  /// stock_current masih bisa disebut namanya saat dilaporkan.
+  name      String   @default("") @db.VarChar(500)
+  pulledAt  DateTime @default(now())
+
+  @@id([bundleSku, itemSku])
+  @@index([itemSku])
+  @@map("bundle_item")
 }
 
 /// Sebaran SKU ke cabang — lapisan keputusan MANUSIA, di atas `isActive` OCS.

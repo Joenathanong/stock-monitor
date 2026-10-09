@@ -926,3 +926,131 @@ Penjaga: `src/lib/token-css.test.ts` — setiap `var(--nama)` tanpa fallback har
 menunjuk token yang benar-benar didefinisikan di `src`. `var(--nama, cadangan)`
 dikecualikan, karena menulis cadangan berarti penulisnya memang tahu tokennya
 bisa tidak ada.
+
+## Turunan bundling di /atp (9 Okt 2026) — TAMPILAN saja
+
+Permintaan user: setiap SKU bundling menampilkan produk turunannya berikut
+status aktif/nonaktifnya, dan urutan kolom jadi `SKU, Turunan Bundling, Stock
+Total, Makassar, Stock Makassar, …`. Ditegaskan user: **hanya menampilkan,
+tidak sampai mengedit.**
+
+### Sumber datanya — dibongkar, bukan ditebak
+
+Sebelum ini TIDAK ADA satu pun sumber yang kita pegang yang tahu isi sebuah
+bundle: `DTO_WmsItemStockLiteV2` tidak punya kolom parent/child,
+`DTO_LookupStockDetailedData` hanya brand, `/Products/GetProductSkus` hanya
+harga, dan `sku_link` itu kode SAP. User menunjuk halamannya
+(`ocs.iegsystem.id/master/bundle`) dan endpoint di belakangnya dibongkar dari
+browser 9 Okt 2026:
+
+```
+GET /MasterData/GetBundleStock      (BUKAN OData — array polos, tanpa paging)
+
+[{ BundleSku, BundleName, TotalQty, TotalAvailableQty,
+   Stocks: [{ AreaId, AvailableQty }],
+   Items:  [{ SellerSku, SellerSkuQty, TotalAvailableQty,
+              Stocks: [{ AreaId, AvailableQty }] }] }]
+```
+
+Yang TERUKUR saat itu, dan ikut membentuk desainnya:
+
+| hal | angka |
+|---|---|
+| bundle | 2.029 |
+| baris komponen | 6.040 |
+| komponen per bundle | rata-rata 2,98 — **paling banyak 14**, paling sedikit 1 |
+| bundle tanpa komponen | 0 |
+| `SellerSkuQty` | 1 … 10 |
+| area | persis 5 cabang kita |
+| payload | 2,5 MB dalam 2,4 detik |
+| prefiks | 2.028 `BDL-`, **1 `GIMMICK-`** |
+
+Dua angka itu langsung jadi keputusan desain: **14 komponen** berarti kolomnya
+tidak boleh memuat daftar komponen sebagai teks (baris rincian yang dibuka,
+bukan sel), dan **1 baris berawalan GIMMICK** berarti daftar ini TIDAK boleh
+disaring dengan `adalahBundle()` — satu baris akan hilang diam-diam.
+
+### Yang disimpan: HANYA komposisinya
+
+Tabel baru `bundle_item` (bundleSku, itemSku, qty, name) — 6.040 baris.
+`Items[].Stocks` dan `TotalAvailableQty` **sengaja tidak disimpan**: stok per SKU
+per area sudah ada di `stock_current` yang ditarik tiap Refresh. Menyimpannya
+dua kali berarti dua angka bernama sama dengan umur berbeda, dan yang akan
+dicurigai user adalah perhitungannya — bukan dua sumbernya. Status aktif
+komponen juga dibaca dari `stock_current.isActive`, bukan dari sini.
+
+Akibatnya fitur ini **tidak menambah satu pun kueri stok**: `muatAtp` membangun
+peta stok sekali dari baris yang memang sudah dibacanya, dan yang ditambah cuma
+satu bacaan `bundle_item`.
+
+### Penarikannya TIDAK ikut tombol Refresh
+
+Komposisi bundling itu master data yang jarang berubah dan payloadnya 2,5 MB,
+sementara Refresh harus selesai dalam 60 detik. Jadi tiga jalan: tombol
+**"Tarik komposisi bundling"** di toolbar tabel `/atp` (`force=1` — orang yang
+sengaja menekan tidak boleh ditahan jeda), cron ATP, dan `npm run sync:bundle`.
+Jeda otomatisnya `bundle_refresh_hours` (bawaan 12).
+
+Dua pengaman yang sengaja dipasang:
+
+- **Daftar kosong TIDAK menimpa apa pun.** Kalau OCS menjawab 0 komponen,
+  komposisi lama dipertahankan dan dilaporkan. Tanpa ini, satu respons aneh
+  menghapus seluruh komposisi dan kolom Turunan jadi kosong tanpa sebab.
+- Pemeriksaan kesegaran membaca baris **PALING TUA** (`pulledAt asc`), bukan
+  paling baru — pelajaran dari bug transit `desc` 8 Okt 2026, di mana satu baris
+  yang baru ditulis membuat seluruh tabel tampak segar dan mengunci penarikan
+  berikutnya selama 3 jam.
+- Di cron ATP, komposisi ditarik **lebih dulu** dan kegagalannya **tidak**
+  membatalkan perekaman `atp_daily`: kolom layar bisa menunggu, riwayat harian
+  tidak bisa dibuat ulang besok.
+
+### Yang ditampilkan, dan kenapa
+
+Kolom `Turunan Bundling` memuat ringkasan + tombol; nilai sort/filter-nya
+**jumlah komponen** (angka), supaya "urutkan dari bundle paling rumit" dan
+"filter > 5 komponen" bisa. Sel kosong membedakan **"bukan Bundle"** dari
+**"komposisinya belum ditarik"** — dua hal yang butuh tindakan berbeda, dan "—"
+polos pernah jadi pertanyaan user 8 Okt.
+
+Baris rinciannya memuat, per komponen: `qty/bundle`, stok per cabang, status
+**per cabang** (bukan satu nilai global — `isActive` OCS memang per (sku, area),
+jadi satu komponen bisa aktif di Makassar dan nonaktif di Medan), dan
+`floor(stok / qty)`.
+
+Lalu dua baris penutup yang berdampingan:
+
+```
+Bisa dibentuk menurut komponen   (hitungan kami, bukan angka OCS)
+Tercatat OCS (yang dipakai ATP)
+```
+
+`susunTurunan` menghitung yang pertama sebagai `min(floor(stok/qty))` atas
+seluruh komponen, dan menandai komponen **pembatas** per cabang. Itulah yang
+menjawab "kenapa bundling ini kosong padahal komponennya ada". Dua aturan yang
+dikunci di tes:
+
+- komponen yang **tidak terdaftar** di sebuah cabang membuat jawabannya `null`,
+  bukan dilewati — melewatinya memberi angka terlalu optimistis dari komponen
+  yang tersisa, tanpa satu pun tanda bahwa angkanya tidak lengkap;
+- angka OCS **tidak pernah ditimpa**. Kalau keduanya beda, itu informasi yang
+  perlu dilihat orang. ATP tetap memakai angka OCS.
+
+### Urutan kolom
+
+Sekarang persis seperti yang diminta user:
+
+```
+SKU | Turunan Bundling | Stok total | Makassar | Stok Makassar | Medan | Stok Medan | … | Nama | Kategori | Brand
+```
+
+Nama/Kategori/Brand dipindah ke belakang karena urutan yang diminta menaruh
+cabang lebih dulu; ketiganya tetap bisa diurutkan & difilter, Brand tetap bisa
+diklik untuk diedit, dan Nama tetap jadi judul kartu di mode HP.
+
+Lembar **Sebaran** di Excel memakai urutan yang SAMA — dua urutan berbeda untuk
+data yang sama adalah cara orang salah kolom. Kolom `Turunan` ikut masuk
+`KOLOM_KETERANGAN` di importer supaya tidak dilaporkan sebagai "kolom asing".
+
+Lembar baru **Turunan** (bentuk panjang: satu baris per komponen per cabang,
+bukan matriks — 14 komponen akan melebar tak terkendali) memuat qty, stok,
+status, bisa-dibentuk, penanda pembatas, dan angka OCS berdampingan.

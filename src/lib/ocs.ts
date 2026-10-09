@@ -276,6 +276,96 @@ export function mapProductPrices(rows: OcsProductSkuRow[], pick: 'MIN' | 'MAX' |
   return [...out.values()];
 }
 
+// ---------- Komposisi bundling ----------
+
+/** Satu baris komponen di dalam sebuah bundle. Nama medan apa adanya dari OCS. */
+export type OcsBundleItemRow = {
+  SellerSku?: string;
+  SellerSkuQty?: number;
+  TotalAvailableQty?: number;
+  Stocks?: { AreaId?: string; AvailableQty?: number }[];
+};
+
+/** Satu bundle dari /MasterData/GetBundleStock. */
+export type OcsBundleRow = {
+  BundleSku?: string;
+  BundleName?: string;
+  /** Jumlah SELURUH qty komponen (mis. 2+1 = 3), bukan jumlah jenis komponen. */
+  TotalQty?: number;
+  TotalAvailableQty?: number;
+  Stocks?: { AreaId?: string; AvailableQty?: number }[];
+  Items?: OcsBundleItemRow[];
+};
+
+/**
+ * Tarik komposisi seluruh bundling.
+ *
+ * DIBONGKAR LANGSUNG dari halaman /master/bundle 9 Okt 2026 — bukan ditebak:
+ *
+ *   endpoint  GET /MasterData/GetBundleStock   (BUKAN OData; array polos)
+ *   bentuk    { BundleSku, BundleName, TotalQty, TotalAvailableQty,
+ *               Stocks: [{AreaId, AvailableQty}],
+ *               Items:  [{SellerSku, SellerSkuQty, TotalAvailableQty,
+ *                         Stocks: [{AreaId, AvailableQty}]}] }
+ *
+ * Terukur saat itu: 2.029 bundle, 6.040 baris komponen, rata-rata 2,98 dan
+ * PALING BANYAK 14 komponen, tidak ada bundle tanpa komponen, `SellerSkuQty`
+ * sampai 10, area persis 5 cabang kita, payload 2,5 MB dalam 2,4 detik.
+ *
+ * Catatan: 2.028 dari 2.029 berawalan `BDL-`, satu berawalan `GIMMICK-`. Jadi
+ * JANGAN menyaring daftar ini dengan `adalahBundle()` — satu baris akan hilang.
+ *
+ * Anggaran waktunya besar karena payloadnya besar; endpoint ini tidak dipanggil
+ * tiap Refresh (lihat `bundle_refresh_hours`).
+ */
+export async function fetchBundleStock(budgetMs = 40_000): Promise<OcsBundleRow[]> {
+  const attempts = budgetMs >= 30_000 ? 2 : 1;
+  const perAttempt = Math.max(12_000, Math.floor((budgetMs - (attempts - 1) * 2_000) / attempts));
+  const data = await authedGet<OcsBundleRow[] | { value: OcsBundleRow[] }>(
+    '/MasterData/GetBundleStock', perAttempt, attempts,
+  );
+  const rows = Array.isArray(data) ? data : data?.value;
+  if (!Array.isArray(rows)) throw new Error('Format respons GetBundleStock tidak dikenali');
+  return rows;
+}
+
+/** Satu baris siap tulis ke `bundle_item`. */
+export type KomponenBundle = { bundleSku: string; itemSku: string; qty: number; name: string };
+
+/**
+ * Bagian murni — dipisah supaya bisa diuji tanpa jaringan.
+ *
+ * Yang dibuang dan alasannya:
+ *   - komponen tanpa `SellerSku`   -> tidak bisa dihubungkan ke apa pun;
+ *   - qty <= 0 atau bukan angka    -> jadi 1, BUKAN dibuang: bundle yang
+ *     komponennya hilang separuh lebih menyesatkan daripada qty yang dibulatkan,
+ *     dan qty 0 untuk komponen yang terdaftar tidak punya arti;
+ *   - komponen GANDA dalam satu bundle -> qty-nya DIJUMLAHKAN, bukan yang
+ *     terakhir menang. Kunci tabelnya (bundleSku, itemSku), jadi tanpa ini satu
+ *     baris akan menimpa yang lain diam-diam dan isi bundle jadi berkurang.
+ *   - komponen yang menunjuk dirinya sendiri -> dibuang; itu akan membuat
+ *     "pembatas" menghitung dirinya sendiri.
+ */
+export function mapBundleItems(rows: OcsBundleRow[]): KomponenBundle[] {
+  const out = new Map<string, KomponenBundle>();
+  for (const b of rows) {
+    const bundleSku = String(b.BundleSku ?? '').trim();
+    if (!bundleSku) continue;
+    const name = String(b.BundleName ?? '').trim().slice(0, 500);
+    for (const it of b.Items ?? []) {
+      const itemSku = String(it.SellerSku ?? '').trim();
+      if (!itemSku || itemSku === bundleSku) continue;
+      const n = Number(it.SellerSkuQty);
+      const qty = Number.isFinite(n) && n > 0 ? Math.trunc(n) : 1;
+      const k = `${bundleSku}\u0000${itemSku}`;
+      const ada = out.get(k);
+      if (ada) ada.qty += qty;
+      else out.set(k, { bundleSku, itemSku, qty, name });
+    }
+  }
+  return [...out.values()];
+}
+
 // ---------- Penjualan ----------
 
 export type OcsSalesRow = {

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {
   AMBANG_ATP_BAWAAN, PRIORITAS_BRAND, brandMenang, adalahBundle, skuKotor,
   kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan, persenTeks,
-  petaBrand, skuBelumDiset,
-  type BarisStokAtp, type Sebaran,
+  petaBrand, skuBelumDiset, susunTurunan,
+  type BarisStokAtp, type Sebaran, type PetaBundle,
 } from './atp';
 
 const baris = (o: Partial<BarisStokAtp> = {}): BarisStokAtp => ({
@@ -353,4 +353,113 @@ test('skuBelumDiset: daftarnya tidak terpengaruh ambang maupun jumlah stok', () 
   // "disebar tapi kosong" adalah angka yang menurunkan ATP.
   const rows = [brs('A', 'Pusat', { availableQty: 0 })];
   assert.deepEqual(skuBelumDiset(rows, new Map()).map((x) => x.sku), ['A']);
+});
+
+// --------------------------------------------------------------------------
+// susunTurunan — turunan bundling, TAMPILAN saja (9 Okt 2026)
+// --------------------------------------------------------------------------
+
+const AREAS = ['Makassar', 'Medan'];
+
+/** stokPerSku: sku -> area -> { availableQty, isActive, name } */
+const stok = (
+  isi: [string, string, number, boolean?][],
+): Map<string, Map<string, { availableQty: number; isActive: boolean; name: string }>> => {
+  const m = new Map<string, Map<string, { availableQty: number; isActive: boolean; name: string }>>();
+  for (const [sku, area, qty, aktif] of isi) {
+    let per = m.get(sku);
+    if (!per) { per = new Map(); m.set(sku, per); }
+    per.set(area, { availableQty: qty, isActive: aktif ?? true, name: `Nama ${sku}` });
+  }
+  return m;
+};
+
+const peta = (isi: [string, string, number][]): PetaBundle => {
+  const m: PetaBundle = new Map();
+  for (const [b, i, q] of isi) {
+    const l = m.get(b) ?? [];
+    l.push({ itemSku: i, qty: q });
+    m.set(b, l);
+  }
+  return m;
+};
+
+test('bukan bundle / komposisi belum ada → n 0, bukan melempar', () => {
+  const h = susunTurunan('SKU-BIASA', new Map(), stok([['SKU-BIASA', 'Medan', 10]]), AREAS);
+  assert.equal(h.n, 0);
+  assert.deepEqual(h.turunan, []);
+  assert.equal(h.adaNonaktif, false);
+});
+
+test('qty per bundle ikut menentukan berapa yang bisa dibentuk', () => {
+  // 100 pcs komponen dengan qty 2 per bundle = 50 bundle, bukan 100.
+  const h = susunTurunan(
+    'BDL-X', peta([['BDL-X', 'KOMP-A', 2]]),
+    stok([['KOMP-A', 'Makassar', 100], ['KOMP-A', 'Medan', 7]]), AREAS,
+  );
+  assert.equal(h.n, 1);
+  assert.equal(h.turunan[0].area.Makassar.muat, 50);
+  assert.equal(h.turunan[0].area.Medan.muat, 3, 'floor(7/2) = 3, dibulatkan TURUN');
+  assert.equal(h.muat.Makassar, 50);
+});
+
+test('pembatas = komponen dengan muat TERKECIL, per cabang masing-masing', () => {
+  const h = susunTurunan(
+    'BDL-X', peta([['BDL-X', 'BANYAK', 1], ['BDL-X', 'TIPIS', 1]]),
+    stok([
+      ['BANYAK', 'Makassar', 500], ['BANYAK', 'Medan', 2],
+      ['TIPIS', 'Makassar', 3], ['TIPIS', 'Medan', 400],
+    ]),
+    AREAS,
+  );
+  assert.equal(h.muat.Makassar, 3);
+  assert.equal(h.pembatas.Makassar, 'TIPIS');
+  assert.equal(h.muat.Medan, 2);
+  assert.equal(h.pembatas.Medan, 'BANYAK', 'pembatasnya bisa beda per cabang');
+});
+
+test('satu komponen habis membuat SELURUH bundle tidak bisa dibentuk', () => {
+  // Inilah yang dijelaskan baris rincian: komponen lain penuh pun tidak menolong.
+  const h = susunTurunan(
+    'BDL-X', peta([['BDL-X', 'ADA', 1], ['BDL-X', 'HABIS', 1]]),
+    stok([['ADA', 'Medan', 9999], ['HABIS', 'Medan', 0]]), ['Medan'],
+  );
+  assert.equal(h.muat.Medan, 0);
+  assert.equal(h.pembatas.Medan, 'HABIS');
+});
+
+test('komponen yang TIDAK terdaftar di cabang → null, dan hitungannya jadi null', () => {
+  // Bukan dilewati. Melewatinya memberi angka terlalu optimistis dari komponen
+  // yang tersisa, dan itu angka yang tidak bisa dipercaya tanpa ada tandanya.
+  const h = susunTurunan(
+    'BDL-X', peta([['BDL-X', 'ADA', 1], ['BDL-X', 'ASING', 1]]),
+    stok([['ADA', 'Medan', 50]]), ['Medan'],
+  );
+  assert.equal(h.turunan[1].area.Medan.stok, null);
+  assert.equal(h.turunan[1].area.Medan.aktif, null);
+  assert.equal(h.muat.Medan, null, 'satu komponen tidak diketahui → jawabannya tidak diketahui');
+});
+
+test('komponen nonaktif tetap DITAMPILKAN dan ditandai', () => {
+  const h = susunTurunan(
+    'BDL-X', peta([['BDL-X', 'KOMP', 1]]),
+    stok([['KOMP', 'Makassar', 10, true], ['KOMP', 'Medan', 10, false]]), AREAS,
+  );
+  assert.equal(h.adaNonaktif, true);
+  assert.equal(h.turunan[0].nAktif, 1);
+  assert.equal(h.turunan[0].nNonaktif, 1);
+  assert.equal(h.turunan[0].area.Medan.aktif, false);
+  assert.equal(h.turunan[0].area.Medan.stok, 10, 'nonaktif bukan berarti stoknya disembunyikan');
+});
+
+test('nama komponen diambil dari baris stok mana pun yang punya isinya', () => {
+  const h = susunTurunan('BDL-X', peta([['BDL-X', 'KOMP', 1]]), stok([['KOMP', 'Medan', 1]]), AREAS);
+  assert.equal(h.turunan[0].name, 'Nama KOMP');
+});
+
+test('qty 0 tidak membuat pembagian nol', () => {
+  // mapBundleItems memaksa qty minimal 1, tapi modul ini tidak boleh ikut
+  // percaya begitu saja — data lama di tabel bisa saja memuat 0.
+  const h = susunTurunan('BDL-X', peta([['BDL-X', 'KOMP', 0]]), stok([['KOMP', 'Medan', 10]]), ['Medan']);
+  assert.equal(h.turunan[0].area.Medan.muat, 10, 'qty <= 0 diperlakukan sebagai 1');
 });

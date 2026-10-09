@@ -244,6 +244,127 @@ export function hitungAtp(
  * cabang baru yang punya 3, sehingga angka keseluruhan bisa bergerak tajam
  * hanya karena satu cabang kecil.
  */
+// ---------------------------------------------------------------------------
+// Turunan bundling — hanya untuk DITAMPILKAN (permintaan user 9 Okt 2026)
+// ---------------------------------------------------------------------------
+
+/** Komposisi: bundleSku -> daftar { itemSku, qty }. Dari tabel `bundle_item`. */
+export type PetaBundle = Map<string, { itemSku: string; qty: number }[]>;
+
+/** Keadaan satu komponen di satu area. */
+export type SelTurunan = {
+  /** null = komponen tidak terdaftar sama sekali di area itu. */
+  stok: number | null;
+  /** null = tidak terdaftar; true/false = isActive OCS di area itu. */
+  aktif: boolean | null;
+  /**
+   * Berapa bundle yang bisa dibentuk komponen ini sendirian di area ini:
+   * floor(stok / qty). null kalau stoknya tidak diketahui.
+   */
+  muat: number | null;
+};
+
+export type Turunan = {
+  itemSku: string;
+  name: string;
+  qty: number;
+  /** Per area. Area yang tidak ada barisnya tetap diisi, dengan nilai null. */
+  area: Record<string, SelTurunan>;
+  /** Jumlah area tempat komponen ini aktif. */
+  nAktif: number;
+  /** Jumlah area tempat komponen ini terdaftar tapi NONAKTIF. */
+  nNonaktif: number;
+};
+
+export type RingkasTurunan = {
+  /** Jumlah jenis komponen. 0 = bukan bundle, atau komposisinya belum ditarik. */
+  n: number;
+  turunan: Turunan[];
+  /**
+   * Per area: berapa bundle yang BISA dibentuk menurut komponennya —
+   * min(floor(stok komponen / qty)) atas seluruh komponen.
+   *
+   * INI ANGKA TURUNAN KITA SENDIRI, bukan angka OCS. Dipakai menjelaskan
+   * "kenapa bundle ini kosong padahal komponennya ada": kalau satu komponen
+   * habis, seluruh bundle tidak bisa dijanjikan. Ditampilkan BERDAMPINGAN
+   * dengan angka OCS, tidak menggantikannya — kalau keduanya beda, itu
+   * informasi, bukan sesuatu yang boleh ditimpa diam-diam.
+   */
+  muat: Record<string, number | null>;
+  /** Komponen yang paling membatasi per area (yang `muat`-nya terkecil). */
+  pembatas: Record<string, string>;
+  /** Komponen yang nonaktif di SETIDAKNYA satu area. */
+  adaNonaktif: boolean;
+};
+
+/**
+ * Susun turunan sebuah bundle dari komposisi + baris stok yang SUDAH dimuat.
+ *
+ * `stokPerSku` dibangun sekali oleh pemanggil dari baris `stock_current` yang
+ * memang sudah dibaca halaman ATP — jadi fitur ini TIDAK menambah satu pun
+ * kueri stok. Yang ditambah cuma satu bacaan tabel `bundle_item`.
+ *
+ * Komponen yang tidak ada di `stokPerSku` TIDAK dibuang: ia muncul dengan
+ * stok/aktif = null. Komponen yang hilang dari daftar stok adalah justru hal
+ * yang perlu dilihat orang — membuangnya membuat bundle terlihat lengkap.
+ */
+export function susunTurunan(
+  bundleSku: string,
+  peta: PetaBundle,
+  stokPerSku: Map<string, Map<string, { availableQty: number; isActive: boolean; name: string }>>,
+  areas: string[],
+): RingkasTurunan {
+  const komposisi = peta.get(bundleSku) ?? [];
+  const kosong: RingkasTurunan = {
+    n: 0, turunan: [], muat: {}, pembatas: {}, adaNonaktif: false,
+  };
+  if (!komposisi.length) return kosong;
+
+  const turunan: Turunan[] = komposisi.map((k) => {
+    const perArea = stokPerSku.get(k.itemSku);
+    const area: Record<string, SelTurunan> = {};
+    let nAktif = 0; let nNonaktif = 0;
+    let name = '';
+    for (const a of areas) {
+      const r = perArea?.get(a);
+      if (!r) { area[a] = { stok: null, aktif: null, muat: null }; continue; }
+      if (!name && r.name) name = r.name;
+      if (r.isActive) nAktif++; else nNonaktif++;
+      area[a] = {
+        stok: r.availableQty,
+        aktif: r.isActive,
+        muat: Math.floor(r.availableQty / Math.max(1, k.qty)),
+      };
+    }
+    return { itemSku: k.itemSku, name, qty: k.qty, area, nAktif, nNonaktif };
+  });
+
+  const muat: Record<string, number | null> = {};
+  const pembatas: Record<string, string> = {};
+  for (const a of areas) {
+    let min: number | null = null;
+    let siapa = '';
+    for (const t of turunan) {
+      const m = t.area[a]?.muat;
+      // Komponen yang stoknya TIDAK DIKETAHUI membuat seluruh hitungan tidak
+      // bisa dipercaya, jadi jawabannya null — bukan diam-diam dilewati, yang
+      // akan menghasilkan angka terlalu optimistis dari komponen yang tersisa.
+      if (m === null || m === undefined) { min = null; siapa = t.itemSku; break; }
+      if (min === null || m < min) { min = m; siapa = t.itemSku; }
+    }
+    muat[a] = min;
+    pembatas[a] = siapa;
+  }
+
+  return {
+    n: turunan.length,
+    turunan,
+    muat,
+    pembatas,
+    adaNonaktif: turunan.some((t) => t.nNonaktif > 0),
+  };
+}
+
 /** Satu SKU yang belum punya keputusan sebaran sama sekali. */
 export type SkuBelumDiset = {
   sku: string;

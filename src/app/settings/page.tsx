@@ -121,6 +121,15 @@ const groupsFor = (v: Record<string, string>, areas: AreaRow[] = []): { title: s
     ],
   },
   {
+    title: 'Komposisi bundling (kolom Turunan di /atp)',
+    fields: [
+      { key: 'bundle_refresh_hours', label: 'Tarik ulang komposisi tiap (jam)', type: 'number',
+        hint: 'Sumbernya OCS /master/bundle (2.029 bundle, 6.040 baris komponen, payload 2,5 MB). '
+          + 'Master data yang jarang berubah, jadi TIDAK ditarik tiap Refresh — ada tombolnya sendiri di /atp. '
+          + '0 = selalu tarik saat tombolnya ditekan. Menekan tombolnya selalu menarik, apa pun angka ini.' },
+    ],
+  },
+  {
     title: 'Sugest PO — gudang pemasok & pembulatan karton',
     fields: [
       { key: 'po_whs_order', label: 'Urutan gudang pemasok', type: 'text',

@@ -13,11 +13,29 @@ type SelArea = {
   tolak: 'TIDAK_AKTIF' | 'BUKAN_KATEGORI_SKU' | null;
   note: string;
 };
+/** Keadaan satu komponen bundling di satu cabang. */
+type SelTurunan = { stok: number | null; aktif: boolean | null; muat: number | null };
+type Turunan = {
+  itemSku: string; name: string; qty: number;
+  area: Record<string, SelTurunan>;
+  nAktif: number; nNonaktif: number;
+};
+type RingkasTurunan = {
+  n: number;
+  turunan: Turunan[];
+  /** Per cabang: berapa bundle yang bisa dibentuk komponennya. null = tidak diketahui. */
+  muat: Record<string, number | null>;
+  pembatas: Record<string, string>;
+  adaNonaktif: boolean;
+};
+
 type BarisSku = {
   sku: string; name: string; brand: string; brandManual: boolean;
   kategori: string;
   /** Total available seluruh cabang — kolom "Stok total" yang bisa diurutkan. */
   stokTotal: number;
+  /** Turunan bundling — tampilan saja; komposisinya milik OCS. */
+  turunan: RingkasTurunan;
   area: Record<string, SelArea>;
   /** Area yang barisnya ada tapi tersaring keluar oleh filter status. */
   lain?: Record<string, 'AKTIF' | 'NONAKTIF'>;
@@ -35,6 +53,10 @@ type Resp = {
   saring: Saring;
   cacah: { aktif: number; nonaktif: number; semua: number };
   baru: SkuBaru[];
+  /** false = tabel bundle_item belum ada (db:push belum dijalankan). */
+  bundleSiap: boolean;
+  /** Berapa bundle yang komposisinya sudah tersimpan. */
+  bundleTersimpan: number;
 };
 
 /** SKU yang belum punya satu pun keputusan sebaran — isi pengingat. */
@@ -100,6 +122,9 @@ export default function AtpPage() {
   // lagi oleh orang yang pernah menutupnya sekali.
   const [tutupBaru, setTutupBaru] = useState(false);
   const [hanyaBaru, setHanyaBaru] = useState(false);
+  // SKU yang baris turunannya sedang dibuka. Satu saja — membuka banyak baris
+  // sekaligus membuat tabel 1.662 baris tidak bisa dibaca lagi.
+  const [buka, setBuka] = useState<string | null>(null);
   // Perubahan ditahan dulu, baru disimpan sekali. 375 SKU x 6 cabang = 2.250
   // sel; menyimpan tiap klik berarti 2.250 permintaan saat pengisian awal, dan
   // satu yang gagal di tengah meninggalkan keadaan separuh tanpa ada yang tahu
@@ -247,45 +272,129 @@ export default function AtpPage() {
   const unduh = `/api/atp/export?ambang=${ambang}&brand=${encodeURIComponent(brand)}`
     + `&q=${encodeURIComponent(cari.trim())}&saring=${saring}&kategori=${encodeURIComponent(kategori)}`;
 
-  const columns = useMemo<Column<BarisSku>[]>(() => [
-    { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 240, sticky: true, isTitle: true },
-    {
-      key: 'name', label: 'Nama', get: (r) => r.name, width: 280, prio: 'p2',
-      render: (r) => <span className="text-label" title={r.name}>{r.name}</span>,
-    },
-    {
-      key: 'kat', label: 'Kategori', get: (r) => r.kategori, width: 100,
-      render: (r) => <span className={`chip ${r.kategori === 'Sku' ? 'chip-ok' : ''}`}>{r.kategori}</span>,
-    },
-    {
-      key: 'brand', label: 'Brand', get: (r) => r.brand || '', width: 130,
-      render: (r) => (editBrand?.sku === r.sku ? (
-        <span className="flex gap-1">
-          <input
-            className="input w-24" value={editBrand.brand} aria-label={`Brand ${r.sku}`}
-            onChange={(e) => setEditBrand({ ...editBrand, brand: e.target.value })}
-          />
-          <button className="btn btn-sm btn-primary" onClick={simpanBrand}>OK</button>
-        </span>
-      ) : (
-        <button
-          className={`chip ${r.brand ? '' : 'chip-bad'}`}
-          title={r.brandManual ? 'diisi manual — tidak akan tertimpa sync:brand' : 'dari OCS'}
-          onClick={() => setEditBrand({ sku: r.sku, brand: r.brand })}
-        >
-          {r.brand || 'kosong'}{r.brandManual ? ' ✎' : ''}
-        </button>
-      )),
-    },
-    {
-      // Angka, BUKAN teks: kolom cabang nilai sortnya "Ya"/"Tidak"/"Belum",
-      // jadi sebelum ini tidak ada satu pun kolom yang bisa mengurutkan stok.
-      key: 'stok', label: 'Stok total', get: (r) => r.stokTotal,
-      type: 'number', align: 'right', mono: true, width: 104,
-      title: 'Jumlah available seluruh cabang yang barisnya tampil. Bisa diurutkan & difilter (mis. "< 5").',
-      render: (r) => <span className="mono">{fmt(r.stokTotal)}</span>,
-    },
-    ...areas.map((a): Column<BarisSku> => ({
+  /**
+   * Tarik komposisi bundling dari OCS.
+   *
+   * Tombol SENDIRI, bukan ikut Refresh: komposisinya master data yang jarang
+   * berubah dan payload-nya 2,5 MB, sementara Refresh harus selesai dalam 60
+   * detik. `force=1` supaya menekan tombolnya memang menarik — jeda
+   * `bundle_refresh_hours` untuk penarikan otomatis, bukan untuk orang yang
+   * sengaja menekan.
+   */
+  async function tarikBundle() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const j = await postJson('/api/atp/bundle?force=1', {});
+      if (!j?.ok) throw new Error(j?.error || j?.message || 'Penarikan gagal');
+      setMsg({
+        tone: 'ok',
+        text: j.message || `${fmt(j.bundle ?? 0)} bundle, ${fmt(j.komponen ?? 0)} baris komponen tersimpan.`,
+      });
+      reload();
+    } catch (e) {
+      setMsg({ tone: 'error', text: e instanceof Error ? e.message : 'Penarikan komposisi gagal' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Baris rincian turunan — dibuka dari kolom "Turunan Bundling".
+   *
+   * Yang ditampilkan dan alasannya:
+   *   qty/bundle   — tanpa ini "stok 100" tidak berarti apa-apa; kalau butuh 2
+   *                  pcs per bundle, 100 pcs cuma cukup untuk 50 bundle;
+   *   status       — PER CABANG, bukan satu nilai global: `isActive` OCS memang
+   *                  per (sku, area), jadi satu komponen bisa aktif di Makassar
+   *                  dan nonaktif di Medan. Satu nilai global akan bohong;
+   *   muat         — floor(stok / qty) per cabang, dan baris PEMBATAS ditandai.
+   *                  Inilah yang menjawab "kenapa bundle ini kosong padahal
+   *                  komponennya ada": satu komponen habis = seluruh bundle
+   *                  tidak bisa dijanjikan.
+   *
+   * Baris "bisa dibentuk" adalah hitungan KITA, dan disebut begitu di layar —
+   * angka OCS tetap yang dipakai ATP. Kalau keduanya beda, itu informasi yang
+   * perlu dilihat orang, bukan sesuatu yang boleh ditimpa diam-diam.
+   */
+  function rincianTurunan(r: BarisSku) {
+    const t = r.turunan;
+    if (!t.n) return null;
+    const sel = (v: number | null) => (v === null ? '—' : fmt(v));
+    return (
+      <div className="space-y-2 py-1">
+        <div className="text-[12px] text-label">
+          <b>{t.n} turunan</b> dari <span className="mono">{r.sku}</span> — komposisinya dari OCS
+          (<span className="mono">/master/bundle</span>), hanya ditampilkan di sini.
+        </div>
+        <div className="overflow-auto">
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-muted">
+                <th className="px-2 py-1">Komponen</th>
+                <th className="px-2 py-1 text-right">Qty/bundle</th>
+                {areas.map((a) => <th key={a} className="px-2 py-1 text-right">{a}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {t.turunan.map((k) => (
+                <tr key={k.itemSku} className="border-t">
+                  <td className="px-2 py-1">
+                    <span className="mono">{k.itemSku}</span>
+                    {k.name ? <span className="ml-2 text-muted">{k.name}</span> : null}
+                  </td>
+                  <td className="px-2 py-1 text-right mono">{fmt(k.qty)}</td>
+                  {areas.map((a) => {
+                    const x = k.area[a];
+                    const batas = t.pembatas[a] === k.itemSku;
+                    return (
+                      <td key={a} className="px-2 py-1 text-right">
+                        <span className={`mono ${x?.aktif === false ? 'text-negative' : ''}`}>{sel(x?.stok ?? null)}</span>
+                        <span className="ml-1 text-[11px] text-muted">
+                          {x?.aktif === null || x?.aktif === undefined
+                            ? '(tidak terdaftar)'
+                            : x.aktif ? '' : '(nonaktif)'}
+                        </span>
+                        {batas ? <span className="ml-1" title={`Komponen paling membatasi di ${a}`}>←</span> : null}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              <tr className="border-t-2 font-semibold">
+                <td className="px-2 py-1" colSpan={2}>
+                  Bisa dibentuk menurut komponen
+                  <span className="ml-1 text-[11px] font-normal text-muted">(hitungan kami, bukan angka OCS)</span>
+                </td>
+                {areas.map((a) => (
+                  <td key={a} className="px-2 py-1 text-right mono" title={t.pembatas[a] ? `Pembatas: ${t.pembatas[a]}` : ''}>
+                    {sel(t.muat[a] ?? null)}
+                  </td>
+                ))}
+              </tr>
+              <tr className="border-t">
+                <td className="px-2 py-1 text-muted" colSpan={2}>Tercatat OCS (yang dipakai ATP)</td>
+                {areas.map((a) => (
+                  <td key={a} className="px-2 py-1 text-right mono text-muted">
+                    {r.area[a] ? fmt(r.area[a].availableQty) : '—'}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {t.adaNonaktif ? (
+          <div className="text-[12px] text-critical">
+            Ada komponen yang <b>nonaktif</b> di salah satu cabang — bundling ini tidak bisa
+            dijanjikan di cabang itu walau komponen lainnya tersedia.
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  const columns = useMemo<Column<BarisSku>[]>(() => {
+    const KOLOM_SEBARAN = (a: string): Column<BarisSku> => ({
       key: `a_${a}`,
       label: a,
       // Nilai mentah untuk sort/filter adalah TEKSNYA, bukan boolean: user
@@ -340,13 +449,13 @@ export default function AtpPage() {
           </span>
         );
       },
-    })),
+    });
     // Satu kolom angka per cabang, supaya stok tiap cabang bisa DIURUTKAN dan
     // DIFILTER sendiri ("Pusat < 5" + sel Ya = janji yang tidak bisa dipenuhi).
     // Chip di kolom cabang tetap menampilkan angkanya untuk dibaca cepat; yang
     // ini untuk diurutkan. Sembunyikan lewat tombol kolom di toolbar tabel
     // kalau tabelnya terasa lebar.
-    ...areas.map((a): Column<BarisSku> => ({
+    const KOLOM_STOK = (a: string): Column<BarisSku> => ({
       key: `s_${a}`,
       label: `Stok ${a}`,
       get: (r) => (r.area[a] ? r.area[a].availableQty : null),
@@ -357,8 +466,113 @@ export default function AtpPage() {
         if (!sel) return <span className="empty">—</span>;
         return <span className={`mono ${sel.siap ? '' : 'text-muted'}`}>{fmt(sel.availableQty)}</span>;
       },
-    })),
-  ], [areas, ubah, editBrand, ambang]); // eslint-disable-line react-hooks/exhaustive-deps
+    });
+    return [
+    { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 240, sticky: true, isTitle: true },
+    {
+      /*
+        Turunan bundling (permintaan user 9 Okt 2026) — TAMPILAN SAJA, tidak bisa
+        diedit di sini: komposisinya milik OCS (/master/bundle).
+
+        Selnya memuat RINGKASAN + tombol, bukan daftar komponennya. Terukur saat
+        endpoint-nya dibongkar: rata-rata 2,98 komponen dan PALING BANYAK 14 —
+        daftar 14 SKU tidak mungkin terbaca di dalam satu sel. Rinciannya muncul
+        sebagai baris yang dibuka di bawah barisnya.
+
+        Nilai sort/filter-nya JUMLAH komponen (angka), bukan teks ringkasannya:
+        yang berguna adalah "urutkan dari bundle paling rumit" dan "filter > 5
+        komponen", bukan mengurutkan menurut kata "turunan".
+      */
+      key: 'turunan', label: 'Turunan Bundling', get: (r) => r.turunan.n,
+      type: 'number', width: 150, noFilter: false,
+      title: 'Jumlah SKU komponen bundling. Klik untuk membuka rinciannya: qty per bundle, '
+        + 'status aktif/nonaktif per cabang, dan komponen mana yang paling membatasi.',
+      render: (r) => {
+        if (!r.turunan.n) {
+          // Bukan bundle, ATAU komposisinya belum ditarik. Dua hal berbeda, dan
+          // selnya harus menjelaskan yang mana — "—" polos membuat orang mengira
+          // bundle-nya memang tidak punya komponen.
+          const bundle = r.kategori === 'Bundle';
+          return (
+            <span
+              className="empty"
+              title={
+                !bundle
+                  ? `${r.sku} bukan kategori Bundle, jadi tidak punya turunan.`
+                  : data?.bundleSiap === false
+                    ? 'Tabel bundle_item belum ada — jalankan npm run db:push.'
+                    : 'Komposisinya belum ada di database. Tekan "Tarik komposisi bundling" di atas.'
+              }
+            >
+              {bundle ? 'belum ditarik' : '—'}
+            </span>
+          );
+        }
+        return (
+          <button
+            className={`chip ${r.turunan.adaNonaktif ? 'chip-bad' : 'chip-ok'}`}
+            title={
+              `${r.turunan.n} komponen`
+              + (r.turunan.adaNonaktif ? ' — ADA yang nonaktif di salah satu cabang' : ' — semua aktif')
+              + '\nKlik untuk membuka rinciannya'
+            }
+            onClick={() => setBuka(buka === r.sku ? null : r.sku)}
+          >
+            {r.turunan.n} turunan {buka === r.sku ? '▴' : '▾'}
+            {r.turunan.adaNonaktif ? ' ⚠' : ''}
+          </button>
+        );
+      },
+    },
+    {
+      // Angka, BUKAN teks: kolom cabang nilai sortnya "Ya"/"Tidak"/"Belum",
+      // jadi sebelum ini tidak ada satu pun kolom yang bisa mengurutkan stok.
+      key: 'stok', label: 'Stok total', get: (r) => r.stokTotal,
+      type: 'number', align: 'right', mono: true, width: 104,
+      title: 'Jumlah available seluruh cabang yang barisnya tampil. Bisa diurutkan & difilter (mis. "< 5").',
+      render: (r) => <span className="mono">{fmt(r.stokTotal)}</span>,
+    },
+    // Keputusan dan stok BERDAMPINGAN per cabang (permintaan user 9 Okt 2026):
+    // Makassar, Stok Makassar, Medan, Stok Medan, dst. Dulu semua kolom
+    // keputusan dulu lalu semua kolom stok, sehingga membaca satu cabang
+    // berarti melompat melewati seluruh tabel.
+    ...areas.flatMap((a): Column<BarisSku>[] => [
+      KOLOM_SEBARAN(a),
+      KOLOM_STOK(a),
+    ]),
+    // Nama, Kategori & Brand DI BELAKANG — urutan yang diminta user menaruh
+    // cabang lebih dulu. Ketiganya tetap bisa diurutkan, difilter, dan Brand
+    // tetap bisa diklik untuk diedit; Nama juga tetap jadi judul kartu di HP.
+    {
+      key: 'name', label: 'Nama', get: (r) => r.name, width: 280, prio: 'p2',
+      render: (r) => <span className="text-label" title={r.name}>{r.name}</span>,
+    },
+    {
+      key: 'kat', label: 'Kategori', get: (r) => r.kategori, width: 100,
+      render: (r) => <span className={`chip ${r.kategori === 'Sku' ? 'chip-ok' : ''}`}>{r.kategori}</span>,
+    },
+    {
+      key: 'brand', label: 'Brand', get: (r) => r.brand || '', width: 130,
+      render: (r) => (editBrand?.sku === r.sku ? (
+        <span className="flex gap-1">
+          <input
+            className="input w-24" value={editBrand.brand} aria-label={`Brand ${r.sku}`}
+            onChange={(e) => setEditBrand({ ...editBrand, brand: e.target.value })}
+          />
+          <button className="btn btn-sm btn-primary" onClick={simpanBrand}>OK</button>
+        </span>
+      ) : (
+        <button
+          className={`chip ${r.brand ? '' : 'chip-bad'}`}
+          title={r.brandManual ? 'diisi manual — tidak akan tertimpa sync:brand' : 'dari OCS'}
+          onClick={() => setEditBrand({ sku: r.sku, brand: r.brand })}
+        >
+          {r.brand || 'kosong'}{r.brandManual ? ' ✎' : ''}
+        </button>
+      )),
+    },
+    ];
+  }, [areas, ubah, editBrand, ambang, buka, data?.bundleSiap]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const k = data?.keseluruhan;
   const belumTotal = (data?.hasil ?? []).reduce((t, h) => t + h.belumDiputus, 0);
@@ -481,6 +695,19 @@ export default function AtpPage() {
         <Alert tone="error">Tabel <code>atp_share</code> belum ada — jalankan <code>npm run db:push</code>.</Alert>
       ) : null}
       {data?.pesan ? <Alert tone="warn">{data.pesan}</Alert> : null}
+      {data && data.bundleSiap === false ? (
+        <Alert tone="warn">
+          Tabel <code>bundle_item</code> belum ada — kolom <b>Turunan Bundling</b> akan kosong.
+          Jalankan <code>npm run check:push</code> lalu <code>npm run db:push</code>.
+        </Alert>
+      ) : null}
+      {data?.bundleSiap && data.bundleTersimpan === 0 ? (
+        <Alert tone="warn">
+          Komposisi bundling belum pernah ditarik dari OCS, jadi kolom <b>Turunan Bundling</b>
+          masih kosong. Tekan <b>Tarik komposisi bundling</b> di toolbar tabel di bawah
+          (atau jalankan <code>npm run sync:bundle</code>).
+        </Alert>
+      ) : null}
       {msg ? <Alert tone={msg.tone}>{msg.text}</Alert> : null}
       {saring !== 'AKTIF' ? (
         <Alert tone="warn">
@@ -718,8 +945,15 @@ export default function AtpPage() {
         columns={columns}
         rowKey={(r) => r.sku}
         loading={!data}
+        expanded={buka}
+        renderExpanded={rincianTurunan}
         emptyText="Tidak ada SKU. Jalankan Refresh dulu agar stok dari OCS terisi."
-        toolbarExtra={<span className="text-[12px] text-label">{fmt(baris.length)} SKU · {areas.length} cabang</span>}
+        toolbarExtra={<>
+          <span className="text-[12px] text-label">{fmt(baris.length)} SKU · {areas.length} cabang</span>
+          <button className="btn btn-sm" onClick={tarikBundle} disabled={busy}>
+            {busy ? 'Menarik…' : 'Tarik komposisi bundling'}
+          </button>
+        </>}
       />
     </div>
   );

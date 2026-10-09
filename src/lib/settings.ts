@@ -61,6 +61,11 @@ export const DEFAULT_SETTINGS = {
   price_source: 'MIN',          // MIN | MAX | AVG dari SalePrice antar marketplace
   price_refresh_hours: 12,      // harga master jarang berubah; jangan tarik tiap Refresh
 
+  // --- Komposisi bundling (OCS /MasterData/GetBundleStock) ---
+  // Master data yang jarang berubah dan payloadnya 2,5 MB, jadi TIDAK ditarik
+  // tiap Refresh. 0 = selalu tarik saat tombolnya ditekan.
+  bundle_refresh_hours: 12,
+
   // --- Sugest PO (gudang pemasok EJI) ---
   // Urutan gudang BERARTI: yang pertama dihabiskan dulu, baru pindah ke
   // berikutnya. Dulu hanya bisa diubah lewat env `EJI_WHS` (butuh deploy);
@@ -118,6 +123,8 @@ export type DoiSettings = {
   /** Tarik barang dalam perjalanan dari OCS? Bawaan: ya. */
   transitEnabled: boolean;
   transitRefreshHours: number;
+  /** Jam minimum antar penarikan komposisi bundling. 0 = selalu tarik. */
+  bundleRefreshHours: number;
   /**
    * Gudang pemasok EJI, URUT PRIORITAS — yang pertama dihabiskan dulu.
    * Kosong = pakai env `EJI_WHS`, lalu bawaan di `eji.ts`.
@@ -195,6 +202,7 @@ export function toDoiSettings(raw: SettingsMap = {}): DoiSettings {
     priceRefreshHours: Math.max(0, num(raw, 'price_refresh_hours')),
     transitEnabled: bool(raw, 'transit_enabled'),
     transitRefreshHours: Math.max(0, num(raw, 'transit_refresh_hours')),
+    bundleRefreshHours: Math.max(0, num(raw, 'bundle_refresh_hours')),
     poWhsOrder: str(raw, 'po_whs_order').split(',').map((v) => v.trim().toUpperCase()).filter(Boolean),
     poToleransiCtn: Math.max(0, Math.trunc(num(raw, 'po_toleransi_ctn'))),
     poLipatMaks: Math.max(0, num(raw, 'po_lipat_maks')),

@@ -139,6 +139,14 @@ export default function AtpPage() {
   // SKU yang baris turunannya sedang dibuka. Satu saja — membuka banyak baris
   // sekaligus membuat tabel 1.662 baris tidak bisa dibaca lagi.
   const [buka, setBuka] = useState<string | null>(null);
+  /**
+   * Baris yang BENAR-BENAR terlihat di tabel — sesudah pencarian global dan
+   * filter per kolom di dalam DataGrid, bukan cuma filter di halaman ini.
+   *
+   * Diisi lewat `onTersaring`. `setTampil` dari useState identitasnya stabil,
+   * jadi efek pengabarnya tidak berjalan berulang.
+   */
+  const [tampil, setTampil] = useState<BarisSku[]>([]);
   // Perubahan ditahan dulu, baru disimpan sekali. 375 SKU x 6 cabang = 2.250
   // sel; menyimpan tiap klik berarti 2.250 permintaan saat pengisian awal, dan
   // satu yang gagal di tengah meninggalkan keadaan separuh tanpa ada yang tahu
@@ -198,28 +206,44 @@ export default function AtpPage() {
   }
 
   /**
-   * Isi borongan untuk SATU kolom cabang, hanya baris yang lolos filter di atas.
+   * Lingkup tombol borongan: baris yang BENAR-BENAR terlihat di tabel.
    *
-   * Sengaja dibatasi ke filter halaman (brand, pencarian, "belum diputuskan"),
-   * BUKAN ke filter kolom di dalam tabel: tabelnya menyaring sendiri dan
-   * halaman ini tidak tahu hasilnya, jadi mengklaim "semua yang tampil" akan
-   * bohong begitu user memakai filter kolom. Jumlahnya ditulis di tombol supaya
-   * yang akan terjadi terlihat sebelum diklik.
+   * Dulu memakai `baris` — hanya filter halaman (brand, kategori, pencarian,
+   * status). Filter per kolom di dalam tabel TIDAK ikut, karena halaman ini
+   * tidak punya cara mengetahuinya. Akibatnya user menyaring kolom (mis.
+   * "Stok Pusat < 5"), menekan "Semua tidak", dan yang berubah jauh lebih
+   * banyak daripada yang terlihat di layar — tanpa satu pun tanda. Dilaporkan
+   * user 9 Okt 2026.
+   *
+   * Sekarang DataGrid mengabarkan hasil saringannya lewat `onTersaring`, jadi
+   * tombol ini memakai daftar yang sama persis dengan yang dilihat orang.
+   * `tampil` memuat SELURUH baris yang lolos, bukan cuma halaman yang tampak —
+   * tabelnya berhalaman 100 baris, dan "semua yang tersaring" memang yang
+   * dimaksud.
+   *
+   * Cadangan `baris` dipakai hanya sebelum tabel sempat mengabarkan apa pun
+   * (render pertama), supaya tombolnya tidak pernah diam-diam mengenai nol.
    */
+  const lingkup = tampil.length || !baris.length ? tampil : baris;
 
   /** `a === null` berarti SEMUA cabang sekaligus. */
   function borongan(a: string | null, ke: Putusan) {
     const areaKena = a === null ? areas : [a];
-    const { target, nKeputusan } = lingkupBorongan(baris, areaKena);
+    const { target, nKeputusan } = lingkupBorongan(lingkup, areaKena);
     if (!target.length) return;
 
     const kata = ke === null ? 'DIKOSONGKAN (kembali belum diputuskan)' : ke ? 'DISEBAR' : 'TIDAK disebar';
     const diMana = a === null ? `SEMUA ${areas.length} cabang` : a;
-    const dari = 'yang lolos filter';
+    const tersaring = target.length < (data?.sku.length ?? 0);
     // Jumlah SKU dan jumlah KEPUTUSAN disebut terpisah — lihat lingkupBorongan().
     if (!confirm(
-      `Tandai ${target.length} SKU ${dari} di ${diMana} sebagai ${kata}?\n\n`
-      + `${nKeputusan} keputusan akan berubah. Belum tersimpan sampai tombol Simpan ditekan.`,
+      `Tandai ${target.length} SKU yang sedang tampil di tabel di ${diMana} sebagai ${kata}?\n\n`
+      + `${nKeputusan} keputusan akan berubah.`
+      + (tersaring
+        ? `\n\nIni SELURUH baris yang lolos filter — termasuk yang ada di halaman berikutnya, `
+          + `bukan hanya ${Math.min(100, target.length)} baris yang terlihat sekarang.`
+        : '')
+      + '\n\nBelum tersimpan sampai tombol Simpan ditekan.',
     )) return;
 
     setUbah((prev) => {
@@ -1049,13 +1073,17 @@ export default function AtpPage() {
 
         <div className="mt-3 border-t border-[var(--border)] pt-3">
           <div className="text-[12px]">
-            Berlaku ke <b>{fmt(baris.length)} SKU yang lolos filter di atas</b>.
+            Berlaku ke <b>{fmt(lingkup.length)} SKU yang sedang tampil di tabel</b>
+            {lingkup.length !== (data?.sku.length ?? 0)
+              ? <> — dari {fmt(data?.sku.length ?? 0)} SKU seluruhnya.</>
+              : '.'}
           </div>
           <div className="mt-1 text-[12px] text-label">
-            Mau mengubah sebagian saja? <b>Persempit filternya</b> — brand, kategori, pencarian,
-            status — lalu tekan tombolnya. Yang terlihat di layar itulah yang berubah. (Filter kolom
-            di dalam tabel tidak ikut dihitung.) Perubahannya ditahan dulu — belum tersimpan sampai
-            tombol <b>Simpan</b> ditekan.
+            Mau mengubah sebagian saja? <b>Persempit filternya</b> — filter di atas (brand,
+            kategori, pencarian, status) <b>maupun pencarian & filter per kolom di dalam tabel</b>,
+            semuanya ikut dihitung. Yang terlihat di layar itulah yang berubah, termasuk baris di
+            halaman berikutnya. Perubahannya ditahan dulu — belum tersimpan sampai tombol{' '}
+            <b>Simpan</b> ditekan.
           </div>
           <div className="mt-2 space-y-1">
             {/* Baris "semua cabang" didahulukan: untuk SKU terpilih, itu yang
@@ -1098,6 +1126,7 @@ export default function AtpPage() {
         loading={!data}
         expanded={buka}
         renderExpanded={rincianTurunan}
+        onTersaring={setTampil}
         emptyText="Tidak ada SKU. Jalankan Refresh dulu agar stok dari OCS terisi."
         toolbarExtra={<>
           <span className="text-[12px] text-label">{fmt(baris.length)} SKU · {areas.length} cabang</span>

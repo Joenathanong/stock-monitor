@@ -80,6 +80,20 @@ export type DataGridProps<T> = {
   toolbarExtra?: ReactNode;
   /** Filter dari luar (mis. select status di halaman) — dijalankan sebelum filter kolom. */
   preFilter?: (r: T) => boolean;
+  /**
+   * Dipanggil tiap kali hasil penyaringan BERUBAH, berisi SELURUH baris yang
+   * lolos (bukan cuma halaman yang sedang tampak).
+   *
+   * Ada karena halaman di luar tabel tidak punya cara lain mengetahui apa yang
+   * sedang terlihat: pencarian global dan filter per kolom dikerjakan DI DALAM
+   * komponen ini. Tanpa itu, tombol borongan di /atp hanya bisa memakai filter
+   * halaman dan akan berbohong begitu user memakai filter kolom.
+   *
+   * Pemanggilnya WAJIB mengirim fungsi yang stabil (mis. `setState` dari
+   * useState, atau useCallback) — kalau identitasnya berubah tiap render,
+   * efek di bawah ikut berjalan terus.
+   */
+  onTersaring?: (rows: T[]) => void;
   footerNote?: ReactNode;
 };
 
@@ -131,7 +145,7 @@ const FunnelIcon = () => (
 );
 
 export function DataGrid<T>(props: DataGridProps<T>) {
-  const { id, rows, columns, rowKey, expanded, renderExpanded, onRowClick, rowClass, pageSize = 100, compact, emptyText, loading, toolbarExtra, preFilter, footerNote } = props;
+  const { id, rows, columns, rowKey, expanded, renderExpanded, onRowClick, rowClass, pageSize = 100, compact, emptyText, loading, toolbarExtra, preFilter, onTersaring, footerNote } = props;
   // v2: kunci dinaikkan agar lebar kolom lama yang rusak tidak ikut terbawa.
   const storeKey = `ieg-grid3:${id}`;
   const [widths, setWidths] = useState<Record<string, number>>({});
@@ -315,6 +329,10 @@ export function DataGrid<T>(props: DataGridProps<T>) {
     }
     return out;
   }, [rows, preFilter, q, filters, sort, columns, colMap]);
+
+  // Kabarkan hasil penyaringan ke halaman. `processed` sudah di-memo, jadi
+  // efek ini hanya berjalan saat hasilnya benar-benar berubah.
+  useEffect(() => { onTersaring?.(processed); }, [processed, onTersaring]);
 
   const pages = Math.max(1, Math.ceil(processed.length / pageSize));
   const safePage = Math.min(page, pages - 1);

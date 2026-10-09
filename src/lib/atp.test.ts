@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   AMBANG_ATP_BAWAAN, PRIORITAS_BRAND, brandMenang, adalahBundle, skuKotor,
   kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan, persenTeks,
-  petaBrand, skuBelumDiset, susunTurunan, bundlingTerblokir, bundlingBertingkat,
+  petaBrand, skuBelumDiset, susunTurunan, bundlingTerblokir, bundlingBertingkat, lingkupBorongan,
   type BarisStokAtp, type Sebaran, type PetaBundle,
 } from './atp';
 
@@ -572,4 +572,35 @@ test('penjaga: belum ada bundling bertingkat (terukur 0 dari 2.028 pada 9 Okt 20
     ['BDL-LUAR → BDL-DALAM'],
     'kalau muncul, harus terdeteksi — bukan diabaikan',
   );
+});
+
+test('lingkupBorongan: hanya baris yang DIBERIKAN yang kena — tidak pernah melebar', () => {
+  // Penjaga lingkup tombol borongan (/atp). Sejak 9 Okt 2026 daftar yang
+  // dikirim ke sini adalah hasil saringan TABEL (termasuk filter per kolom),
+  // bukan lagi hanya filter halaman. Fungsi ini tidak boleh menambah baris
+  // dari mana pun — kalau melebar, user menyaring 10 baris lalu 1.600 berubah.
+  const r = (sku: string, areas: string[]) =>
+    ({ sku, area: Object.fromEntries(areas.map((a) => [a, {}])) });
+  const { target, nKeputusan } = lingkupBorongan(
+    [r('A', ['Pusat', 'Medan']), r('B', ['Pusat'])],
+    ['Pusat'],
+  );
+  assert.deepEqual(target.map((x) => x.sku), ['A', 'B']);
+  assert.equal(nKeputusan, 2, 'satu keputusan per (SKU, cabang) yang barisnya ADA');
+});
+
+test('lingkupBorongan: SKU yang tidak punya baris di cabang itu dilewati', () => {
+  const r = (sku: string, areas: string[]) =>
+    ({ sku, area: Object.fromEntries(areas.map((a) => [a, {}])) });
+  const { target, nKeputusan } = lingkupBorongan([r('A', ['Medan'])], ['Pusat']);
+  assert.deepEqual(target, [], 'tidak ada barisnya di Pusat → bukan target');
+  assert.equal(nKeputusan, 0);
+});
+
+test('lingkupBorongan: daftar kosong menghasilkan nol, bukan semuanya', () => {
+  // Kalau filter tabel tidak menyisakan apa pun, tombol borongan harus
+  // mengenai NOL — bukan diam-diam jatuh ke seluruh data.
+  const { target, nKeputusan } = lingkupBorongan([], ['Pusat', 'Medan']);
+  assert.deepEqual(target, []);
+  assert.equal(nKeputusan, 0);
 });

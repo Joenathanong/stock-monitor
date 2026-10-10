@@ -89,13 +89,10 @@ async function main() {
       'UPDATE area SET doiCritical = ?, doiMin = ?, doiMax = ? WHERE code = ?',
       kritis, low, aman, a.code,
     );
-    const pita = ringkasPita(ambangDoi(
-      {
-        code: a.code, name: a.name, isActive: true, sortOrder: a.sortOrder,
-        doiCritical: kritis, doiMin: low, doiMax: aman, startDate: null, note: a.note,
-      },
-      { kritis, min: low, max: aman },
-    ));
+    // Angkanya sudah tiga-tiganya ada di sini, jadi tidak perlu lewat
+    // `ambangDoi` — yang sejak 10 Okt 2026 mengembalikan null untuk baris yang
+    // belum lengkap dan tidak lagi menerima angka cadangan.
+    const pita = ringkasPita({ kritis, min: low, max: aman });
     console.log(
       `  ${nama.padEnd(12)} ${String(kritis).padStart(3)}/${String(low).padStart(3)}`
       + `/${String(aman).padStart(3)}   ${pita}`,

@@ -28,6 +28,8 @@ export async function GET(req: Request) {
     computedAt: snap.computedAt,
     summary: snap.summary,
     settings: snap.settings,
+    ambang: snap.ambang,
+    leadTimeArea: snap.leadTimeArea,
     tv: {
       slideSeconds: Number(settings.tv_slide_seconds) || 15,
       rowsPerSlide: Number(settings.tv_rows_per_slide) || 12,

@@ -5,6 +5,7 @@ import type { HealthSummary, ProductStatus } from '@/lib/doi';
 import type { DoiSettings } from '@/lib/settings';
 import { getTheme, setTheme, type Theme } from '@/lib/theme';
 import { doiLabel, doiTotalLabel, opsi2Label, show1, show2, windowLabel } from '@/components/ui';
+import { ringkasPita } from '@/lib/area-master';
 
 /**
  * Dashboard TV — layar penuh, tanpa login, berganti slide otomatis.
@@ -20,6 +21,9 @@ type Row = {
 };
 type Resp = {
   ok: boolean; error?: string; snapshotDate: string | null; computedAt: string | null; summary: HealthSummary | null; settings: DoiSettings | null;
+  /** Ambang cabang yang sedang tampil, dari tabel Cabang/Area. */
+  ambang: { kritis: number; min: number; max: number } | null;
+  leadTimeArea: number | null;
   tv: { slideSeconds: number; rowsPerSlide: number; refreshMinutes: number }; rows: Row[];
 };
 
@@ -137,6 +141,8 @@ function Tv() {
 
   const disp = data?.settings?.doiDisplay ?? 'BOTH';
   const d1 = show1(disp), d2 = show2(disp);
+  const ambang = data?.ambang ?? null;
+  const leadTimeArea = data?.leadTimeArea ?? null;
 
   const slides = useMemo<Slide[]>(() => {
     if (!data?.summary) return [];
@@ -157,7 +163,7 @@ function Tv() {
             {d2 ? <Kpi label={doiTotalLabel(2, disp)} value={`${doi(s.total.doi2)}`} unit="hari" hint={win2} /> : null}
             <Kpi label="Total stok" value={nf(s.total.stock)} unit="pcs" hint={`+ ${nf(s.total.transit)} transit`} />
             <Kpi label="Perlu open PO" value={nf(s.byStatus.CRITICAL + s.byStatus.LOW)} unit="SKU" hint={`${nf(s.byStatus.CRITICAL)} kritis · ${nf(s.byStatus.LOW)} low`} tone="var(--negative)" />
-            <Kpi label="Overstock" value={nf(s.byStatus.OVERSTOCK)} unit="SKU" hint={`> ${set?.targetDoiDays ?? 14} hari`} tone="var(--accent-violet)" />
+            <Kpi label="Overstock" value={nf(s.byStatus.OVERSTOCK)} unit="SKU" hint={ambang ? `> ${ambang.max} hari` : "ambang cabang belum diatur"} tone="var(--accent-violet)" />
             <Kpi label="Produk baru" value={nf(s.npl)} unit="SKU" hint={`${nf(s.byStatus.NPL_WAIT)} data belum cukup`} tone="var(--primary)" />
           </div>
           <div className="tv-panels min-h-0 flex-1">
@@ -166,7 +172,13 @@ function Tv() {
             </Panel>
             <Panel title="Distribusi DOI">
               <Bars items={s.buckets.map((b) => ({ label: b.label, value: b.count, color: 'var(--c1)' }))} />
-              <div className="mt-4 text-[15px] text-label">Target DOI {set?.targetDoiDays} hari · safety {set?.safetyDays} hari · lead time default {set?.defaultLeadTimeDays} hari</div>
+              {/* Pita cabang yang sedang tampil, bukan tiga angka global —
+                  yang dulu menulis "Target DOI 14 hari" di layar cabang mana
+                  pun, padahal tidak benar untuk satu cabang pun. */}
+              <div className="mt-4 text-[15px] text-label">
+                {ambang ? `Pita DOI: ${ringkasPita(ambang)}` : 'Ambang DOI cabang ini belum diatur'}
+                {leadTimeArea !== null && leadTimeArea !== undefined ? ` · lead time ${leadTimeArea} hari` : ''}
+              </div>
             </Panel>
             <Panel title={`Analisis ABC (qty ${win1})`}>
               <div className="tv-tablewrap tv-tablewrap-mini"><table className="tv-table tv-table-mini">
@@ -221,7 +233,7 @@ function Tv() {
 
     const over = rows.filter((r) => r.status === 'OVERSTOCK').sort((a, b) => b.stock - a.stock).slice(0, rowsPerSlide);
     out.push({
-      key: 'overstock', title: 'Overstock Terbesar', subtitle: `${nf(s.byStatus.OVERSTOCK)} SKU di atas ${set?.targetDoiDays ?? 14} hari`,
+      key: 'overstock', title: 'Overstock Terbesar', subtitle: ambang ? `${nf(s.byStatus.OVERSTOCK)} SKU di atas ${ambang.max} hari` : `${nf(s.byStatus.OVERSTOCK)} SKU overstock`,
       render: () => over.length ? (
         <div className="tv-tablewrap"><table className="tv-table">
           <thead><tr><th className="c-sku">SKU</th><th className="c-abc">ABC</th><th className="num">Stok</th>{d1 ? <th className="num">{doiLabel('ADS', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('ADS', 2, disp)}</th> : null}{d1 ? <th className="num">{doiLabel('DOI', 1, disp)}</th> : null}{d2 ? <th className="num">{doiLabel('DOI', 2, disp)}</th> : null}<th className="num">Penjualan {win1}</th></tr></thead>

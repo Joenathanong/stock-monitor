@@ -15,8 +15,20 @@ function constantSales(perDay: number, days: number, today = TODAY): Record<Date
   return out;
 }
 
+/**
+ * Ambang bawaan untuk tes — SAMA PERSIS dengan tiga pengaturan global yang
+ * dicabut 10 Okt 2026 (lead time 7, safety 3, target 14), yaitu angka yang kini
+ * tersimpan di baris GABUNGAN.
+ *
+ * Disamakan dengan sengaja. Seluruh tes di berkas ini ditulis ketika status
+ * dihitung relatif terhadap lead time, dan nilainya tidak diubah satu pun saat
+ * jalur itu dihapus. Jadi tes-tes lama yang tetap lulus ADALAH buktinya:
+ * pemindahan setelan ke tabel Cabang/Area tidak menggeser satu status pun.
+ */
+const AMBANG_BAWAAN = { kritis: 7, min: 10, max: 14 };
+
 function ctx(over: Partial<DoiContext> = {}): DoiContext {
-  return { today: TODAY, exclusionDates: new Set(), earliestDataDate: '2026-01-01', ...over };
+  return { today: TODAY, exclusionDates: new Set(), earliestDataDate: '2026-01-01', ambang: AMBANG_BAWAAN, ...over };
 }
 
 function input(over: Partial<SkuInput> = {}): SkuInput {
@@ -90,14 +102,39 @@ test('tanggal pertama = awal data → bukan NPL, ditandai truncated', () => {
   assert.equal(r.isNpl, false);
 });
 
-test('status mengikuti lead time: kritis, low, tunggu kiriman, aman, overstock', () => {
-  // ADS 10, lead time 7, safety 3, target 14
+test('status mengikuti ambang cabang: kritis, low, tunggu kiriman, aman, overstock', () => {
+  // ADS 10, ambang 7/10/14 (baris GABUNGAN).
   const base = input({ leadTimeDays: 7 });
   assert.equal(computeSku({ ...base, availableQty: 60 }, S, ctx()).status, 'CRITICAL');   // DOI 6 ≤ 7
   assert.equal(computeSku({ ...base, availableQty: 90 }, S, ctx()).status, 'LOW');        // DOI 9 ≤ 10
-  assert.equal(computeSku({ ...base, availableQty: 60, transitQty: 100 }, S, ctx()).status, 'WAITING'); // 6 di tangan, 16 dengan transit
+  // WAITING = stok sendiri sudah di titik pesan, tapi kiriman sudah menutupinya.
+  // Syaratnya kiriman itu membawa posisi ke DALAM pita aman — bukan melewatinya.
+  assert.equal(computeSku({ ...base, availableQty: 60, transitQty: 70 }, S, ctx()).status, 'WAITING'); // 6 di tangan, 13 dengan transit
   assert.equal(computeSku({ ...base, availableQty: 120 }, S, ctx()).status, 'HEALTHY');   // DOI 12
   assert.equal(computeSku({ ...base, availableQty: 200 }, S, ctx()).status, 'OVERSTOCK'); // DOI 20 > 14
+});
+
+test('kiriman yang MELEWATI batas aman jadi OVERSTOCK, bukan WAITING', () => {
+  // PERUBAHAN NYATA 10 Okt 2026, dan satu-satunya perubahan angka dari
+  // pencabutan tiga pengaturan global. Ia hanya mengenai laporan GABUNGAN;
+  // kelima cabang sudah memakai jalur ambang sejak ambangnya diisi.
+  //
+  // Jalur lead time yang lama memeriksa WAITING SEBELUM overstock:
+  //     dT <= lt            -> CRITICAL
+  //     dT <= lt + safety   -> LOW
+  //     dS <= lt + safety   -> WAITING      <-- menang walau dT jauh di atas target
+  //     dT >  target        -> OVERSTOCK
+  // jadi SKU bersisa 6 hari di tangan tapi 16 hari dengan transit disebut
+  // WAITING, padahal kirimannya sudah melewati batas aman 14 hari.
+  //
+  // Jalur ambang memberi WAITING hanya DI DALAM pita aman, jadi kasus yang sama
+  // kini OVERSTOCK. Itu lebih jujur: "menunggu kiriman" menyembunyikan bahwa
+  // pesanannya kelebihan, dan keduanya sama-sama tidak memicu saran PO
+  // (`perluPesan` cuma CRITICAL dan LOW), jadi tidak ada yang jadi salah pesan.
+  const base = input({ leadTimeDays: 7 });
+  const r = computeSku({ ...base, availableQty: 60, transitQty: 100 }, S, ctx()); // 6 di tangan, 16 dengan transit
+  assert.equal(r.status, 'OVERSTOCK');
+  assert.equal(r.suggested1, 0, 'tetap tidak disarankan PO — itu yang penting di lapangan');
 });
 
 test('saran qty = target DOI × ADS − (stok + transit), tidak negatif', () => {
@@ -319,15 +356,26 @@ test('ambang per area dipakai apa adanya — Surabaya 7/14/21', () => {
   assert.equal(st(22), 'OVERSTOCK');
 });
 
-test('TANPA ambang area, perilaku lama (relatif lead time) TIDAK berubah', () => {
-  // Inilah jaminannya: memasang fitur ini tidak boleh menggeser status area
-  // yang ambangnya belum diisi. Lead time 7, safetyDays bawaan 3 → LOW ≤ 10.
+test('ambang GABUNGAN 7/10/14 memberi status yang SAMA dengan jalur lead time lama', () => {
+  // Tes ini dulu berbunyi "TANPA ambang area, perilaku lama TIDAK berubah" dan
+  // memanggil computeSku tanpa ambang sama sekali — menguji cabang kode yang
+  // menghitung status relatif terhadap lead time (CRITICAL <= lt, LOW <= lt +
+  // safety, OVERSTOCK > targetDoiDays, dengan lt 7 / safety 3 / target 14).
+  //
+  // Cabang itu DIHAPUS 10 Okt 2026 bersama tiga pengaturan globalnya. Yang
+  // menggantikannya adalah baris GABUNGAN, yang lahir berisi 7/10/14 — angka
+  // yang sama persis. ANGKA YANG DIHARAPKAN DI BAWAH TIDAK DIUBAH SATU PUN
+  // dari versi lamanya; hanya jalurnya yang berbeda. Kalau salah satu meleset,
+  // pemindahan setelan diam-diam menggeser status, dan itulah yang dijaga.
   const s = S;
-  const ctx = { today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>() };
-  assert.equal(computeSku(skuDoi(7), s, ctx).status, 'CRITICAL');
-  assert.equal(computeSku(skuDoi(10), s, ctx).status, 'LOW');
-  assert.equal(computeSku(skuDoi(11), s, ctx).status, 'HEALTHY');
-  assert.equal(computeSku(skuDoi(15), s, ctx).status, 'OVERSTOCK', 'targetDoiDays bawaan 14');
+  const ctxGab = {
+    today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>(),
+    ambang: AMBANG_BAWAAN,
+  };
+  assert.equal(computeSku(skuDoi(7), s, ctxGab).status, 'CRITICAL');
+  assert.equal(computeSku(skuDoi(10), s, ctxGab).status, 'LOW');
+  assert.equal(computeSku(skuDoi(11), s, ctxGab).status, 'HEALTHY');
+  assert.equal(computeSku(skuDoi(15), s, ctxGab).status, 'OVERSTOCK', 'batas aman 14');
 });
 
 test('ambang Pusat 4/5/7 — pita low hanya SATU hari, dan itu sah', () => {

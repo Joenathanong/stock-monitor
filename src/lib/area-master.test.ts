@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   KODE_AREA_BAWAAN, TANPA_KODE, petaKodeArea, namaAreaDari, areaAktif,
-  ambangDoi, pitaDoi, ringkasPita, validasiArea, areaBelumTerdaftar, normalKode, type BarisArea,
+  ambangDoi, pitaDoi, ringkasPita, validasiArea, peringatanArea, areaBelumTerdaftar, normalKode, type BarisArea,
 } from './area-master';
 
 const area = (o: Partial<BarisArea> = {}): BarisArea => ({
   code: 'GJSB', name: 'Surabaya', isActive: true, sortOrder: 10,
-  doiCritical: null, doiMin: null, doiMax: null, startDate: null, note: null, ...o,
+  doiCritical: null, doiMin: null, doiMax: null,
+  leadTimeDays: null, atpTarget: null, startDate: null, note: null, ...o,
 });
 
 test('peta kode dibangun dari tabel, bukan dari konstanta', () => {
@@ -48,24 +49,38 @@ test('area aktif berurut sortOrder lalu nama', () => {
   assert.deepEqual(areaAktif(rows).map((r) => r.name), ['Bali', 'Aceh', 'Ceko']);
 });
 
-const GLOBAL = { kritis: 7, min: 10, max: 14 };
-
-test('ambang DOI: per area menang, yang kosong jatuh ke global', () => {
+test('ambang DOI dibaca dari BARISNYA SENDIRI, tanpa angka global', () => {
   assert.deepEqual(
-    ambangDoi(area({ doiCritical: 4, doiMin: 5, doiMax: 7 }), GLOBAL),
+    ambangDoi(area({ doiCritical: 4, doiMin: 5, doiMax: 7 })),
     { kritis: 4, min: 5, max: 7 },
   );
-  assert.deepEqual(ambangDoi(area({ doiMin: 21 }), GLOBAL), { kritis: 7, min: 21, max: 21 },
-    'maks global 14 diangkat ke min 21 — "pesan sampai penuh" tidak boleh mengurangi stok');
-  assert.deepEqual(ambangDoi(null, GLOBAL), GLOBAL);
+});
+
+test('baris yang belum lengkap mengembalikan null, BUKAN angka tebakan', () => {
+  // PERUBAHAN 10 Okt 2026. Dulu kolom kosong jatuh ke tiga pengaturan global,
+  // dan itu yang membuat ada dua tempat mengatur satu hal: yang global mati
+  // diam-diam untuk kelima cabang, tapi angkanya tetap terpajang di Dashboard
+  // dan /tv sebagai "Target DOI 14 hari" — tidak benar untuk satu cabang pun.
+  //
+  // Sekarang "belum lengkap" adalah keadaan yang HARUS diputuskan pemanggil
+  // (compute.ts jatuh ke baris GABUNGAN, layar menulis "belum diatur"), bukan
+  // ditambal di dalam fungsi ini tanpa ada yang tahu.
+  assert.equal(ambangDoi(area({ doiMin: 21 })), null, 'dua kolom lain masih kosong');
+  assert.equal(ambangDoi(area({ doiCritical: 4, doiMin: 5 })), null, 'doiMax kosong');
+  assert.equal(ambangDoi(null), null);
+  assert.equal(ambangDoi(area()), null);
 });
 
 test('kritis DIPAKSA di bawah min, bukan hanya divalidasi di form', () => {
   // Baris yang tersimpan sebelum aturan ini ada tidak boleh membuat pita LOW
   // hilang. 20 >= 10, jadi dipotong ke 9.
-  assert.deepEqual(ambangDoi(area({ doiCritical: 20, doiMin: 10 }), GLOBAL), { kritis: 9, min: 10, max: 14 });
+  assert.deepEqual(ambangDoi(area({ doiCritical: 20, doiMin: 10, doiMax: 14 })), { kritis: 9, min: 10, max: 14 });
   // min 0 -> kritis tidak boleh negatif.
-  assert.equal(ambangDoi(area({ doiCritical: 5, doiMin: 0 }), GLOBAL).kritis, 0);
+  assert.equal(ambangDoi(area({ doiCritical: 5, doiMin: 0, doiMax: 0 }))!.kritis, 0);
+});
+
+test('maks DIANGKAT ke min — "pesan sampai penuh" tidak boleh mengurangi stok', () => {
+  assert.deepEqual(ambangDoi(area({ doiCritical: 7, doiMin: 21, doiMax: 14 })), { kritis: 7, min: 21, max: 21 });
 });
 
 test('pitaDoi: batasnya INKLUSIF di tiap ujung atas', () => {
@@ -91,7 +106,7 @@ test('ambang 5 kota dari user 5 Okt 2026 menutup SELURUH garis hari, tanpa celah
     ['Yogyakarta', 7, 13, 20],
   ];
   for (const [nama, kritis, min, max] of kota) {
-    const a = ambangDoi(area({ doiCritical: kritis, doiMin: min, doiMax: max }), GLOBAL);
+    const a = ambangDoi(area({ doiCritical: kritis, doiMin: min, doiMax: max }))!;
     assert.deepEqual(a, { kritis, min, max }, nama);
     // Setiap hari dari 0 sampai max+5 harus punya pita, dan urutannya tidak
     // boleh mundur. Itu membuktikan tidak ada celah DAN tidak ada tumpang-tindih.
@@ -136,27 +151,79 @@ test('ambang 5 kota lolos validasi', () => {
   }
 });
 
+/** Baris yang sah: ketiga ambang terisi — wajib sejak 10 Okt 2026. */
+const SAH = { doiCritical: 7, doiMin: 14, doiMax: 21 };
+
+test('validasi: ketiga ambang WAJIB diisi', () => {
+  // Dulu boleh kosong dan jatuh ke pengaturan global. Global sudah dicabut,
+  // jadi baris tanpa ambang bukan "pakai bawaan" lagi — ia tidak bisa dihitung
+  // sama sekali. Ditolak di sini, bukan dibiarkan lalu ditambal diam-diam saat
+  // menghitung.
+  const g = validasiArea({ code: 'GJSB', name: 'Surabaya' });
+  assert.deepEqual(g.map((x) => x.field).sort(), ['doiCritical', 'doiMax', 'doiMin']);
+  assert.deepEqual(validasiArea({ code: 'GJSB', name: 'Surabaya', ...SAH }), []);
+});
+
+test('validasi: lead time & target ATP boleh kosong, tapi dibatasi kalau diisi', () => {
+  // Berbeda dari ambang: keduanya tidak menentukan status, jadi barisnya tetap
+  // bisa dipakai tanpa mereka — kekosongannya muncul sebagai PERINGATAN, bukan
+  // galat, supaya orang tidak terkunci saat membuka cabang baru.
+  assert.deepEqual(validasiArea({ code: 'A1', name: 'X', ...SAH, leadTimeDays: null, atpTarget: null }), []);
+  assert.equal(validasiArea({ code: 'A1', name: 'X', ...SAH, leadTimeDays: -1 }).some((g) => g.field === 'leadTimeDays'), true);
+  assert.equal(validasiArea({ code: 'A1', name: 'X', ...SAH, atpTarget: 0 }).some((g) => g.field === 'atpTarget'), true);
+  assert.equal(validasiArea({ code: 'A1', name: 'X', ...SAH, atpTarget: 101 }).some((g) => g.field === 'atpTarget'), true);
+  assert.deepEqual(validasiArea({ code: 'A1', name: 'X', ...SAH, leadTimeDays: 7, atpTarget: 95 }), []);
+});
+
+test('peringatan: lead time lebih lama daripada ambang kritis = gudang dipastikan kosong', () => {
+  // Bukan galat — angkanya mungkin memang begitu, dan menolaknya berarti
+  // menghalangi orang menyimpan keadaan yang sebenarnya. Tapi diam soal ini
+  // berarti alarm "kritis" berbunyi ketika kehabisan stok SUDAH tidak bisa
+  // dihindari, dan tidak ada satu layar pun yang menyebutkannya.
+  //
+  // Kasus nyata hari ini: Pusat kritis <=4 hari dengan lead time 7 hari.
+  const p = peringatanArea({ code: 'GBJD', name: 'Pusat', doiCritical: 4, doiMin: 5, doiMax: 7, leadTimeDays: 7 });
+  const lubang = p.find((x) => x.field === 'doiCritical');
+  assert.ok(lubang, 'lubang lead time vs kritis harus diperingatkan');
+  assert.match(lubang!.pesan, /3 hari/, 'selisihnya disebut, bukan cuma "tidak cocok"');
+  // Lead time <= kritis: tidak ada lubang.
+  assert.equal(
+    peringatanArea({ code: 'A1', name: 'X', doiCritical: 14, doiMin: 21, doiMax: 35, leadTimeDays: 7 })
+      .some((x) => x.field === 'doiCritical'),
+    false,
+  );
+});
+
 test('validasi: kode & nama wajib, format kode dijaga', () => {
-  assert.deepEqual(validasiArea({ code: 'GJSB', name: 'Surabaya' }), []);
+  assert.deepEqual(validasiArea({ code: 'GJSB', name: 'Surabaya', ...SAH }), []);
   assert.equal(validasiArea({ code: '', name: 'X' }).some((g) => g.field === 'code'), true);
   assert.equal(validasiArea({ code: 'G-JSB', name: 'X' }).some((g) => g.field === 'code'), true);
   assert.equal(validasiArea({ code: 'GJSB', name: '' }).some((g) => g.field === 'name'), true);
 });
 
-test('validasi: nama GABUNGAN ditolak — itu nama khusus laporan gabungan', () => {
-  assert.equal(validasiArea({ code: 'GAB', name: 'GABUNGAN' }).some((g) => g.field === 'name'), true);
-  assert.equal(validasiArea({ code: 'GAB', name: 'gabungan' }).some((g) => g.field === 'name'), true);
+test('nama GABUNGAN hanya untuk baris berkode GABUNGAN', () => {
+  // Sejak 10 Okt 2026 laporan gabungan punya barisnya sendiri di tabel ini.
+  // Yang menentukan baris itu adalah KODE-nya, bukan namanya — kalau namanya,
+  // dua baris bisa sama-sama mengaku gabungan dan yang dipakai jadi urusan
+  // urutan baris.
+  assert.equal(validasiArea({ code: 'GAB', name: 'GABUNGAN', ...SAH }).some((g) => g.field === 'name'), true);
+  assert.equal(validasiArea({ code: 'GAB', name: 'gabungan', ...SAH }).some((g) => g.field === 'name'), true);
+  assert.deepEqual(validasiArea({ code: 'GABUNGAN', name: 'GABUNGAN', ...SAH }), [], 'baris gabungan yang sah');
+  assert.equal(
+    validasiArea({ code: 'GABUNGAN', name: 'Pusat', ...SAH }).some((g) => g.field === 'name'), true,
+    'kode GABUNGAN tapi bernama kota = baris gabungan yang menyamar jadi cabang',
+  );
 });
 
 test('validasi: maks tidak boleh di bawah min, negatif ditolak', () => {
-  assert.equal(validasiArea({ code: 'A1', name: 'X', doiMin: 10, doiMax: 5 }).some((g) => g.field === 'doiMax'), true);
-  assert.equal(validasiArea({ code: 'A1', name: 'X', doiMin: -1 }).some((g) => g.field === 'doiMin'), true);
-  assert.deepEqual(validasiArea({ code: 'A1', name: 'X', doiMin: 5, doiMax: 5 }), []);
+  assert.equal(validasiArea({ code: 'A1', name: 'X', doiCritical: 4, doiMin: 10, doiMax: 5 }).some((g) => g.field === 'doiMax'), true);
+  assert.equal(validasiArea({ code: 'A1', name: 'X', doiCritical: 0, doiMin: -1, doiMax: 5 }).some((g) => g.field === 'doiMin'), true);
+  assert.deepEqual(validasiArea({ code: 'A1', name: 'X', doiCritical: 4, doiMin: 5, doiMax: 5 }), []);
 });
 
 test('validasi: tanggal mulai harus YYYY-MM-DD', () => {
-  assert.equal(validasiArea({ code: 'A1', name: 'X', startDate: '01-06-2026' }).some((g) => g.field === 'startDate'), true);
-  assert.deepEqual(validasiArea({ code: 'A1', name: 'X', startDate: '2026-06-01' }), []);
+  assert.equal(validasiArea({ code: 'A1', name: 'X', ...SAH, startDate: '01-06-2026' }).some((g) => g.field === 'startDate'), true);
+  assert.deepEqual(validasiArea({ code: 'A1', name: 'X', ...SAH, startDate: '2026-06-01' }), []);
 });
 
 test('area yang ada di data tapi belum terdaftar ikut dilaporkan', () => {

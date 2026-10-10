@@ -9,8 +9,8 @@ import { assignAbc, computeSku, summarize, type DoiResult, type HealthSummary } 
 import { pencocokPhaseOut } from './phase-out';
 import { buildExclusionMap } from './exclusion';
 import { AREA_GABUNGAN, labelArea } from './areas';
-import { ambangDoi } from './area-master';
-import { muatArea } from './area-store';
+import { setelanArea } from './area-master';
+import { muatArea, pastikanBarisGabungan } from './area-store';
 import { addDays, keyToUtcDate, todayKey, toDateKeyUtc, type DateKey } from './dates';
 import { acquireLock, finishLog, lockOwner, releaseLock, startLog, syncPrices, syncStock, syncTransit, STALE_LOCK_MINUTES } from './sync';
 import { budget, defaultBudgetMs, Timeline } from './budget';
@@ -153,29 +153,38 @@ export async function computeAll(area: string, now = new Date()): Promise<Comput
   // Ambang DOI area ini. Dicocokkan lewat NAMA, karena `area` di sini adalah
   // nama yang dipakai stock_current/sales_daily, bukan kode gudang.
   //
-  // GABUNGAN sengaja TIDAK memakai ambang area mana pun: pitanya berbeda jauh
-  // antar kota (Pusat 4/5/7 vs Makassar 14/31/45), jadi memakai salah satunya
-  // untuk angka gabungan akan salah untuk semua yang lain. Gabungan jatuh ke
-  // pengaturan global, dan itu harus terbaca jelas di layar gabungan.
-  let ambang = null as ReturnType<typeof ambangDoi> | null;
-  if (area !== AREA_GABUNGAN) {
-    const baris = (await muatArea()).find((a) => a.name === area) ?? null;
-    // Hanya dipakai kalau area ini BENAR-BENAR punya ambang sendiri. Kalau
-    // belum diisi, ctx.ambang tetap null supaya perilaku lama (relatif terhadap
-    // lead time) dipertahankan apa adanya.
-    if (baris && (baris.doiCritical !== null || baris.doiMin !== null || baris.doiMax !== null)) {
-      ambang = ambangDoi(baris, {
-        kritis: settings.defaultLeadTimeDays,
-        min: settings.defaultLeadTimeDays + settings.safetyDays,
-        max: settings.targetDoiDays,
-      });
-    }
+  // SATU SUMBER sejak 10 Okt 2026, atas permintaan user ("saya mau semua
+  // mengikuti cabang area saja"): tabel Cabang/Area, titik. Tidak ada lagi
+  // cadangan ke pengaturan global — tiga medan itu dicabut.
+  //
+  // GABUNGAN kini punya BARISNYA SENDIRI di tabel yang sama (kode GABUNGAN),
+  // diisi 7/10/14 saat dibuat yaitu angka global yang dulu dipakainya, supaya
+  // laporan gabungan tidak berubah di hari pemindahan. Pitanya memang tidak
+  // bisa diturunkan dari kota mana pun (Pusat 4/5/7 vs Makassar 14/31/45), dan
+  // sekarang itu jadi baris yang bisa dilihat dan diubah, bukan angka tak kasat
+  // mata di layar lain.
+  // Cadangannya baris GABUNGAN — baris yang ADA DI LAYAR dan bisa diperbaiki,
+  // bukan konstanta. Aturannya ditulis SEKALI di `setelanArea`, dipakai juga
+  // oleh layar dan poster, supaya ketiganya tidak bisa menyimpulkan ambang yang
+  // berbeda untuk area yang sama.
+  const { ambang, leadTimeDays: leadTimeArea } = setelanArea(await muatArea(), area);
+  if (!ambang) {
+    // Loud, bukan diam. Satu-satunya cara sampai sini adalah baris GABUNGAN
+    // hilang atau belum lengkap; menebak angka di titik ini berarti seluruh
+    // status DOI hari itu dihitung dengan ambang yang tidak pernah dipilih
+    // siapa pun, dan tidak akan ada yang tahu.
+    throw new Error(
+      `Ambang DOI untuk area "${area}" tidak ada, dan baris GABUNGAN juga belum lengkap. `
+      + 'Isi Kritis/Low/Aman di Pengaturan → Cabang / Area sebelum menghitung ulang.',
+    );
   }
+
   const ctx = {
     today,
     exclusionDates: new Set(exclusionMap.keys()),
     earliestDataDate: sales.earliestDataDate,
     ambang,
+    leadTimeArea,
   };
 
   // Satu SKU bisa punya beberapa baris transit (OCS + manual, atau beberapa
@@ -352,6 +361,10 @@ export async function runCompute(
   lewatiTransit = false,
 ): Promise<RunResult> {
   const t0 = Date.now();
+  // Lebih dulu daripada apa pun: tanpa baris GABUNGAN, perhitungan area
+  // gabungan tidak punya ambang dan seluruh jalannya gagal. Lihat alasannya di
+  // `pastikanBarisGabungan`. Idempoten dan sekali query.
+  await pastikanBarisGabungan().catch(() => false);
   const anggaran = budget(budgetMs);
   const waktu = new Timeline();
   const owner = lockOwner();

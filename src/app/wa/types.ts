@@ -25,6 +25,15 @@ export type AreaWa = {
    * dipakai menentukan statusnya.
    */
   ambang?: { kritis: number; min: number; max: number };
+  /**
+   * Target ketersediaan (ATP) CABANG INI, persen — kolom di tabel Cabang/Area.
+   *
+   * Per cabang sejak 10 Okt 2026. Sempat global selama beberapa jam, lalu user
+   * memintanya ikut cabang seperti ambang DOI. Opsional dengan alasan yang sama
+   * seperti `atp`: poster memuat datanya lewat HTTP dan dua sisi bisa berbeda
+   * versi sesaat saat deploy berjalan.
+   */
+  atpTarget?: number | null;
   perluPo: number;
   /**
    * ATP area ini. OPSIONAL dengan sengaja.
@@ -110,12 +119,10 @@ export type DataWa = {
     atp?: { persen: number | null; siap: number; dihitung: number };
   } | null;
   /**
-   * Target ATP (%) dari Pengaturan — GLOBAL, bukan per area.
+   * Target ATP untuk angka KESELURUHAN di strip kepala — dari baris GABUNGAN.
    *
-   * Opsional dengan sengaja, alasan yang sama seperti `total.atp`: poster
-   * memuat datanya lewat HTTP dan dua sisi bisa berbeda versi sesaat saat
-   * deploy berjalan. Tanpa angka ini poster tetap tergambar, hanya tanpa baris
-   * target ATP — laporan harian tidak boleh padam karena satu medan baru.
+   * Target per kartu ada di `AreaWa.atpTarget`. Dua medan, bukan satu, karena
+   * angka keseluruhan memang bukan milik cabang mana pun.
    */
   atpTarget?: number | null;
   areas: AreaWa[];

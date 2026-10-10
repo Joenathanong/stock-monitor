@@ -5,12 +5,15 @@ import { DataGrid, type Column } from '@/components/DataGrid';
 
 type Row = { sku: string; name: string; leadTimeDays: number | null; isExcluded: boolean; note: string | null };
 type Resp = { ok: boolean; rows: Row[] };
-type SettingsResp = { ok: boolean; settings: Record<string, string> };
 
 export default function SkuMasterPage() {
   const { data, error, reload } = useApi<Resp>('/api/sku-master');
-  const settings = useApi<SettingsResp>('/api/settings');
-  const defaultLt = Number(settings.data?.settings.default_lead_time_days ?? 7);
+  // Lead time bawaan TIDAK lagi satu angka global — pengaturan
+  // `default_lead_time_days` dicabut 10 Okt 2026 dan diganti kolom per cabang.
+  // Halaman ini lintas cabang (satu SKU dipakai semua kota), jadi tidak ada
+  // satu angka yang benar untuk ditampilkan di sini: Pusat dan Makassar punya
+  // lead time sendiri-sendiri. Menulis "7 (default)" seperti dulu berarti
+  // menyebut angka yang mungkin tidak berlaku di mana pun.
 
   const [onlyEmpty, setOnlyEmpty] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -74,8 +77,8 @@ export default function SkuMasterPage() {
     { key: 'name', label: 'Nama', get: (r) => r.name, width: 300, prio: 'p2', render: (r) => <span className="text-label" title={r.name}>{r.name}</span> },
     { key: 'lt', label: 'Lead time', get: (r) => r.leadTimeDays, type: 'number', mono: true, width: 110,
       render: (r) => edit?.sku === r.sku
-        ? <input className="input w-20 text-right" value={edit.days} onChange={(e) => setEdit({ ...edit, days: e.target.value })} placeholder={String(defaultLt)} />
-        : r.leadTimeDays ?? <span className="text-muted">{defaultLt} (default)</span> },
+        ? <input className="input w-20 text-right" value={edit.days} onChange={(e) => setEdit({ ...edit, days: e.target.value })} placeholder="ikut cabang" />
+        : r.leadTimeDays ?? <span className="text-muted" title="Memakai lead time cabang masing-masing, dari Pengaturan → Cabang / Area">ikut cabang</span> },
     { key: 'ex', label: 'Dikecualikan', get: (r) => (r.isExcluded ? 'Ya' : 'Tidak'), width: 120,
       render: (r) => <button className={`chip ${r.isExcluded ? 'chip-bad' : 'chip-ok'}`} onClick={() => toggleExclude(r)} title="klik untuk mengubah">{r.isExcluded ? 'Ya' : 'Tidak'}</button> },
     { key: 'note', label: 'Catatan', get: (r) => r.note, width: 220, prio: 'p3',
@@ -84,14 +87,14 @@ export default function SkuMasterPage() {
       render: (r) => edit?.sku === r.sku
         ? <span className="space-x-1"><button className="btn btn-sm btn-primary" onClick={saveRow}>Simpan</button><button className="btn btn-sm" onClick={() => setEdit(null)}>Batal</button></span>
         : <button className="btn btn-sm" onClick={() => setEdit({ sku: r.sku, days: r.leadTimeDays === null ? '' : String(r.leadTimeDays), note: r.note ?? '' })}>Edit</button> },
-  ], [sel, edit, defaultLt]); // eslint-disable-line react-hooks/exhaustive-deps
+  ], [sel, edit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="page-title">Lead Time & Master SKU</h1>
-          <div className="mt-1 text-[12px] text-label">Lead time kirim (hari) per SKU. Yang kosong memakai default <b>{defaultLt} hari</b> dari Pengaturan. SKU bisa dikecualikan (discontinued) agar tidak masuk saran PO.</div>
+          <div className="mt-1 text-[12px] text-label">Lead time kirim (hari) per SKU. Yang kosong memakai <b>lead time cabangnya masing-masing</b> (Pengaturan → Cabang / Area) — tidak ada lagi satu angka global, karena jarak kirim tiap kota berbeda. SKU bisa dikecualikan (discontinued) agar tidak masuk saran PO.</div>
         </div>
         <RefreshButton withStock={false} onDone={reload} />
       </div>

@@ -219,6 +219,18 @@ model Area {
   doiMin    Int?
   /// Batas atas pita AMAN (hari) = tingkat isi-ulang DAN ambang overstock.
   doiMax    Int?
+  /// Lead time cabang ini (hari) - berapa lama barang sampai setelah PO ditekan.
+  ///
+  /// Menggantikan pengaturan global `default_lead_time_days`, yang dicabut 10 Okt
+  /// 2026: satu angka untuk semua kota tidak masuk akal ketika Pusat dan Makassar
+  /// jaraknya berbeda jauh. SKU yang punya lead time sendiri di `sku_master`
+  /// tetap menang; kolom ini yang dipakai kalau SKU-nya tidak punya.
+  ///
+  /// Kosong = belum diisi, dan itu DITAMPILKAN sebagai peringatan di Pengaturan,
+  /// bukan diam-diam diganti angka lain.
+  leadTimeDays Int?
+  /// Target ketersediaan (ATP) cabang ini, dalam persen. Di bawah ini = merah di poster.
+  atpTarget Int?
   /// Tanggal mulai operasional - menggantikan pengaturan `sales_area_start`.
   startDate DateTime? @db.Date
   note      String?   @db.VarChar(300)

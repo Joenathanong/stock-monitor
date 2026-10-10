@@ -81,18 +81,28 @@ export type DoiContext = {
   /**
    * Ambang DOI area ini — tiga batas MUTLAK dalam hari (Pengaturan → Cabang).
    *
-   * KOSONG = pakai perilaku lama yang relatif terhadap lead time
-   * (`CRITICAL: DOI <= leadTime`, `LOW: DOI <= leadTime + safetyDays`,
-   * `OVERSTOCK: DOI > targetDoiDays`). Dibiarkan begitu dengan sengaja: area
-   * yang belum diisi ambangnya TIDAK boleh berubah statusnya hanya karena
-   * fitur ini dipasang.
+   * WAJIB sejak 10 Okt 2026. Sebelumnya boleh kosong, dan kalau kosong status
+   * dihitung relatif terhadap lead time (`DOI <= leadTime` -> CRITICAL, dst).
+   * Dua jalur itu hidup berdampingan selama sebulan, dan hasilnya persis yang
+   * dikhawatirkan: kelima cabang sudah memakai ambang mutlak, sehingga cabang
+   * kode berbasis lead time tidak pernah dijalankan — tapi medan "Lead time
+   * default" dan "Target DOI maksimum" tetap duduk di Pengaturan seolah hidup,
+   * dan angka 14 hari itu tetap terpajang di Dashboard, /tv, halaman SKU dan
+   * /simulasi sebagai "Target DOI" padahal tidak benar untuk satu cabang pun.
    *
-   * TERISI = batas mutlak yang menang, dan lead time tidak lagi menentukan
-   * status. Itu memang yang diminta: tiap kota punya ambang sendiri yang tidak
-   * bisa diturunkan dari satu angka cadangan global (Pusat 4/5/7 vs Makassar
-   * 14/31/45).
+   * Sekarang hanya ada SATU jalur. Area yang barisnya belum lengkap diputuskan
+   * di `compute.ts` (jatuh ke baris GABUNGAN), bukan di sini — supaya "pakai
+   * cadangan" jadi keputusan yang kelihatan, bukan cabang `if` yang tersembunyi
+   * di tengah perhitungan status.
    */
-  ambang?: AmbangDoi | null;
+  ambang: AmbangDoi;
+  /**
+   * Lead time cabang ini (hari), dari tabel Cabang/Area.
+   *
+   * Dipakai HANYA sebagai cadangan untuk SKU yang tidak punya lead time
+   * sendiri di `sku_master`. Ia TIDAK menentukan status — itu urusan `ambang`.
+   */
+  leadTimeArea?: number | null;
 };
 
 export type WindowStat = {
@@ -242,7 +252,12 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
   const refDoi = doiOf(stock, refAds);
   const refDoiTransit = doiOf(position, refAds);
 
-  const leadTimeDays = input.leadTimeDays ?? s.defaultLeadTimeDays;
+  // Lead time: milik SKU kalau ada, kalau tidak milik cabangnya. Pengaturan
+  // global `default_lead_time_days` dicabut 10 Okt 2026 — satu angka untuk
+  // semua kota tidak masuk akal ketika jarak kirim Pusat dan Makassar berbeda
+  // jauh. 0 berarti belum diisi di kedua tempat, dan itu ditampilkan apa adanya
+  // (kolom LT kosong) alih-alih diganti tebakan.
+  const leadTimeDays = input.leadTimeDays ?? ctx.leadTimeArea ?? 0;
 
   // --- NPL ---
   const isNpl = ageDays !== null && ageDays < s.nplDays && !firstSalesTruncated;
@@ -260,23 +275,14 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
   else {
     const dT = refDoiTransit!;
     const dS = refDoi!;
-    const lt = leadTimeDays;
-    const am = ctx.ambang ?? null;
-    if (am) {
-      // Ambang per area: tiga batas mutlak. Urutan pitanya ditulis SATU kali di
-      // `pitaDoi` (area-master.ts) supaya layar, perhitungan, dan Sugest PO
-      // tidak bisa memakai batas yang berbeda.
-      const pita = pitaDoi(dT, am);
-      // WAITING dipertahankan: stok sendiri sudah di titik pesan, tapi transit
-      // sudah menutupinya — jangan disarankan PO lagi.
-      status = (pita === 'HEALTHY' && dS <= am.min) ? 'WAITING' : pita;
-    } else {
-      if (dT <= lt) status = 'CRITICAL';
-      else if (dT <= lt + s.safetyDays) status = 'LOW';
-      else if (dS <= lt + s.safetyDays) status = 'WAITING';
-      else if (dT > s.targetDoiDays) status = 'OVERSTOCK';
-      else status = 'HEALTHY';
-    }
+    const am = ctx.ambang;
+    // SATU jalur: tiga batas mutlak dari tabel Cabang/Area. Urutan pitanya
+    // ditulis SATU kali di `pitaDoi` (area-master.ts) supaya layar,
+    // perhitungan, dan Sugest PO tidak bisa memakai batas yang berbeda.
+    const pita = pitaDoi(dT, am);
+    // WAITING dipertahankan: stok sendiri sudah di titik pesan, tapi transit
+    // sudah menutupinya — jangan disarankan PO lagi.
+    status = (pita === 'HEALTHY' && dS <= am.min) ? 'WAITING' : pita;
   }
 
   // --- Saran qty ---
@@ -303,9 +309,15 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
   const perluPesan = status === 'CRITICAL' || status === 'LOW';
   const suggest = (ads: number) =>
     perluPesan && ads > 0
-      // Diisi sampai batas ATAS pita aman area ini; tanpa ambang per area, tetap
-      // memakai target global supaya angkanya tidak berubah diam-diam.
-      ? Math.max(0, Math.ceil((ctx.ambang?.max ?? s.targetDoiDays) * ads - position))
+      // Diisi sampai batas ATAS pita aman area ini.
+      //
+      // TAHAP 2 (belum): lead time belum masuk ke sini. Rumus yang benar adalah
+      // `(max + leadTime) * ads - position` — barang yang dipesan hari ini baru
+      // datang `leadTime` hari lagi, dan selama itu stok terus terjual. Sengaja
+      // ditunda sampai lead time tiap cabang terisi, supaya dampaknya bisa
+      // diukur dengan angka nyata: di cabang ber-max kecil kenaikannya besar
+      // (Pusat max 7 + lead 7 = saran qty DUA KALI LIPAT).
+      ? Math.max(0, Math.ceil(ctx.ambang.max * ads - position))
       : 0;
 
   const runOutDate = refDoi !== null ? addDays(today, Math.max(0, Math.floor(refDoi))) : null;

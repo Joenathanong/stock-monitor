@@ -23,11 +23,21 @@ export const DEFAULT_SETTINGS = {
   dead_stock_window_days: 90,   // 0 penjualan selama N hari + stok > 0 → dead stock
 
   // --- Ambang tindakan ---
-  target_doi_days: 14,          // DOI target maksimum; di atas ini overstock
-  safety_days: 3,               // cadangan di atas lead time
-  default_lead_time_days: 7,    // lead time bila SKU tidak ada di master
+  //
+  // `target_doi_days`, `safety_days` dan `default_lead_time_days` DICABUT
+  // 10 Okt 2026 atas permintaan user ("saya mau semua mengikuti cabang area
+  // saja"). Ketiganya punya pasangan per cabang di tabel Cabang/Area, dan dua
+  // tempat mengatur satu hal selalu berakhir sama: yang satu mati diam-diam
+  // sementara angkanya tetap terpajang di layar sebagai fakta. Persis itu yang
+  // terjadi — "Target DOI 14 hari" tampil di Dashboard, /tv, halaman SKU dan
+  // /simulasi, padahal tidak benar untuk satu cabang pun (7/21/20/45/35).
+  //
+  // `atp_target_persen` juga dicabut, dengan alasan yang sama: umurnya cuma
+  // beberapa jam, dan user langsung memintanya per cabang.
+  //
+  // Laporan GABUNGAN — satu-satunya yang memang memakai ketiganya — kini punya
+  // BARISNYA SENDIRI di tabel Cabang/Area (kode GABUNGAN), lihat `area-store.ts`.
   action_basis: 'KONSERVATIF',  // KONSERVATIF (DOI terkecil) | OPSI1 | OPSI2
-  atp_target_persen: 90,        // target ketersediaan (ATP) %; di bawah ini ditandai merah di poster
 
   exclude_phase_out: 1,         // SKU phase out tidak dihitung di DOI total & ABC
 
@@ -108,20 +118,6 @@ export type DoiSettings = {
   nplDays: number;
   nplMinDays: number;
   deadStockWindowDays: number;
-  targetDoiDays: number;
-  safetyDays: number;
-  /**
-   * Target ketersediaan (ATP) dalam persen — GLOBAL, satu angka untuk semua area.
-   *
-   * Sengaja global, berbeda dengan target DOI yang per cabang. Target DOI harus
-   * per cabang karena lead time dan pola jual tiap kota berbeda (Pusat 7 hari,
-   * Makassar 45 hari). ATP mengukur hal lain: berapa persen SKU yang BISA
-   * dijanjikan — itu janji layanan yang sama di mana pun, bukan akibat jarak
-   * kirim. Kalau nanti memang perlu per cabang, kolomnya ditambah di tabel
-   * Cabang/Area seperti kolom "Aman ≤ (hari)".
-   */
-  atpTargetPersen: number;
-  defaultLeadTimeDays: number;
   actionBasis: 'KONSERVATIF' | 'OPSI1' | 'OPSI2';
   abcAPct: number;
   abcBPct: number;
@@ -199,10 +195,6 @@ export function toDoiSettings(raw: SettingsMap = {}): DoiSettings {
     nplDays: num(raw, 'npl_days'),
     nplMinDays: num(raw, 'npl_min_days'),
     deadStockWindowDays: Math.max(1, num(raw, 'dead_stock_window_days')),
-    targetDoiDays: num(raw, 'target_doi_days'),
-    safetyDays: num(raw, 'safety_days'),
-    atpTargetPersen: num(raw, 'atp_target_persen'),
-    defaultLeadTimeDays: num(raw, 'default_lead_time_days'),
     actionBasis: basis === 'OPSI1' || basis === 'OPSI2' ? basis : 'KONSERVATIF',
     abcAPct: num(raw, 'abc_a_pct'),
     abcBPct: num(raw, 'abc_b_pct'),

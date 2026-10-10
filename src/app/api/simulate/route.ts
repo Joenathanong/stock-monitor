@@ -16,7 +16,10 @@ export async function GET(req: Request) {
     computedAt: snap.computedAt,
     settings: {
       doiDisplay: snap.settings?.doiDisplay ?? 'BOTH',
-      targetDoiDays: snap.settings?.targetDoiDays ?? 14,
+      // Target simulasi = batas AMAN area yang sedang dilihat (umumnya baris
+      // GABUNGAN, karena halaman ini mensimulasikan DOI total). Dulu angka
+      // global 14 — yang tidak benar untuk cabang mana pun.
+      targetDoiDays: snap.ambang?.max ?? 14,
       areaScope: snap.settings?.areaScope ?? '',
     },
     params,

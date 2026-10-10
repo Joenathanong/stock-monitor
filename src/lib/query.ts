@@ -8,6 +8,8 @@ import { keyToUtcDate, toDateKeyUtc, type DateKey } from './dates';
 import type { HealthSummary, ProductStatus } from './doi';
 import type { DoiSettings } from './settings';
 import { AREA_GABUNGAN } from './areas';
+import { muatArea } from './area-store';
+import { setelanArea, type AmbangDoi } from './area-master';
 
 /**
  * Area mana yang dibaca kalau pemanggil tidak menyebut.
@@ -96,8 +98,29 @@ export type SnapshotView = {
   exclusions: { date: DateKey; reason: string }[];
   earliestDataDate: DateKey | null;
   settings: DoiSettings | null;
+  /**
+   * Ambang DOI area yang sedang ditampilkan, dari tabel Cabang/Area.
+   *
+   * Dikirim bersama snapshot sejak 10 Okt 2026, dan itu bukan kenyamanan
+   * belaka. Sebelumnya Dashboard, /tv, halaman SKU dan /simulasi menulis
+   * "Target DOI 14 hari" dari pengaturan global — angka yang tidak benar untuk
+   * SATU CABANG PUN (yang benar 7/21/20/45/35). Layar memajang angka global
+   * karena itu satu-satunya yang ada di payload-nya; begitu ambang yang
+   * sebenarnya ikut dikirim, tidak ada lagi alasan menampilkan yang salah.
+   */
+  ambang: AmbangDoi | null;
+  /** Lead time cabang (hari) — cadangan untuk SKU tanpa lead time sendiri. */
+  leadTimeArea: number | null;
   rows: SnapshotRow[];
 };
+
+/** Ambang + lead time sebuah area, dengan baris GABUNGAN sebagai cadangan. */
+export async function ambangArea(area: string | null | undefined): Promise<{
+  ambang: AmbangDoi | null; leadTimeArea: number | null;
+}> {
+  const s = setelanArea(await muatArea().catch(() => []), area);
+  return { ambang: s.ambang, leadTimeArea: s.leadTimeDays };
+}
 
 /** Snapshot terakhir (hari ini bila ada, kalau tidak yang paling baru). */
 export async function latestSnapshot(area?: string | null): Promise<SnapshotView> {
@@ -106,7 +129,7 @@ export async function latestSnapshot(area?: string | null): Promise<SnapshotView
     ? await prisma.doiSummary.findFirst({ where: { snapshotDate: keyToUtcDate(snapshotDate), areaId } })
     : null;
   if (!summary) {
-    return { snapshotDate: null, computedAt: null, trigger: null, summary: null, exclusions: [], earliestDataDate: null, settings: null, rows: [], areaId, areas };
+    return { snapshotDate: null, computedAt: null, trigger: null, summary: null, exclusions: [], earliestDataDate: null, settings: null, ...(await ambangArea(areaId)), rows: [], areaId, areas };
   }
   const payload = JSON.parse(summary.payload) as {
     summary: HealthSummary; exclusions: { date: DateKey; reason: string }[]; earliestDataDate: DateKey | null; settings: DoiSettings;
@@ -130,6 +153,7 @@ export async function latestSnapshot(area?: string | null): Promise<SnapshotView
     exclusions: payload.exclusions ?? [],
     earliestDataDate: payload.earliestDataDate ?? null,
     settings: await withLiveDisplay(payload.settings ?? null),
+    ...(await ambangArea(summary.areaId)),
     rows: rows.map((r) => ({
       sku: r.sku,
       name: r.name,
@@ -184,6 +208,8 @@ export type DashboardView = {
   /** Area yang ditampilkan, dan seluruh area yang bisa dipilih. */
   areaId: string | null; areas: string[];
   summary: HealthSummary | null; settings: DoiSettings | null;
+  /** Ambang & lead time cabang yang sedang dilihat, dari tabel Cabang/Area. */
+  ambang: AmbangDoi | null; leadTimeArea: number | null;
   exclusions: { date: DateKey; reason: string }[]; earliestDataDate: DateKey | null;
   po: SnapshotRow[]; overstock: SnapshotRow[]; npl: SnapshotRow[]; phaseOut: SnapshotRow[];
   /**
@@ -274,7 +300,7 @@ export async function dashboardView(area?: string | null): Promise<DashboardView
   const summary = areaId && snapshotDate
     ? await prisma.doiSummary.findFirst({ where: { snapshotDate: keyToUtcDate(snapshotDate), areaId } })
     : null;
-  const empty = { snapshotDate: null, areaId, areas, computedAt: null, trigger: null, summary: null, settings: null, exclusions: [], earliestDataDate: null, po: [], overstock: [], npl: [], phaseOut: [], totals: { po: NOL, overstock: NOL, npl: NOL, phaseOut: NOL } };
+  const empty = { snapshotDate: null, areaId, areas, computedAt: null, trigger: null, summary: null, settings: null, ...(await ambangArea(areaId)), exclusions: [], earliestDataDate: null, po: [], overstock: [], npl: [], phaseOut: [], totals: { po: NOL, overstock: NOL, npl: NOL, phaseOut: NOL } };
   if (!summary) return empty;
 
   const payload = JSON.parse(summary.payload) as {
@@ -301,6 +327,9 @@ export async function dashboardView(area?: string | null): Promise<DashboardView
     trigger: summary.trigger,
     summary: normalizeSummary(payload.summary),
     settings: await withLiveDisplay(payload.settings ?? null),
+    // Diambil dari snapshot yang sudah dimuat — bukan query kedua.
+    ambang: snap.ambang,
+    leadTimeArea: snap.leadTimeArea,
     exclusions: payload.exclusions ?? [],
     earliestDataDate: payload.earliestDataDate ?? null,
     // Prioritas open PO diurut menurut kegentingan (DOI terkecil), bukan qty —

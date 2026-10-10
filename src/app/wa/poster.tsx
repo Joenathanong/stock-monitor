@@ -51,11 +51,9 @@ const Teks = ({
   </text>
 );
 
-function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, atpTarget, onKlik }: {
+function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onKlik }: {
   a: AreaWa; x: number; y: number; w: number; h: number;
   blok: DataWa['blok']; disp: DataWa['doiDisplay']; kritisMaks: number;
-  /** Target ATP (%) dari Pengaturan — GLOBAL, sama untuk semua kartu. */
-  atpTarget?: number | null;
   /** Ukuran angka ATP — dihitung SEKALI untuk seluruh poster, lihat ukuranAtpMuat. */
   atpSize: number;
   /** Status yang ditampilkan — SAMA untuk semua kartu, lihat `kunciTampil`. */
@@ -176,6 +174,9 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, atp
     // `ambang.max` = "Aman <= (hari)" di Pengaturan > Cabang/Area, yang juga
     // dipakai Sugest PO sebagai batas pengisian ("PO diisi sampai sini").
     const arahD = arahDoi(nilaiUtama, a.ambang);
+    // Target ATP CABANG INI, bukan satu angka untuk semua — sejalan dengan
+    // ambang DOI yang juga per cabang.
+    const atpTarget = a.atpTarget ?? null;
     const arahA = arahAtp(a.atp?.persen, atpTarget);
 
     // Sisi KANAN pita. Di mode dua opsi DOI, ATP tidak memegang angka besar,
@@ -518,7 +519,6 @@ export function Poster({ data, onPilihArea }: Props) {
           h={kartuH}
           blok={data.blok}
           atpSize={atpSize}
-          atpTarget={data.atpTarget}
           disp={disp}
           kritisMaks={0}
           tampil={tampil}

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { AbcChip, Alert, Bars, Empty, Kpi, RefreshButton, STATUS_COLOR, STATUS_ORDER, STATUS_TEXT, StatusChip, doiLabel, doiTotalLabel, fmt, fmtDateTime, fmtDoi, fmtRp, fmtRpShort, opsi2Label, show1, show2, useApi, windowLabel } from '@/components/ui';
 import { DataGrid, type Column } from '@/components/DataGrid';
 import type { DashboardView, SnapshotRow } from '@/lib/query';
+import { ringkasPita } from '@/lib/area-master';
 import { AreaPicker, useArea, labelArea } from '@/components/AreaPicker';
 
 /**
@@ -14,7 +15,12 @@ import { AreaPicker, useArea, labelArea } from '@/components/AreaPicker';
 const doiT = (stock: number, transit: number, ads: number) =>
   transit > 0 && ads > 0 ? (stock + transit) / ads : null;
 
-type Resp = DashboardView & { ok: boolean };
+type Resp = DashboardView & {
+  ok: boolean;
+  /** Ambang & lead time cabang yang sedang dilihat — dari tabel Cabang/Area. */
+  ambang: { kritis: number; min: number; max: number } | null;
+  leadTimeArea: number | null;
+};
 
 const skuCol: Column<SnapshotRow> = { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 220, isTitle: true,
   render: (r) => <span className="font-semibold" title={r.name}>{r.sku}</span> };
@@ -145,7 +151,16 @@ export function DashboardBody({ apiUrl, readOnly = false }: { apiUrl: string; re
             <div className="card card-pad">
               <div className="card-title mb-3">Distribusi DOI (basis {set?.actionBasis === 'KONSERVATIF' ? 'konservatif' : set?.actionBasis})</div>
               <Bars items={s.buckets.map((b) => ({ label: b.label, value: b.count }))} />
-              <div className="mt-3 text-[12px] text-label">Target DOI {set?.targetDoiDays} hari · safety {set?.safetyDays} hari · lead time default {set?.defaultLeadTimeDays} hari</div>
+              {/* Pita cabang yang SEDANG DILIHAT, bukan tiga angka global.
+                  Barisnya dulu berbunyi "Target DOI 14 hari · safety 3 hari ·
+                  lead time default 7 hari" di layar area mana pun — dan 14 itu
+                  tidak benar untuk satu cabang pun. */}
+              <div className="mt-3 text-[12px] text-label">
+                {data?.ambang
+                  ? `Pita DOI ${data.areaId ?? ''}: ${ringkasPita(data.ambang)}`
+                  : 'Ambang DOI cabang ini belum diatur — isi di Pengaturan → Cabang / Area'}
+                {data?.leadTimeArea !== null && data?.leadTimeArea !== undefined ? ` · lead time ${data.leadTimeArea} hari` : ''}
+              </div>
             </div>
             <div className="card overflow-hidden">
               <div className="card-title px-4 pt-4">Analisis ABC (qty {win1})</div>

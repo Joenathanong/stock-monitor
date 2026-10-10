@@ -1,22 +1,25 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Alert, Empty, postJson, useApi } from '@/components/ui';
-import { ambangDoi, ringkasPita } from '@/lib/area-master';
+import { ambangDoi, ringkasPita, peringatanArea } from '@/lib/area-master';
+import { KODE_GABUNGAN } from '@/lib/areas';
 
 type BarisArea = {
   code: string; name: string; isActive: boolean; sortOrder: number;
   doiCritical: number | null; doiMin: number | null; doiMax: number | null;
+  leadTimeDays: number | null; atpTarget: number | null;
   startDate: string | null; note: string | null;
 };
-type Resp = {
-  ok: boolean; areas: BarisArea[]; belumTerdaftar: string[];
-  bawaan: { kritis: number; min: number; max: number };
-};
+type Resp = { ok: boolean; areas: BarisArea[]; belumTerdaftar: string[] };
 
 const kosong: BarisArea = {
   code: '', name: '', isActive: true, sortOrder: 100,
-  doiCritical: null, doiMin: null, doiMax: null, startDate: null, note: null,
+  doiCritical: null, doiMin: null, doiMax: null,
+  leadTimeDays: null, atpTarget: null, startDate: null, note: null,
 };
+
+/** Baris ambang laporan gabungan — bukan cabang, jadi diperlakukan berbeda. */
+const isGabungan = (r: BarisArea) => r.code === KODE_GABUNGAN;
 
 /**
  * Pratinjau pita untuk satu baris, dihitung dengan fungsi yang SAMA dengan
@@ -27,18 +30,29 @@ const kosong: BarisArea = {
  * berbeda tanpa ada yang kelihatan keliru — dan yang dipercaya user adalah yang
  * di layar.
  */
-function Pita({ r, bawaan }: { r: BarisArea; bawaan: Resp['bawaan'] }) {
-  const terisi = r.doiCritical !== null || r.doiMin !== null || r.doiMax !== null;
-  const a = ambangDoi(r, bawaan);
+function Pita({ r }: { r: BarisArea }) {
+  const a = ambangDoi(r);
   const bentrok = (r.doiCritical ?? -1) >= (r.doiMin ?? Infinity)
     || (r.doiMax !== null && r.doiMin !== null && r.doiMax < r.doiMin);
+  if (!a) {
+    // Tidak ada lagi "(global)". Sejak 10 Okt 2026 tidak ada angka global yang
+    // bisa dipakai diam-diam: baris yang belum lengkap memang belum berfungsi,
+    // dan itu harus terbaca begitu — bukan ditampilkan seolah punya pita.
+    return <span className="text-[11px]" style={{ color: 'var(--critical)' }}>belum lengkap — isi ketiganya</span>;
+  }
   return (
     <span className={bentrok ? 'text-[11px]' : 'text-[11px] text-label'} style={bentrok ? { color: 'var(--critical)' } : undefined}>
       {ringkasPita(a)}
-      {!terisi ? ' (global)' : ''}
       {bentrok ? ' — batas salah urut, dikoreksi otomatis saat dihitung' : ''}
     </span>
   );
+}
+
+/** Peringatan baris (tidak memblokir simpan) — mis. lead time > ambang kritis. */
+function Peringatan({ r }: { r: BarisArea }) {
+  const p = peringatanArea(r).filter((x) => x.field === 'doiCritical');
+  if (!p.length) return null;
+  return <div className="text-[11px]" style={{ color: 'var(--critical)' }}>{p[0].pesan}</div>;
 }
 
 const num = (v: string): number | null => (v.trim() === '' ? null : Number(v));
@@ -148,6 +162,8 @@ export default function AreaMaster() {
             <th className="num" title="DOI <= angka ini -> CRITICAL">Kritis ≤<br /><span className="text-label">(hari)</span></th>
             <th className="num" title="DOI <= angka ini -> LOW, masuk Sugest PO">Low ≤<br /><span className="text-label">(hari)</span></th>
             <th className="num" title="DOI <= angka ini -> AMAN; di atasnya OVERSTOCK">Aman ≤<br /><span className="text-label">(hari)</span></th>
+            <th className="num" title="Berapa lama barang sampai setelah PO ditekan. Dipakai saran qty PO; SKU yang punya lead time sendiri menang.">Lead time<br /><span className="text-label">(hari)</span></th>
+            <th className="num" title="Ketersediaan di bawah angka ini ditandai merah di poster /wa">Target ATP<br /><span className="text-label">(%)</span></th>
             <th className="num">Mulai</th>
             <th className="py-1 text-left">Pita</th>
             <th className="py-1 text-left">Catatan</th>
@@ -158,24 +174,29 @@ export default function AreaMaster() {
             {rows.map((r, i) => (
               <tr key={r.code} className={r.isActive ? '' : 'text-label'}>
                 <td className="py-1"><input className="input w-24 mono" value={r.code} readOnly title="Kode adalah kunci — hapus lalu buat baru kalau kodenya salah" /></td>
-                <td><input className="input w-36" value={r.name} onChange={(e) => ubah(i, { name: e.target.value })} /></td>
+                <td>
+                  <input className="input w-36" value={r.name} readOnly={isGabungan(r)} onChange={(e) => ubah(i, { name: e.target.value })} />
+                  {isGabungan(r) ? <div className="text-[11px] text-label">ambang laporan gabungan — bukan gudang</div> : null}
+                </td>
                 <td><input className="input w-16 num" type="number" value={r.sortOrder} onChange={(e) => ubah(i, { sortOrder: Number(e.target.value) })} /></td>
-                <td><input className="input w-16 num" type="number" value={r.doiCritical ?? ''} placeholder={String(data?.bawaan.kritis ?? '')} onChange={(e) => ubah(i, { doiCritical: num(e.target.value) })} /></td>
-                <td><input className="input w-16 num" type="number" value={r.doiMin ?? ''} placeholder={String(data?.bawaan.min ?? '')} onChange={(e) => ubah(i, { doiMin: num(e.target.value) })} /></td>
-                <td><input className="input w-16 num" type="number" value={r.doiMax ?? ''} placeholder={String(data?.bawaan.max ?? '')} onChange={(e) => ubah(i, { doiMax: num(e.target.value) })} /></td>
-                <td className="whitespace-nowrap">{data ? <Pita r={r} bawaan={data.bawaan} /> : null}</td>
+                <td><input className="input w-16 num" type="number" value={r.doiCritical ?? ''} placeholder="wajib" onChange={(e) => ubah(i, { doiCritical: num(e.target.value) })} /></td>
+                <td><input className="input w-16 num" type="number" value={r.doiMin ?? ''} placeholder="wajib" onChange={(e) => ubah(i, { doiMin: num(e.target.value) })} /></td>
+                <td><input className="input w-16 num" type="number" value={r.doiMax ?? ''} placeholder="wajib" onChange={(e) => ubah(i, { doiMax: num(e.target.value) })} /></td>
+                <td><input className="input w-16 num" type="number" value={r.leadTimeDays ?? ''} placeholder="—" onChange={(e) => ubah(i, { leadTimeDays: num(e.target.value) })} /></td>
+                <td><input className="input w-16 num" type="number" value={r.atpTarget ?? ''} placeholder="—" onChange={(e) => ubah(i, { atpTarget: num(e.target.value) })} /></td>
+                <td className="whitespace-nowrap"><Pita r={r} /><Peringatan r={r} /></td>
                 <td><input className="input w-36" type="date" value={r.startDate ?? ''} onChange={(e) => ubah(i, { startDate: e.target.value || null })} /></td>
                 <td><input className="input w-40" value={r.note ?? ''} onChange={(e) => ubah(i, { note: e.target.value || null })} /></td>
                 <td><label className="check"><input type="checkbox" checked={r.isActive} onChange={(e) => ubah(i, { isActive: e.target.checked })} /></label></td>
                 <td className="whitespace-nowrap">
                   <button className="btn btn-sm" onClick={() => simpan(r)} disabled={busy === r.code}>Simpan</button>
-                  {r.isActive ? (
+                  {r.isActive && !isGabungan(r) ? (
                     <button className="btn btn-sm ml-1" onClick={() => nonaktifkan(r.code)} disabled={busy === r.code}>Nonaktifkan</button>
                   ) : null}
                 </td>
               </tr>
             ))}
-            {!rows.length ? <tr><td colSpan={11}><Empty>Belum ada area — klik &quot;Isi dari data yang ada&quot;.</Empty></td></tr> : null}
+            {!rows.length ? <tr><td colSpan={13}><Empty>Belum ada area — klik &quot;Isi dari data yang ada&quot;.</Empty></td></tr> : null}
           </tbody>
         </table>
       </div>
@@ -186,9 +207,11 @@ export default function AreaMaster() {
           <div><label className="label">Kode gudang OCS</label><input className="input w-28 mono" value={baru.code} placeholder="GJBL" onChange={(e) => setBaru({ ...baru, code: e.target.value.toUpperCase() })} /></div>
           <div><label className="label">Nama area</label><input className="input w-40" value={baru.name} placeholder="Bali" onChange={(e) => setBaru({ ...baru, name: e.target.value })} /></div>
           <div><label className="label">Urut</label><input className="input w-16 num" type="number" value={baru.sortOrder} onChange={(e) => setBaru({ ...baru, sortOrder: Number(e.target.value) })} /></div>
-          <div><label className="label">Kritis ≤ (hari)</label><input className="input w-20 num" type="number" value={baru.doiCritical ?? ''} placeholder={String(data?.bawaan.kritis ?? '')} onChange={(e) => setBaru({ ...baru, doiCritical: num(e.target.value) })} /></div>
-          <div><label className="label">Low ≤ (hari)</label><input className="input w-20 num" type="number" value={baru.doiMin ?? ''} placeholder={String(data?.bawaan.min ?? '')} onChange={(e) => setBaru({ ...baru, doiMin: num(e.target.value) })} /></div>
-          <div><label className="label">Aman ≤ (hari)</label><input className="input w-20 num" type="number" value={baru.doiMax ?? ''} placeholder={String(data?.bawaan.max ?? '')} onChange={(e) => setBaru({ ...baru, doiMax: num(e.target.value) })} /></div>
+          <div><label className="label">Kritis ≤ (hari)</label><input className="input w-20 num" type="number" value={baru.doiCritical ?? ''} placeholder="wajib" onChange={(e) => setBaru({ ...baru, doiCritical: num(e.target.value) })} /></div>
+          <div><label className="label">Low ≤ (hari)</label><input className="input w-20 num" type="number" value={baru.doiMin ?? ''} placeholder="wajib" onChange={(e) => setBaru({ ...baru, doiMin: num(e.target.value) })} /></div>
+          <div><label className="label">Aman ≤ (hari)</label><input className="input w-20 num" type="number" value={baru.doiMax ?? ''} placeholder="wajib" onChange={(e) => setBaru({ ...baru, doiMax: num(e.target.value) })} /></div>
+          <div><label className="label">Lead time (hari)</label><input className="input w-20 num" type="number" value={baru.leadTimeDays ?? ''} onChange={(e) => setBaru({ ...baru, leadTimeDays: num(e.target.value) })} /></div>
+          <div><label className="label">Target ATP (%)</label><input className="input w-20 num" type="number" value={baru.atpTarget ?? ''} onChange={(e) => setBaru({ ...baru, atpTarget: num(e.target.value) })} /></div>
           <div><label className="label">Mulai operasional</label><input className="input w-36" type="date" value={baru.startDate ?? ''} onChange={(e) => setBaru({ ...baru, startDate: e.target.value || null })} /></div>
           <button className="btn btn-primary" onClick={tambah} disabled={busy === 'baru' || !baru.code || !baru.name}>
             {busy === 'baru' ? 'Menambah…' : 'Tambah'}
@@ -210,14 +233,25 @@ export default function AreaMaster() {
           tidak mungkin ada hari yang tidak masuk pita mana pun. Harus naik:
           Kritis &lt; Low ≤ Aman.
           <div className="mt-1">
-            Dikosongkan = ikut pengaturan global ({data?.bawaan.kritis ?? '—'} / {data?.bawaan.min ?? '—'} /{' '}
-            {data?.bawaan.max ?? '—'} hari), dan untuk area itu status DOI tetap dihitung relatif
-            terhadap lead time seperti sebelumnya. Begitu salah satu kolom diisi, area itu memakai
-            batas mutlak dan lead time tidak lagi menentukan statusnya.
+            <b>Ketiganya wajib diisi.</b> Sampai 10 Okt 2026 kolom ini boleh kosong dan jatuh ke
+            tiga pengaturan global (7 / 10 / 14 hari) — dan justru itu masalahnya: ada dua tempat
+            mengatur satu hal, yang satu mati diam-diam sementara angkanya tetap terpajang di
+            Dashboard dan /tv sebagai &quot;Target DOI 14 hari&quot;, padahal tidak benar untuk satu
+            cabang pun. Ketiga pengaturan global itu sudah dicabut; tabel ini satu-satunya sumber.
           </div>
           <div className="mt-1">
-            Laporan <b>GABUNGAN</b> tidak memakai ambang kota mana pun — pitanya terlalu berbeda
-            antar kota untuk dijumlahkan — jadi gabungan selalu memakai pengaturan global.
+            <b>Lead time</b> adalah berapa lama barang sampai setelah PO ditekan. Ia tidak
+            menentukan status — itu urusan tiga kolom di atas — tapi dipakai sebagai lead time
+            cadangan untuk SKU yang tidak punya angkanya sendiri di Master SKU. Kalau lead time
+            lebih lama daripada <b>Kritis ≤</b>, barisnya diberi peringatan: SKU baru ditandai
+            kritis ketika kehabisan stok sudah tidak bisa dihindari.
+          </div>
+          <div className="mt-1">
+            Laporan <b>GABUNGAN</b> punya barisnya sendiri di tabel ini (kode{' '}
+            <span className="mono">{KODE_GABUNGAN}</span>), bukan cabang dan tidak punya gudang.
+            Ia tidak memakai ambang kota mana pun — pitanya terlalu berbeda
+            antar kota untuk dijumlahkan — ia memakai angkanya sendiri di baris itu, dan baris
+            itu juga yang jadi cadangan bagi cabang yang kolomnya belum lengkap.
           </div>
         </div>
       </div>

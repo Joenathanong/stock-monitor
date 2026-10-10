@@ -4,6 +4,7 @@ import { addDays, keyToUtcDate, toDateKeyUtc, todayKey, type DateKey } from '@/l
 import { buildExclusionMap } from '@/lib/exclusion';
 import { sapKey } from '@/lib/phase-out';
 import { fail, json, safe } from '@/lib/http';
+import { ambangArea } from '@/lib/query';
 
 export const dynamic = 'force-dynamic';
 
@@ -105,11 +106,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ sku: string }> 
     sapCode: snapRow?.sapCode ?? null,
     master: master ? { leadTimeDays: master.leadTimeDays, isExcluded: master.isExcluded, note: master.note } : null,
     phaseOut: po ? { sapCode: po.sapCode, reason: po.reason, note: po.note, targetOutDate: po.targetOutDate ? toDateKeyUtc(po.targetOutDate) : null } : null,
-    settings: {
-      targetDoiDays: settings.targetDoiDays, safetyDays: settings.safetyDays,
-      defaultLeadTimeDays: settings.defaultLeadTimeDays, doiDisplay: settings.doiDisplay,
-      opsi1WindowDays: settings.opsi1WindowDays,
-    },
+    settings: { doiDisplay: settings.doiDisplay, opsi1WindowDays: settings.opsi1WindowDays },
+    // Ambang & lead time CABANG tempat SKU ini berada — bukan angka global.
+    // Grafik SKU menggambar garis acuan "Target N hari"; dengan angka global
+    // garis itu digambar di 14 hari untuk semua SKU, padahal batas Pusat 7 dan
+    // Makassar 45. Garis acuan yang salah lebih buruk daripada tanpa garis:
+    // ia terbaca seolah diukur.
+    ...(await ambangArea(snapRow?.areaId ?? null)),
     snapshot: snapRow ? {
       snapshotDate: toDateKeyUtc(snapRow.snapshotDate),
       availableQty: snapRow.availableQty, qtyOnHand: snapRow.qtyOnHand, qtyOnOrder: snapRow.qtyOnOrder,

@@ -1,6 +1,5 @@
 import { prisma } from '@/lib/prisma';
 import { fail, json, safe } from '@/lib/http';
-import { getSettings } from '@/lib/compute';
 import { muatArea, isiAreaBawaan } from '@/lib/area-store';
 import { areaBelumTerdaftar, validasiArea, normalKode, type BarisArea } from '@/lib/area-master';
 
@@ -16,26 +15,20 @@ export const dynamic = 'force-dynamic';
  * pernah muncul di mana pun.
  */
 export async function GET() {
-  const [areas, dariStok, s] = await Promise.all([
+  const [areas, dariStok] = await Promise.all([
     muatArea(),
     prisma.$queryRawUnsafe<{ areaId: string }[]>(
       "SELECT DISTINCT areaId FROM stock_current WHERE areaId <> '' ORDER BY areaId",
     ),
-    getSettings(),
   ]);
   return json(safe({
     ok: true,
     areas,
     belumTerdaftar: areaBelumTerdaftar(dariStok.map((r) => r.areaId), areas),
-    // Nilai yang dipakai area yang DOI min/maks-nya dibiarkan kosong.
-    // Tiga batas bawaan, disusun supaya SAMA dengan perilaku lama di doi.ts:
-    // CRITICAL saat DOI <= leadTime, LOW saat DOI <= leadTime + safetyDays,
-    // OVERSTOCK di atas targetDoiDays.
-    bawaan: {
-      kritis: s.defaultLeadTimeDays,
-      min: s.defaultLeadTimeDays + s.safetyDays,
-      max: s.targetDoiDays,
-    },
+    // `bawaan` DIHAPUS 10 Okt 2026. Dulu ia mengirim tiga angka global sebagai
+    // cadangan untuk kolom yang dikosongkan — dan justru itu yang membuat ada
+    // dua tempat mengatur ambang. Sekarang kolomnya wajib, dan laporan
+    // GABUNGAN punya barisnya sendiri di tabel yang sama.
   }));
 }
 
@@ -58,6 +51,8 @@ export async function PUT(req: Request) {
     sortOrder: angka(b.sortOrder) ?? 100,
     doiMin: angka(b.doiMin),
     doiMax: angka(b.doiMax),
+    leadTimeDays: angka(b.leadTimeDays),
+    atpTarget: angka(b.atpTarget),
     startDate: b.startDate ? String(b.startDate).slice(0, 10) : null,
     note: b.note ? String(b.note).slice(0, 300) : null,
   };

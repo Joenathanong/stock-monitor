@@ -26,7 +26,10 @@ type Resp = {
   ok: boolean; sku: string; today: string; days: number; name: string | null; sapCode: string | null;
   master: { leadTimeDays: number | null; isExcluded: boolean; note: string | null } | null;
   phaseOut: { sapCode: string | null; reason: string | null; note: string | null; targetOutDate: string | null } | null;
-  settings: { targetDoiDays: number; safetyDays: number; defaultLeadTimeDays: number; doiDisplay: DoiDisplay; opsi1WindowDays: number };
+  settings: { doiDisplay: DoiDisplay; opsi1WindowDays: number };
+  /** Ambang cabang tempat SKU ini berada; null kalau cabangnya belum tersetel. */
+  ambang: { kritis: number; min: number; max: number } | null;
+  leadTimeArea: number | null;
   snapshot: Snap | null;
   totals: { qty: number; shopee: number; tiktok: number; tokped: number; lazada: number; other: number };
   stockSince: string | null; stockDays: number;
@@ -170,8 +173,10 @@ export default function SkuPage() {
                   <>
                     <LineChart dates={dates} lines={doiLines} unit="hari" digits={1}
                       refs={[
-                        { value: data.settings.targetDoiDays, label: `Target ${data.settings.targetDoiDays} hari`, color: 'var(--c2)' },
-                        { value: snap?.leadTimeDays ?? data.settings.defaultLeadTimeDays, label: `Lead time ${snap?.leadTimeDays ?? data.settings.defaultLeadTimeDays} hari`, color: 'var(--critical-solid)' },
+                        ...(data.ambang ? [{ value: data.ambang.max, label: `Target ${data.ambang.max} hari`, color: 'var(--c2)' }] : []),
+                        ...((snap?.leadTimeDays ?? data.leadTimeArea) !== null && (snap?.leadTimeDays ?? data.leadTimeArea) !== undefined
+                          ? [{ value: (snap?.leadTimeDays ?? data.leadTimeArea) as number, label: `Lead time ${snap?.leadTimeDays ?? data.leadTimeArea} hari`, color: 'var(--critical-solid)' }]
+                          : []),
                       ]} />
                     <div className="mt-2 text-[12px] text-label">
                       Garis di bawah lead time = stok habis sebelum barang datang; di atas target = overstock.

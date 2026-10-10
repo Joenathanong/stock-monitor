@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { latestSnapshot, summaryHistory } from '@/lib/query';
 import { getSettingsMap } from '@/lib/compute';
 import { AREA_GABUNGAN } from '@/lib/areas';
-import { ambangDoi } from '@/lib/area-master';
+import { setelanArea } from '@/lib/area-master';
 import { muatArea } from '@/lib/area-store';
 import { toDateKeyUtc } from '@/lib/dates';
 import { tolakAksesPoster } from '@/lib/wa-akses';
@@ -65,18 +65,21 @@ export async function GET(req: Request) {
     )
   ).map((r) => r.areaId);
 
-  // Ambang DOI per area, untuk ditulis di label sebaran ("Kritis ≤4D").
-  // Dicocokkan lewat NAMA, karena itulah kunci yang dipakai doi_snapshot.
-  // Bawaannya disusun sama dengan perilaku lama di doi.ts, supaya area yang
-  // ambangnya belum diisi tetap menampilkan angka yang BENAR-BENAR dipakai.
-  const bawaanAmbang = {
-    kritis: Number(raw.default_lead_time_days ?? 7),
-    min: Number(raw.default_lead_time_days ?? 7) + Number(raw.safety_days ?? 3),
-    max: Number(raw.target_doi_days ?? 14),
-  };
+  // Ambang DOI & target ATP per area, untuk label sebaran ("Kritis ≤4D") dan
+  // baris target di kartu. Dicocokkan lewat NAMA, karena itulah kunci yang
+  // dipakai doi_snapshot.
+  //
+  // CADANGANNYA baris GABUNGAN, bukan pengaturan global — tiga medan itu
+  // dicabut 10 Okt 2026. Ini penting bukan karena kerapian: cadangan di sini
+  // HARUS sama dengan cadangan di `compute.ts`, kalau tidak poster menulis
+  // "Aman ≤14D" untuk cabang yang statusnya sebenarnya dihitung dengan batas
+  // lain. Label yang berbohong, tanpa ada yang gagal. Supaya itu MUSTAHIL,
+  // keduanya kini memanggil `setelanArea` yang sama, bukan menyusun aturan
+  // cadangannya masing-masing — dijaga satu-ambang.test.ts.
   const barisArea = await muatArea().catch(() => []);
-  const ambangPerNama = new Map(
-    barisArea.map((a) => [a.name, ambangDoi(a, bawaanAmbang)]),
+  const setelanGab = setelanArea(barisArea, AREA_GABUNGAN);
+  const setelanPerNama = new Map(
+    barisArea.map((a) => [a.name, setelanArea(barisArea, a.name)]),
   );
 
   /**
@@ -130,7 +133,11 @@ export async function GET(req: Request) {
         valueTransit: nilaiTransit(snap.rows),
         noPrice: s?.total.noPrice ?? 0,
         byStatus: s?.byStatus ?? null,
-        ambang: ambangPerNama.get(area) ?? bawaanAmbang,
+        ambang: setelanPerNama.get(area)?.ambang ?? setelanGab.ambang ?? undefined,
+        // Target ATP cabang ini. null = belum diisi -> kartu tidak menulis
+        // baris target sama sekali, bukan menulis "Target 0%" yang akan
+        // meluluskan semua cabang diam-diam.
+        atpTarget: setelanPerNama.get(area)?.atpTarget ?? null,
         perluPo: blok.po ? snap.rows.filter((r) => Math.max(r.suggested1, r.suggested2) > 0).length : 0,
         // Dicocokkan lewat NAMA area, kunci yang sama dengan `stock_current` —
         // bukan kode gudang. Area yang tidak punya baris ATP dikirim `undefined`,
@@ -219,10 +226,8 @@ export async function GET(req: Request) {
             : undefined,
         }
       : null,
-    // Target ATP (%) — GLOBAL, satu angka untuk semua kartu. 0 atau kosong di
-    // Pengaturan berarti "tidak diatur": barisnya tidak digambar sama sekali,
-    // bukan digambar sebagai "Target 0%" yang akan membuat semua kartu lulus.
-    atpTarget: Number(raw.atp_target_persen ?? 0) > 0 ? Number(raw.atp_target_persen) : null,
+    // Target ATP keseluruhan untuk strip kepala = milik baris GABUNGAN.
+    atpTarget: setelanGab.atpTarget,
     areas: perArea,
     // Tanggal tren dipakai sebagai label sumbu; dikirim sekali, bukan per area.
     trenLabel: perArea[0]?.tren.map((t) => t.date) ?? [],

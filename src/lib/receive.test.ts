@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapReceive, isiBoxDariNama, formatCtnPcs, type OcsReceiveLine } from './receive';
+import { mapReceive, isiBoxDariNama, formatCtnPcs, cacheMasihSah, barisYatim, type OcsReceiveLine } from './receive';
 import { KODE_AREA_BAWAAN, TANPA_KODE } from './area-master';
 
 /** Peta kode gudang → area, seperti yang dibangun dari tabel `area`. */
@@ -146,4 +146,79 @@ test('angka nyata OCS 25 Sep 2026 — total per gudang', () => {
   assert.equal(r.totalDoQty, 236647);
   assert.equal(r.totalBatchQty, 255459);
   assert.equal(r.transit.length, 4, 'empat gudang terpisah, Pusat memang nol');
+});
+
+// ---------------------------------------------------------------------------
+// Penarikan transit: dua aturan yang kalau salah MERUSAK DIAM-DIAM
+// ---------------------------------------------------------------------------
+
+/**
+ * Latar: 9 Okt 2026 angka SIT di produksi terbukti salah — Surabaya tercatat
+ * 61.794 pcs padahal OCS cuma punya 24.841, Pusat tercatat 0 padahal ada
+ * dokumen GBJD 9.700 pcs. Dua sebabnya terpisah, dan keduanya diperbaiki
+ * 11 Okt 2026:
+ *
+ *   1. Pembersihan baris lama hanya jalan kalau SELURUH dokumen berhasil
+ *      dibaca. Anggaran satu permintaan hampir tidak pernah cukup untuk itu,
+ *      jadi pembersihannya praktis tidak pernah jalan dan baris dari dokumen
+ *      yang sudah ditutup menumpuk terus -> angka menggelembung.
+ *   2. Cache per dokumen kedaluwarsa serentak tiap 3 jam, dan urutan
+ *      penarikannya tetap. Jadi yang terbaca selalu dokumen yang itu-itu juga,
+ *      dan ekor daftarnya tidak pernah tersentuh -> angka hilang.
+ */
+
+test('cache dipakai kalau jumlah barisnya sama, seberapa pun tuanya', () => {
+  // Inti perbaikan #2. Daftar dokumen selalu ditarik utuh dan membawa
+  // LineCount; sama artinya isinya tidak berubah. Tanpa ini, cache sepuluh hari
+  // yang isinya identik tetap ditarik ulang dan memakan jatah dokumen lain.
+  const lama = { lineCountTersimpan: 12, lineCountDaftar: 12, pulledAtMs: 0, batasSegarMs: 1_000_000 };
+  assert.equal(cacheMasihSah(lama), true);
+});
+
+test('cache DIBUANG kalau jumlah barisnya berubah, walau baru ditarik', () => {
+  // Kebalikannya sama pentingnya: dokumen yang bertambah isinya harus terbaca
+  // ulang hari itu juga, bukan menunggu 3 jam.
+  assert.equal(cacheMasihSah({ lineCountTersimpan: 12, lineCountDaftar: 15, pulledAtMs: 999_999, batasSegarMs: 1_000 }), false);
+});
+
+test('tanpa LineCount dari OCS, perilakunya kembali ke aturan umur', () => {
+  // `LineCount` opsional di balasan OCS. Menebak "tidak berubah" dari
+  // ketiadaan angka akan membekukan dokumen yang sebenarnya bertambah isinya.
+  assert.equal(cacheMasihSah({ lineCountTersimpan: 12, lineCountDaftar: undefined, pulledAtMs: 5_000, batasSegarMs: 1_000 }), true, 'masih muda');
+  assert.equal(cacheMasihSah({ lineCountTersimpan: 12, lineCountDaftar: undefined, pulledAtMs: 500, batasSegarMs: 1_000 }), false, 'sudah basi');
+});
+
+test('baris yatim: seluruh dokumennya hilang dari daftar OCS', () => {
+  // Inti perbaikan #1. Daftar dokumen adalah satu-satunya hal yang selalu kita
+  // tahu lengkap, jadi kesimpulan ini sah walau isi dokumennya belum dibaca.
+  const aktif = new Set(['101', '102']);
+  const rows = [
+    { sku: 'A', areaId: 'Pusat', docNums: '101' },
+    { sku: 'B', areaId: 'Medan', docNums: '999' },
+    { sku: 'C', areaId: 'Medan', docNums: '999, 998' },
+    { sku: 'D', areaId: 'Pusat', docNums: '999, 102' },
+  ];
+  assert.deepEqual(barisYatim(rows, aktif).map((r) => r.sku), ['B', 'C']);
+});
+
+test('baris yang MASIH punya satu dokumen aktif TIDAK dihapus', () => {
+  // Baris transit menggabungkan beberapa dokumen. Satu dokumen ditutup bukan
+  // berarti barangnya tidak jadi berangkat — menghapusnya akan menghilangkan
+  // transit yang masih berjalan, dan itu hanya terbaca sebagai DOI yang
+  // tiba-tiba turun tanpa sebab.
+  assert.deepEqual(barisYatim([{ sku: 'D', areaId: 'Pusat', docNums: '999, 102' }], new Set(['102'])), []);
+});
+
+test('baris tanpa nomor dokumen tidak dihapus di jalur ini', () => {
+  // Asal-usulnya tidak bisa dibuktikan dari daftar dokumen. Dibiarkan untuk
+  // pembersihan kedua, yang hanya jalan saat seluruh dokumen berhasil dibaca.
+  const rows = [{ sku: 'X', areaId: 'Pusat', docNums: null }, { sku: 'Y', areaId: 'Pusat', docNums: '  ' }];
+  assert.deepEqual(barisYatim(rows, new Set(['101'])), []);
+});
+
+test('daftar dokumen KOSONG menghapus semua baris OCS yang bernomor', () => {
+  // Kasus sah: semua dokumen sudah ditutup, jadi memang tidak ada lagi barang
+  // di jalan. Ditulis sebagai tes supaya perilakunya disengaja, bukan kebetulan.
+  const rows = [{ sku: 'A', areaId: 'Pusat', docNums: '101' }, { sku: 'B', areaId: 'Medan', docNums: '102' }];
+  assert.deepEqual(barisYatim(rows, new Set<string>()).map((r) => r.sku), ['A', 'B']);
 });

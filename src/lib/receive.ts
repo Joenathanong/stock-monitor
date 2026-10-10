@@ -203,3 +203,58 @@ export function formatCtnPcs(qty: number, perCtn: number): string {
   if (!ctn) return `${sisa.toLocaleString('id-ID')} pcs`;
   return sisa ? `${ctn.toLocaleString('id-ID')} ctn ${sisa} pcs` : `${ctn.toLocaleString('id-ID')} ctn`;
 }
+
+// ---------------------------------------------------------------------------
+// Aturan penarikan transit — MURNI, supaya bisa diuji tanpa OCS & tanpa database
+// ---------------------------------------------------------------------------
+
+/**
+ * Boleh pakai isi dokumen yang tersimpan, atau harus ditarik ulang?
+ *
+ * Jumlah baris menang atas umur. Daftar dokumen selalu ditarik utuh dan membawa
+ * `LineCount`; kalau angkanya sama dengan yang tersimpan, isinya tidak berubah,
+ * seberapa tua pun cache-nya.
+ *
+ * Umur cuma cadangan untuk saat OCS tidak mengirim `LineCount` — medannya
+ * opsional, dan menebak "tidak berubah" dari ketiadaan angka akan membekukan
+ * dokumen yang sebenarnya bertambah isinya.
+ */
+export function cacheMasihSah(opsi: {
+  lineCountTersimpan: number;
+  lineCountDaftar: number | undefined;
+  pulledAtMs: number;
+  batasSegarMs: number;
+}): boolean {
+  const { lineCountTersimpan, lineCountDaftar, pulledAtMs, batasSegarMs } = opsi;
+  // Angka dari OCS, kalau ada, adalah jawabannya — DUA ARAH.
+  //
+  // Sempat saya tulis `sama -> true, selain itu jatuh ke umur`, dan tesnya
+  // langsung menangkapnya: dokumen yang baru ditarik 10 menit lalu lalu
+  // bertambah isinya akan dianggap masih sah selama 3 jam, karena cabang umur
+  // menolongnya. Itu persis kebalikan dari gunanya — dokumen yang BERUBAH
+  // justru yang paling perlu dibaca ulang.
+  if (typeof lineCountDaftar === 'number') return lineCountDaftar === lineCountTersimpan;
+  return pulledAtMs >= batasSegarMs;
+}
+
+export type BarisTransitTersimpan = { sku: string; areaId: string; docNums: string | null };
+
+/**
+ * Baris transit yang SELURUH dokumennya sudah tidak ada lagi di daftar OCS.
+ *
+ * Inilah satu-satunya penghapusan yang sah tanpa membaca isi dokumen: daftar
+ * dokumen selalu lengkap, dan dokumen yang ditutup hilang darinya. Dipisah jadi
+ * fungsi murni karena salah sedikit di sini berarti MENGHAPUS transit yang
+ * sebenarnya masih berjalan — kerusakan yang tidak bergejala, cuma terbaca
+ * sebagai DOI yang tiba-tiba turun.
+ *
+ * Baris tanpa nomor dokumen TIDAK dihapus di sini: asal-usulnya tidak bisa
+ * dibuktikan, jadi ia urusan pembersihan kedua yang hanya jalan saat seluruh
+ * dokumen berhasil dibaca.
+ */
+export function barisYatim<T extends BarisTransitTersimpan>(rows: T[], nomorAktif: Set<string>): T[] {
+  return rows.filter((r) => {
+    const nomor = String(r.docNums ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    return nomor.length > 0 && nomor.every((n) => !nomorAktif.has(n));
+  });
+}

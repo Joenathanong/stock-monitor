@@ -6,7 +6,7 @@
  */
 import { prisma } from './prisma';
 import { fetchProductPrices, fetchStock, fetchSalesForDate, fetchReceiveDocs, fetchReceiveLines, fetchBundleStock, mapBundleItems, demandStatusCodes, ALL_STATUS_CODES, type OcsSalesRow } from './ocs';
-import { mapReceive, type OcsReceiveLine } from './receive';
+import { mapReceive, cacheMasihSah, barisYatim, type OcsReceiveLine } from './receive';
 import { petaArea, areaAktifDb } from './area-store';
 import { sapKey } from './phase-out';
 import { budget, defaultBudgetMs } from './budget';
@@ -212,7 +212,7 @@ export async function syncTransit(
   // satu error Prisma menjatuhkan seluruh langkah transit, dan yang terbaca user
   // hanya "transit GAGAL (Invalid `prisma.receiveDoc.findMany()` invocation…)".
   const nomor = docs.map((d) => d.DoDocNum);
-  let cache: { docNum: number; lines: string; pulledAt: Date }[] = [];
+  let cache: { docNum: number; lines: string; lineCount: number; pulledAt: Date }[] = [];
   let cacheSiap = true;
   try {
     if (nomor.length) cache = await prisma.receiveDoc.findMany({ where: { docNum: { in: nomor } } });
@@ -220,9 +220,35 @@ export async function syncTransit(
     cacheSiap = false;
   }
   const batasSegar = Date.now() - Math.max(1, refreshHours) * 3_600_000;
+
+  /**
+   * Cache dinilai dari JUMLAH BARISNYA, bukan dari umurnya.
+   *
+   * PERBAIKAN 11 Okt 2026. Dulu satu-satunya syarat adalah "ditarik < 3 jam
+   * lalu", jadi setiap 3 jam SELURUH cache kedaluwarsa serentak. Penarikan
+   * berikutnya harus membaca ulang semua dokumen dengan anggaran yang hanya
+   * cukup untuk beberapa — dan karena urutan dokumen tetap, yang terbaca selalu
+   * dokumen yang itu-itu juga. Ekor daftarnya, termasuk dokumen GBJD 9.700 pcs
+   * menuju Pusat, tidak pernah sampai giliran dibaca.
+   *
+   * Daftar dokumen SELALU ditarik utuh dan membawa `LineCount`. Kalau jumlah
+   * baris yang tersimpan sama dengan yang dilaporkan OCS, isinya tidak berubah —
+   * seberapa tua pun cache-nya. Jadi anggaran penarikan hanya dipakai untuk
+   * dokumen yang BENAR-BENAR berubah atau belum pernah dibaca.
+   *
+   * Umur tetap dipakai sebagai cadangan: kalau OCS tidak mengirim `LineCount`
+   * (medannya opsional), perilakunya persis seperti sebelum perbaikan ini.
+   */
+  const jumlahBaris = new Map<number, number | undefined>(docs.map((d) => [d.DoDocNum, d.LineCount]));
   const tersimpan = new Map<number, OcsReceiveLine[]>();
   for (const c of cache) {
-    if (c.pulledAt.getTime() < batasSegar) continue;   // basi: tarik ulang
+    const sah = cacheMasihSah({
+      lineCountTersimpan: c.lineCount,
+      lineCountDaftar: jumlahBaris.get(c.docNum),
+      pulledAtMs: c.pulledAt.getTime(),
+      batasSegarMs: batasSegar,
+    });
+    if (!sah) continue;   // berubah atau basi: tarik ulang
     try {
       const isi = JSON.parse(c.lines) as OcsReceiveLine[];
       if (Array.isArray(isi)) tersimpan.set(c.docNum, isi);
@@ -242,6 +268,22 @@ export async function syncTransit(
     if (simpan) { lines.push(...simpan); dariCache++; }
     else perluTarik.push(d);
   }
+
+  /**
+   * Yang PALING LAMA tidak dibaca didahulukan; yang belum pernah dibaca paling
+   * depan.
+   *
+   * Sebelum ini urutannya mengikuti daftar dokumen apa adanya. Kalau anggaran
+   * cuma cukup untuk N dokumen, yang terbaca selalu N dokumen PERTAMA — dan
+   * penarikan berikutnya mengulang N yang sama. Ekor daftarnya tidak pernah
+   * tersentuh, berapa kali pun penarikan dijalankan.
+   *
+   * Dengan urutan ini, giliran berputar: dokumen yang terlewat hari ini berada
+   * di depan antrean besok. Dipadukan dengan validasi `lineCount` di atas,
+   * dokumen yang tidak berubah tidak lagi ikut antre sama sekali.
+   */
+  const dibacaPada = new Map(cache.map((c) => [c.docNum, c.pulledAt.getTime()]));
+  perluTarik.sort((a, b) => (dibacaPada.get(a.DoDocNum) ?? 0) - (dibacaPada.get(b.DoDocNum) ?? 0));
 
   /**
    * Isi dokumen dibaca BERBARENGAN, bukan satu per satu.
@@ -339,12 +381,47 @@ export async function syncTransit(
       );
     }
   }
-  // Baris OCS yang tidak ikut ditulis barusan memang sudah tidak dalam perjalanan.
-  // Kalau ada dokumen yang belum sempat ditarik, pembersihan DILEWATI —
-  // menghapus berdasarkan data separuh akan menghilangkan transit yang masih ada.
+  /**
+   * PEMBERSIHAN — dua jalur, dan yang pertama tidak menunggu penarikan tuntas.
+   *
+   * PERBAIKAN 11 Okt 2026. Dulu hanya ada jalur kedua, dan syaratnya `!kurang`:
+   * pembersihan hanya jalan kalau SELURUH dokumen berhasil dibaca. Karena
+   * anggaran satu permintaan hampir tidak pernah cukup untuk semua dokumen,
+   * `kurang > 0` hampir selalu benar — jadi pembersihannya praktis TIDAK PERNAH
+   * JALAN, dan baris dari dokumen yang sudah ditutup menumpuk terus. Terukur
+   * 9 Okt 2026: Surabaya tercatat 61.794 pcs padahal OCS cuma punya 24.841,
+   * dan total 93.925 vs 69.709 yang sebenarnya.
+   *
+   * Jalur 1 memakai DAFTAR DOKUMEN, bukan isinya. Daftar itu selalu ditarik
+   * utuh — itulah satu-satunya hal yang selalu kita tahu lengkap. Dokumen yang
+   * sudah ditutup HILANG dari daftar, jadi baris transit yang seluruh nomor
+   * dokumennya tidak ada lagi di daftar sudah pasti tidak dalam perjalanan.
+   * Kesimpulan itu sah walau isi dokumennya belum sempat dibaca satu pun.
+   *
+   * Jalur 2 yang lama tetap ada untuk kasus yang tidak bisa dilihat jalur 1:
+   * dokumennya masih terbuka, tapi SKU-nya sudah tidak ada lagi di dalamnya.
+   * Itu hanya bisa diketahui dari isi dokumen, jadi syarat `!kurang` tetap
+   * berlaku di sana — dan memang benar begitu.
+   */
   let dihapus = 0;
+  const nomorAktif = new Set(docs.map((d) => String(d.DoDocNum)));
+  const sisaOcs = await prisma.$queryRawUnsafe<{ sku: string; areaId: string; docNums: string | null }[]>(
+    "SELECT sku, areaId, docNums FROM transit_stock WHERE source = 'ocs' AND updatedAt < ?", now,
+  );
+  // Aturannya murni dan diuji di receive.test.ts — salah sedikit berarti
+  // menghapus transit yang masih berjalan, dan itu tidak bergejala.
+  const yatim = barisYatim(sisaOcs, nomorAktif);
+  for (let i = 0; i < yatim.length; i += BATCH) {
+    const chunk = yatim.slice(i, i + BATCH);
+    const ph = chunk.map(() => '(?,?)').join(',');
+    dihapus += await prisma.$executeRawUnsafe(
+      `DELETE FROM transit_stock WHERE source = 'ocs' AND (sku, areaId) IN (${ph})`,
+      ...chunk.flatMap((r) => [r.sku, r.areaId]),
+    );
+  }
+
   if (!kurang) {
-    dihapus = await prisma.$executeRawUnsafe(
+    dihapus += await prisma.$executeRawUnsafe(
       "DELETE FROM transit_stock WHERE source = 'ocs' AND updatedAt < ?", now,
     );
   }

@@ -148,7 +148,8 @@ export type AlasanPo =
   | 'OK'                 // kebutuhan terpenuhi penuh, karton utuh
   | 'KURANG'             // saldo tidak cukup; diambil karton utuh yang ada
   | 'PECAHAN_TIPIS'      // < 1 karton, tapi DOI tipis → tetap diproses
-  | 'KOSONG'             // saldo ≤ 0
+  | 'KOSONG'             // saldo ≤ 0, kodenya ada
+  | 'TANPA_MAPPING'      // belum ada kode SAP sama sekali — kebutuhan tetap dicatat
   | 'TIDAK_PERLU'        // kebutuhan ≤ 0
   | 'TANPA_ISI_KARTON'   // isi karton tidak diketahui → dikirim apa adanya
   | 'DIBATASI_DOI_MAX'   // dibulatkan TURUN supaya tidak melewati DOI max
@@ -215,8 +216,25 @@ export function hitungBaris(b: BarisOpenPo, opsi: OpsiPo = {}): HasilOpenPo {
 
   if (need <= 0) return { ...dasar, alasan: 'TIDAK_PERLU', keterangan: '' };
 
+  // BELUM ADA KODE SAP sama sekali — beda dari "kodenya ada tapi saldonya nol",
+  // dan bedanya menentukan tindakan: yang ini diperbaiki di Mapping SKU, yang
+  // itu ditunggu barangnya masuk gudang pemasok.
+  //
+  // Keputusan user 11 Okt 2026: barisnya TETAP muncul di Sugest PO dan template
+  // open PO, dengan kolom sumber kosong tapi kebutuhannya tertulis. Sebelumnya
+  // baris begini dibuang dari daftar, dan 28.840 pcs kebutuhan (16% dari total)
+  // lenyap tanpa jejak — terbaca orang gudang sebagai "memang belum perlu
+  // dipesan", kebalikan dari keadaannya.
+  if (!kode.length) {
+    return {
+      ...dasar, kurang: need, alasan: 'TANPA_MAPPING',
+      keterangan: 'Belum ada kode SAP di Mapping SKU — kebutuhan tetap dicatat, sumbernya diisi manual',
+    };
+  }
+
   // "jika jumlah <0 maka tidak ada angka sugest PO" — saldo nol pun sama saja:
-  // tidak ada yang bisa diambil.
+  // tidak ada yang bisa diambil. Barisnya TETAP ditampilkan (keputusan user
+  // 11 Okt 2026): open PO tetap perlu dibuat walau GBJD/GBJD2 sedang kosong.
   if (totalSaldo <= 0) {
     return { ...dasar, kurang: need, alasan: 'KOSONG', keterangan: 'Stock GBJD Kosong' };
   }
@@ -359,8 +377,8 @@ export function hitungBaris(b: BarisOpenPo, opsi: OpsiPo = {}): HasilOpenPo {
         ambil: [{ sapCode: muat.sapCode, supplierWhs: muat.supplierWhs, perCtn: muat.perCtn, ctn: 1, qty }],
         qtyTotal: qty, ctnTotal: 1, kurang: 0,
         alasan: 'KARTON_LEBIH_DARI_MAX',
-        keterangan: `1 karton (${muat.perCtn} pcs) melewati DOI max, tapi DOI tipis (${b.status}) `
-          + `— tetap dikirim, ${lipat}x kebutuhan ${need} pcs`,
+        keterangan: `Karton terkecil ${muat.perCtn} pcs = ${lipat}x kebutuhan ${need} pcs dan melewati `
+          + `batas Aman — TETAP dikirim supaya tidak sampai kosong (status ${b.status})`,
       };
     }
     return {

@@ -309,15 +309,23 @@ export function computeSku(input: SkuInput, s: DoiSettings, ctx: DoiContext): Do
   const perluPesan = status === 'CRITICAL' || status === 'LOW';
   const suggest = (ads: number) =>
     perluPesan && ads > 0
-      // Diisi sampai batas ATAS pita aman area ini.
+      // Diisi sampai batas ATAS pita aman area ini, DITAMBAH lead time.
       //
-      // TAHAP 2 (belum): lead time belum masuk ke sini. Rumus yang benar adalah
-      // `(max + leadTime) * ads - position` — barang yang dipesan hari ini baru
-      // datang `leadTime` hari lagi, dan selama itu stok terus terjual. Sengaja
-      // ditunda sampai lead time tiap cabang terisi, supaya dampaknya bisa
-      // diukur dengan angka nyata: di cabang ber-max kecil kenaikannya besar
-      // (Pusat max 7 + lead 7 = saran qty DUA KALI LIPAT).
-      ? Math.max(0, Math.ceil(ctx.ambang.max * ads - position))
+      // Keputusan user 11 Okt 2026: "leadtime (hari) digunakan untuk
+      // perhitungan barang dijalan". Barang yang dipesan hari ini baru sampai
+      // `leadTime` hari lagi, dan selama itu stok terus terjual — jadi pesanan
+      // harus menutup masa tunggunya juga, kalau tidak gudang sudah tipis lagi
+      // saat barangnya baru tiba.
+      //
+      // Kenapa ini TIDAK membuat overstock: tingkat isi-ulangnya memang
+      // (max + lead) hari, tapi saat barang TIBA sudah habis terjual `lead`
+      // hari, jadi posisinya kembali ke tepat `max` hari — persis di batas
+      // atas pita Aman, bukan di atasnya. Yang bertambah hanya qty sekali
+      // pesan, bukan tingkat stok yang dipegang.
+      //
+      // Lead time 0 (cabang yang belum butuh mengisinya) membuat rumus ini
+      // identik dengan yang lama, jadi cabang itu tidak bergeser sama sekali.
+      ? Math.max(0, Math.ceil((ctx.ambang.max + Math.max(0, leadTimeDays)) * ads - position))
       : 0;
 
   const runOutDate = refDoi !== null ? addDays(today, Math.max(0, Math.floor(refDoi))) : null;

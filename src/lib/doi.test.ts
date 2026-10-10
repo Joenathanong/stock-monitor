@@ -137,11 +137,30 @@ test('kiriman yang MELEWATI batas aman jadi OVERSTOCK, bukan WAITING', () => {
   assert.equal(r.suggested1, 0, 'tetap tidak disarankan PO — itu yang penting di lapangan');
 });
 
-test('saran qty = target DOI × ADS − (stok + transit), tidak negatif', () => {
+test('saran qty = (batas Aman + lead time) × ADS − (stok + transit), tidak negatif', () => {
+  // PERUBAHAN 11 Okt 2026 atas keputusan user: lead time ikut dihitung.
+  // Sebelumnya `14 * 10 - 70 = 70`; sekarang masa tunggu 7 hari ikut ditutup.
   const r = computeSku(input({ availableQty: 50, transitQty: 20, leadTimeDays: 7 }), S, ctx());
-  assert.equal(r.suggested1, 14 * 10 - 70);
+  assert.equal(r.suggested1, (14 + 7) * 10 - 70);
   const over = computeSku(input({ availableQty: 500 }), S, ctx());
   assert.equal(over.suggested1, 0);
+});
+
+test('lead time 0 membuat saran qty SAMA PERSIS dengan rumus lama', () => {
+  // Empat dari lima cabang sengaja dibiarkan 0 ("belum butuh diisi"). Jaminannya:
+  // bagi mereka pemasangan lead time tidak menggeser satu angka pun.
+  const r = computeSku(input({ availableQty: 50, transitQty: 20, leadTimeDays: 0 }), S, ctx({ leadTimeArea: 0 }));
+  assert.equal(r.suggested1, 14 * 10 - 70, 'harus identik dengan rumus sebelum 11 Okt 2026');
+});
+
+test('pesanan mendarat TEPAT di batas Aman, bukan di atasnya', () => {
+  // Kekhawatiran yang wajar: "bukankah ini bikin overstock?" Tidak — tingkat
+  // isi-ulangnya (max + lead) hari, tapi saat barang TIBA sudah habis terjual
+  // `lead` hari. Dihitung di sini supaya klaim itu tidak cuma ada di komentar.
+  const ads = 10, lead = 7, max = 14, stok = 50, transit = 20;
+  const r = computeSku(input({ availableQty: stok, transitQty: transit, leadTimeDays: lead }), S, ctx());
+  const posisiSaatTiba = (stok + transit) + r.suggested1 - ads * lead;
+  assert.equal(posisiSaatTiba / ads, max, 'saat tiba, posisinya tepat di batas Aman');
 });
 
 test('basis konservatif memakai ADS terbesar (DOI terkecil)', () => {
@@ -398,8 +417,11 @@ test('saran qty diisi sampai batas ATAS pita aman area, bukan target global', ()
   const r = computeSku(skuDoi(10), s, {
     today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>(), ambang: makassar,
   });
-  // ADS 1/hari, posisi 10 → butuh 45 - 10 = 35, bukan 14 - 10 = 4.
-  assert.equal(r.suggested1, 35);
+  // ADS 1/hari, posisi 10. Yang dibuktikan tes ini: pembaginya ambang MAKASSAR
+  // (45), bukan angka global lama (14) — kalau global, hasilnya cuma 4.
+  // `skuDoi` memberi lead time 7 pada SKU-nya, dan sejak 11 Okt 2026 lead time
+  // ikut ditutup: (45 + 7) - 10 = 42.
+  assert.equal(r.suggested1, 42);
 });
 
 test('transit yang sudah menutupi titik pesan jadi WAITING, bukan LOW lagi', () => {
@@ -443,12 +465,14 @@ test('KRITIS dan LOW tetap dapat saran, diisi sampai batas aman', () => {
   const s = S;
   const am = { kritis: 7, min: 14, max: 21 };
   const ctx = { today: '2026-10-01' as DateKey, exclusionDates: new Set<DateKey>(), ambang: am };
+  // `skuDoi` memakai lead time bawaannya (7 hari), dan sejak 11 Okt 2026 lead
+  // time ikut ditutup: tingkat isi-ulang jadi (21 + 7) = 28 hari, bukan 21.
   const kritis = computeSku(skuDoi(5), s, ctx);
   assert.equal(kritis.status, 'CRITICAL');
-  assert.equal(kritis.suggested1, 16, '21 - 5');
+  assert.equal(kritis.suggested1, 23, '(21 + 7) - 5');
   const low = computeSku(skuDoi(12), s, ctx);
   assert.equal(low.status, 'LOW');
-  assert.equal(low.suggested1, 9, '21 - 12');
+  assert.equal(low.suggested1, 16, '(21 + 7) - 12');
 });
 
 test('OVERSTOCK tetap 0 — dan sekarang karena ATURAN, bukan karena kebetulan', () => {

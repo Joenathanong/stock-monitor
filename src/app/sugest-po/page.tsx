@@ -20,12 +20,13 @@ const ALASAN: Record<HasilOpenPo['alasan'], { teks: string; chip: string }> = {
   OK: { teks: 'Terpenuhi penuh, karton utuh', chip: 'chip-ok' },
   KURANG: { teks: 'Saldo pemasok tidak cukup', chip: 'chip-warn' },
   PECAHAN_TIPIS: { teks: 'Kurang dari 1 karton, tapi stok tipis', chip: 'chip-warn' },
-  KOSONG: { teks: 'Saldo pemasok kosong', chip: 'chip-bad' },
+  KOSONG: { teks: 'Saldo pemasok kosong — tetap di-PO', chip: 'chip-bad' },
+  TANPA_MAPPING: { teks: 'Belum ada kode SAP — isi sumbernya manual', chip: 'chip-bad' },
   TIDAK_PERLU: { teks: 'Belum perlu dipesan', chip: 'chip-info' },
   TANPA_ISI_KARTON: { teks: 'Isi karton tidak diketahui - dikirim pcs', chip: 'chip-warn' },
   DIBATASI_DOI_MAX: { teks: 'Dibulatkan turun agar tidak lewat batas Aman', chip: 'chip-info' },
   TOLERANSI_DOI_MAX: { teks: 'Lewat batas Aman dalam toleransi karton', chip: 'chip-info' },
-  KARTON_LEBIH_DARI_MAX: { teks: '1 karton saja sudah jauh di atas kebutuhan', chip: 'chip-warn' },
+  KARTON_LEBIH_DARI_MAX: { teks: 'Karton jauh di atas kebutuhan — tetap dikirim', chip: 'chip-warn' },
 };
 
 const kunci = (b: { areaId: string; sku: string }) => `${b.areaId}\u0000${b.sku}`;
@@ -88,12 +89,12 @@ export default function SugestPoPage() {
           Keduanya ditulis sebagai instruksi, bukan sebagai tabel kosong - tabel
           kosong terbaca sebagai "tidak ada yang perlu dipesan", yang artinya
           justru berlawanan. */}
-      {d && d.mapping === 0 ? (
+      {d && d.tanpaMapping.length ? (
         <Alert tone="warn">
-          <b>Mapping SKU masih kosong.</b> Sugest PO perlu tahu satu SKU OCS itu kode SAP yang mana dan isi
-          kartonnya berapa - tanpa itu tidak ada baris yang bisa dipesan. Buka{' '}
-          <Link className="link" href="/settings">Pengaturan &rarr; Mapping SKU</Link> lalu tekan{' '}
-          <b>&quot;Lihat usulan dari 6 digit&quot;</b>, periksa usulannya, dan simpan.
+          <b>{d.tanpaMapping.length} baris belum punya kode SAP</b> ({new Set(d.tanpaMapping.map((x) => x.sku)).size} SKU,{' '}
+          {fmt(d.tanpaMapping.reduce((a, x) => a + x.need, 0))} pcs). Barisnya TETAP ada di tabel dan di Excel dengan
+          kebutuhannya, hanya kolom gudang &amp; kode SAP-nya kosong — isi manual saat membuat PO, atau lengkapi di{' '}
+          <Link className="link" href="/settings">Pengaturan &rarr; Mapping SKU</Link> supaya terisi sendiri lain kali.
         </Alert>
       ) : null}
       {d && d.mapping > 0 && d.saldo === 0 ? (
@@ -142,31 +143,11 @@ export default function SugestPoPage() {
             expanded={buka}
             onRowClick={(x) => setBuka(buka === kunci(x) ? null : kunci(x))}
             renderExpanded={(x) => <Rincian b={x} />}
-            emptyText={d && d.mapping === 0
-              ? 'Belum bisa menyarankan apa pun - mapping SKU masih kosong (lihat peringatan di atas).'
-              : 'Tidak ada SKU yang menyentuh batas Low di cabang ini.'}
+            emptyText="Tidak ada SKU yang menyentuh batas Low di cabang ini."
             footerNote="klik baris = rincian pemecahan per kode sumber"
           />
         </div>
       </section>
-
-      {d && d.tanpaMapping.length ? (
-        <section className="card card-pad">
-          <div className="card-title mb-1">Perlu dipesan, tapi belum ada mapping ({d.tanpaMapping.length})</div>
-          <div className="mb-2 text-[12px] text-label">
-            SKU ini sudah menyentuh batas Low, tapi belum punya kode SAP di Mapping SKU - jadi tidak bisa
-            masuk daftar PO. Sengaja ditampilkan di sini: kalau cuma dilewati, orang gudang akan mengira
-            memang belum perlu dipesan.
-          </div>
-          <div className="flex flex-wrap gap-2 text-[12px]">
-            {d.tanpaMapping.map((x) => (
-              <span key={`${x.areaId}-${x.sku}`} className="chip chip-warn">
-                <span className="mono">{x.sku}</span> · {x.areaId} · butuh {fmt(x.need)} pcs
-              </span>
-            ))}
-          </div>
-        </section>
-      ) : null}
 
       {!loading && !error && !data?.baris.length && d && d.mapping > 0 ? (
         <Empty>Tidak ada saran PO untuk {labelArea(data?.areaId ?? area ?? '')} pada snapshot ini.</Empty>

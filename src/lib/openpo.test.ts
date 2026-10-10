@@ -96,10 +96,18 @@ test('saldo negatif diperlakukan sama dengan kosong', () => {
   assert.equal(h.alasan, 'KOSONG');
 });
 
-test('tanpa kode sumber sama sekali → kosong, bukan melempar', () => {
+test('tanpa kode sumber sama sekali → TANPA_MAPPING, bukan "stok kosong"', () => {
+  // PERUBAHAN 11 Okt 2026. Dulu baris tanpa kode dilabeli KOSONG, sama dengan
+  // baris yang kodenya ada tapi saldonya habis. Dua keadaan itu menuntut
+  // tindakan yang BERBEDA: yang ini diperbaiki di Mapping SKU, yang itu
+  // ditunggu barangnya masuk gudang pemasok. Label yang sama membuat orang
+  // menunggu barang yang tidak akan pernah datang, karena yang kurang
+  // sebenarnya cuma satu baris mapping.
   const h = hitungBaris(baris({ kode: [] }));
-  assert.equal(h.alasan, 'KOSONG');
+  assert.equal(h.alasan, 'TANPA_MAPPING');
   assert.deepEqual(h.ambil, []);
+  assert.equal(h.kurang, baris({ kode: [] }).need, 'kebutuhannya tetap tercatat');
+  assert.match(h.keterangan, /Mapping SKU/);
 });
 
 test('kurang dari 1 karton + DOI tipis → tetap diproses', () => {
@@ -315,7 +323,12 @@ test('karton melewati max TAPI DOI tipis → tetap dikirim, dan ditandai', () =>
   assert.equal(r.qtyTotal, 1000, 'kehabisan barang lebih mahal daripada kelebihan stok');
   assert.equal(r.ctnTotal, 1);
   assert.equal(r.alasan, 'KARTON_LEBIH_DARI_MAX');
-  assert.match(r.keterangan, /tetap dikirim/);
+  // Keputusan user 11 Okt 2026: "jangan sampai ada barang kosong ... walaupun
+  // per kartonnya jumlahnya besar (pada sugest po beri keterangan saja)".
+  // Jadi yang dikunci bukan cuma "dikirim", tapi juga bahwa LIPATNYA tertulis —
+  // angka 1000 pcs untuk kebutuhan 50 tidak boleh muncul tanpa penjelasan.
+  assert.match(r.keterangan, /TETAP dikirim/);
+  assert.match(r.keterangan, /20x kebutuhan 50 pcs/);
 });
 
 test('toleransi 1 karton: kebutuhan DIPENUHI walau melewati DOI max sedikit', () => {

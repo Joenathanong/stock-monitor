@@ -118,17 +118,44 @@ test('toleransi karton TIDAK berlaku untuk karton yang jauh lebih besar dari keb
 // 3. SKU tanpa mapping harus TERLIHAT, bukan hilang
 // ---------------------------------------------------------------------------
 
-test('SKU tanpa mapping dilaporkan, tidak dilewati diam-diam', () => {
-  // Kalau hanya dilewati, SKU yang hampir habis lenyap dari daftar PO tanpa
-  // jejak — dan orang gudang membacanya sebagai "memang belum perlu dipesan",
-  // persis kebalikan dari keadaannya.
+test('SKU tanpa mapping TETAP jadi baris PO, dengan kebutuhannya', () => {
+  // KEPUTUSAN USER 11 Okt 2026, setelah angkanya terukur: 7 SKU tanpa mapping
+  // menyimpan 28.840 pcs kebutuhan — 16% dari seluruh PO hari itu — dan
+  // sebelumnya mereka DIBUANG dari daftar. Orang gudang membacanya sebagai
+  // "memang belum perlu dipesan", persis kebalikan dari keadaannya.
+  //
+  // Sekarang barisnya tetap ada dengan kolom sumber kosong, supaya kebutuhannya
+  // ikut terbawa ke Sugest PO dan ke template open PO.
   const { baris, tanpaMapping } = susunBarisPo(
     [snap(), snap({ sku: 'SKU-ASING', suggested1: 300 })],
     opsiDasar,
   );
-  assert.equal(baris.length, 1);
+  assert.equal(baris.length, 2, 'dua-duanya jadi baris');
+  const asing = baris.find((b) => b.sku === 'SKU-ASING')!;
+  assert.equal(asing.need, 300, 'kebutuhannya tidak hilang');
+  assert.deepEqual(asing.kode, [], 'tanpa kode sumber');
+  assert.equal(asing.groupKey, 'SKU-ASING', 'diwakili SKU OCS-nya sendiri');
+  // Tetap diringkas supaya layar bisa mengarahkan perbaikan ke Mapping SKU.
   assert.deepEqual(tanpaMapping.map((x) => x.sku), ['SKU-ASING']);
-  assert.equal(tanpaMapping[0].need, 300);
+});
+
+test('baris tanpa kode SAP dibedakan dari baris bersaldo kosong', () => {
+  // Dua keadaan, dua tindakan: yang satu diperbaiki di Mapping SKU, yang lain
+  // ditunggu barangnya masuk gudang pemasok. Memberi label yang sama pada
+  // keduanya membuat orang menunggu barang yang tidak akan pernah datang,
+  // karena yang kurang sebenarnya cuma satu baris mapping.
+  const { baris } = susunBarisPo([snap({ sku: 'SKU-ASING', suggested1: 300 })], opsiDasar);
+  const h1 = hitungSemua(baris, {}).hasil[0];
+  assert.equal(h1.alasan, 'TANPA_MAPPING');
+  assert.equal(h1.qtyTotal, 0);
+  assert.equal(h1.kurang, 300, 'kebutuhannya tercatat sebagai kurang, bukan nol');
+  assert.match(h1.keterangan, /Mapping SKU/);
+
+  // Kodenya ada, saldonya nol -> KOSONG, dan barisnya juga tetap muncul.
+  const { baris: b2 } = susunBarisPo([snap()], { ...opsiDasar, saldo: saldoPeta([['1222000001', 'GBJD', 0]]) });
+  const h2 = hitungSemua(b2, {}).hasil[0];
+  assert.equal(h2.alasan, 'KOSONG');
+  assert.equal(h2.kurang, 96);
 });
 
 test('yang tanpa mapping diurut kebutuhan terbesar dulu', () => {

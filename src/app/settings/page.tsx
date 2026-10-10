@@ -147,8 +147,10 @@ const groupsFor = (v: Record<string, string>, areas: AreaRow[] = []): { title: s
         hint: 'Kebutuhan hampir tidak pernah pas sekelipatan karton. 1 = boleh dibulatkan naik walau melewati batas '
           + 'DOI max sebanyak satu karton, supaya kebutuhan terpenuhi penuh. 0 = batas keras, kekurangannya dilaporkan.' },
       { key: 'po_lipat_maks', label: 'Toleransi hanya bila karton ≤ N× kebutuhan', type: 'number',
-        hint: 'Penjaga kasus karton raksasa: isi 1000 pcs/karton untuk kebutuhan 50 pcs itu 20× — bukan "lewat sedikit". '
-          + 'Di luar batas ini barisnya TIDAK dikirim otomatis, tapi dilaporkan untuk diputuskan orang. 0 = tanpa syarat.' },
+        hint: 'Berlaku pada PEMBULATAN NAIK saja: karton yang isinya lebih dari N× kebutuhan tidak dibulatkan naik '
+          + 'melewati batas Aman. TIDAK menahan pengiriman — keputusan 11 Okt 2026: jangan sampai ada barang kosong, '
+          + 'jadi kalau karton terkecil pun sudah di atas kebutuhan, barisnya TETAP di-PO dan diberi keterangan '
+          + '"Karton jauh di atas kebutuhan" beserta berapa kali lipatnya. 0 = tanpa syarat.' },
     ],
   },
   {

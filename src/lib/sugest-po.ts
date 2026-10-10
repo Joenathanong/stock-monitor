@@ -67,9 +67,10 @@ export type SusunHasil = {
   /**
    * SKU yang perlu dipesan tapi belum punya mapping.
    *
-   * Dikembalikan, BUKAN dilewati diam-diam. SKU yang hilang dari daftar PO
-   * tanpa jejak akan dibaca orang gudang sebagai "memang belum perlu dipesan" —
-   * kebalikan dari keadaan sebenarnya.
+   * Sejak 11 Okt 2026 mereka JUGA jadi baris PO biasa (dengan `kode: []`), jadi
+   * daftar ini bukan lagi "yang dibuang" melainkan ringkasan untuk mengarahkan
+   * perbaikan di Mapping SKU. Terukur saat keputusan itu diambil: 7 SKU, 22
+   * baris, 28.840 pcs — 16% dari seluruh kebutuhan PO hari itu.
    */
   tanpaMapping: TanpaMapping[];
 };
@@ -84,13 +85,13 @@ export function susunBarisPo(rows: BarisSnapshotPo[], o: SusunOpsi): SusunHasil 
     if (need <= 0) continue;
 
     const groupKey = o.grup.get(r.sku);
-    if (!groupKey) {
-      tanpaMapping.push({ sku: r.sku, name: r.name, areaId: r.areaId, need });
-      continue;
-    }
+    if (!groupKey) tanpaMapping.push({ sku: r.sku, name: r.name, areaId: r.areaId, need });
 
     baris.push({
-      groupKey,
+      // Tanpa mapping, produknya diwakili SKU OCS-nya sendiri. Barisnya tetap
+      // masuk daftar dengan kode sumber kosong — lihat `TANPA_MAPPING` di
+      // openpo.ts untuk alasannya.
+      groupKey: groupKey ?? r.sku,
       sku: r.sku,
       name: r.name,
       areaId: r.areaId,
@@ -98,7 +99,7 @@ export function susunBarisPo(rows: BarisSnapshotPo[], o: SusunOpsi): SusunHasil 
       status: r.status,
       doi: o.opsi === 1 ? r.doi1 : r.doi2,
       abc: r.abcClass,
-      kode: kodeSumber(groupKey, o.perGrup, o.saldo, o.gudang),
+      kode: groupKey ? kodeSumber(groupKey, o.perGrup, o.saldo, o.gudang) : [],
       /**
        * Batas atas = kebutuhan itu sendiri.
        *

@@ -433,22 +433,38 @@ body {
 /* Halaman ini isinya SATU gambar. Tidak ada sidebar, tidak ada topbar: apa pun
    yang bukan poster akan ikut terpotret kalau bot menangkap layar. */
 .wa-root {
-  min-height: 100vh; min-height: 100dvh;
+  /* tinggi PASTI, bukan min-height — html/body dikunci overflow:hidden, jadi
+     halaman ini harus jadi scroller-nya sendiri (sama seperti .app-main dan
+     .pub-main). Dengan min-height, kotaknya ikut tumbuh mengikuti isi sehingga
+     tidak pernah meluap: poster 16:10 di layar 1366×768 lebih tinggi daripada
+     viewport, dan tombol "Unduh JPG" di bawahnya tidak bisa dijangkau sama
+     sekali — tidak ada yang bisa digulir. */
+  height: 100vh; height: 100dvh;
+  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable;
   display: flex; flex-direction: column; align-items: center; gap: 12px;
   padding: 16px; background: var(--bg-canvas);
 }
 /* Lebar poster dikunci 1600px lalu diperkecil mengikuti layar — perbandingannya
    tidak boleh berubah, karena itu yang menentukan hasil unduhan. */
-.wa-canvas { width: 100%; max-width: 1600px; }
+/* `flex: none` wajib: .wa-root kini scroller dengan tinggi pasti, dan item flex
+   kolom bawaannya boleh menyusut (flex-shrink: 1). Tanpa ini poster diperas
+   agar pas di viewport pendek, bukan digulir. */
+.wa-canvas { width: 100%; max-width: 1600px; flex: none; }
 
 /* Mode bot (?bare=1): halaman PERSIS seukuran poster, tanpa sisa apa pun, supaya
    tangkapan layar seukuran viewport sudah jadi gambar jadi. Tingginya mengikuti
    isi, jadi yang mengunci ukuran adalah `KANVAS` di wa-poster.ts (kini
    1600×1000) — bukan angka di berkas ini. */
-.wa-root.is-bare { min-height: 0; padding: 0; gap: 0; display: block; width: 1600px; }
+/* Mode bot TIDAK boleh jadi scroller: tingginya harus mengikuti isi supaya
+   tangkapan layar memuat poster utuh. Kalau tinggi viewport bot kurang dari
+   1000px, `overflow-y: auto` akan memotong kaki poster tanpa gejala apa pun. */
+.wa-root.is-bare {
+  min-height: 0; height: auto; overflow: visible; scrollbar-gutter: auto;
+  padding: 0; gap: 0; display: block; width: 1600px;
+}
 .wa-root.is-bare .wa-canvas { width: 1600px; max-width: none; }
 .wa-bar {
-  width: 100%; max-width: 1600px;
+  width: 100%; max-width: 1600px; flex: none;
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
 }
 .wa-pesan { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: var(--bg-canvas); }

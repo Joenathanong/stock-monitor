@@ -62,6 +62,7 @@ const groupsFor = (v: Record<string, string>, areas: AreaRow[] = []): { title: s
     title: 'Ambang tindakan',
     fields: [
       { key: 'target_doi_days', label: 'Target DOI maksimum (hari)', type: 'number', hint: 'Di atas ini = overstock. Saran qty PO mengisi sampai angka ini.' },
+      { key: 'atp_target_persen', label: 'Target ATP (%)', type: 'number', hint: 'Ketersediaan di bawah angka ini ditandai merah di poster /wa. Satu angka untuk semua cabang — ATP itu janji layanan, bukan akibat jarak kirim seperti target DOI.' },
       { key: 'safety_days', label: 'Safety di atas lead time (hari)', type: 'number', hint: 'DOI ≤ lead time → kritis; ≤ lead time + safety → low stock.' },
       { key: 'default_lead_time_days', label: 'Lead time default (hari)', type: 'number' },
       { key: 'action_basis', label: 'DOI yang dipakai untuk status', type: 'select', options: [{ v: 'KONSERVATIF', l: 'Konservatif — DOI terkecil dari kedua opsi' }, { v: 'OPSI1', l: 'Opsi 1' }, { v: 'OPSI2', l: 'Opsi 2' }] },

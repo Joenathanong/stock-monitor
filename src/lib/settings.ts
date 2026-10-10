@@ -27,6 +27,7 @@ export const DEFAULT_SETTINGS = {
   safety_days: 3,               // cadangan di atas lead time
   default_lead_time_days: 7,    // lead time bila SKU tidak ada di master
   action_basis: 'KONSERVATIF',  // KONSERVATIF (DOI terkecil) | OPSI1 | OPSI2
+  atp_target_persen: 90,        // target ketersediaan (ATP) %; di bawah ini ditandai merah di poster
 
   exclude_phase_out: 1,         // SKU phase out tidak dihitung di DOI total & ABC
 
@@ -109,6 +110,17 @@ export type DoiSettings = {
   deadStockWindowDays: number;
   targetDoiDays: number;
   safetyDays: number;
+  /**
+   * Target ketersediaan (ATP) dalam persen — GLOBAL, satu angka untuk semua area.
+   *
+   * Sengaja global, berbeda dengan target DOI yang per cabang. Target DOI harus
+   * per cabang karena lead time dan pola jual tiap kota berbeda (Pusat 7 hari,
+   * Makassar 45 hari). ATP mengukur hal lain: berapa persen SKU yang BISA
+   * dijanjikan — itu janji layanan yang sama di mana pun, bukan akibat jarak
+   * kirim. Kalau nanti memang perlu per cabang, kolomnya ditambah di tabel
+   * Cabang/Area seperti kolom "Aman ≤ (hari)".
+   */
+  atpTargetPersen: number;
   defaultLeadTimeDays: number;
   actionBasis: 'KONSERVATIF' | 'OPSI1' | 'OPSI2';
   abcAPct: number;
@@ -189,6 +201,7 @@ export function toDoiSettings(raw: SettingsMap = {}): DoiSettings {
     deadStockWindowDays: Math.max(1, num(raw, 'dead_stock_window_days')),
     targetDoiDays: num(raw, 'target_doi_days'),
     safetyDays: num(raw, 'safety_days'),
+    atpTargetPersen: num(raw, 'atp_target_persen'),
     defaultLeadTimeDays: num(raw, 'default_lead_time_days'),
     actionBasis: basis === 'OPSI1' || basis === 'OPSI2' ? basis : 'KONSERVATIF',
     abcAPct: num(raw, 'abc_a_pct'),

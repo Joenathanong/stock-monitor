@@ -8,6 +8,7 @@ import {
   FONT, FONT_MONO, KANVAS, WARNA, adsTeks, angkaRingkas, deretTren, hari, jalurSpark, labelDoi, lebarKartu,
   rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, TINGGI_SPARK, lebarTeksKira, potongTeks, JEDA_LABEL, labelPitaPisah, tataLabelStatus, tampil1, tampil2,
   KARTU, tinggiKartuTersedia, ukuranAtpMuat, UKURAN_DOI,
+  teksTarget, teksTargetAtp, ruangTarget, pilihKanan, arahDoi, arahAtp, WARNA_TARGET,
 } from '@/lib/wa-poster';
 // Dipakai dari atp.ts, TIDAK ditulis ulang di sini: angka di poster dan angka di
 // halaman /atp harus sama ejaannya ("71,0%"), dan dua fungsi dengan satu tugas
@@ -50,9 +51,11 @@ const Teks = ({
   </text>
 );
 
-function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onKlik }: {
+function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, atpTarget, onKlik }: {
   a: AreaWa; x: number; y: number; w: number; h: number;
   blok: DataWa['blok']; disp: DataWa['doiDisplay']; kritisMaks: number;
+  /** Target ATP (%) dari Pengaturan — GLOBAL, sama untuk semua kartu. */
+  atpTarget?: number | null;
   /** Ukuran angka ATP — dihitung SEKALI untuk seluruh poster, lihat ukuranAtpMuat. */
   atpSize: number;
   /** Status yang ditampilkan — SAMA untuk semua kartu, lihat `kunciTampil`. */
@@ -147,12 +150,78 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
         {keduanya ? hari(a.doi2) : (a.atp ? persenAtp(a.atp.persen) : '—')}
       </Teks>,
     );
-    // Mode dua opsi: ATP jadi baris kecil di 26px jeda yang sudah ada sebelum
-    // grid kotak, jadi tidak ada tinggi tambahan dan BIAYA_BLOK tidak berubah.
-    if (keduanya) {
+    // --- PITA 26px: TARGET DOI (kiri) dan TARGET ATP (kanan) ---
+    //
+    // Jeda 26px antara angka besar dan grid kotak sudah ada sejak dulu, jadi
+    // kedua baris ini TIDAK menambah tinggi kartu dan BIAYA_BLOK tidak berubah.
+    //
+    // Keduanya duduk PERSIS di bawah angka yang mereka nilai: target DOI di
+    // bawah angka DOI, target ATP di bawah angka ATP. Itu yang membuatnya
+    // terbaca sebagai pembanding, bukan sebagai keterangan lepas.
+    //
+    // TARGET DOI (permintaan user 10 Okt 2026).
+    //
+    // Angkanya sebenarnya sudah ada di poster — sebagai label "Aman <=7D" di
+    // baris sebaran. Tapi di sana ia terbaca sebagai batas pita, bukan sebagai
+    // target, dan orang membaca angka 38px di kepala kartu, bukan label 11px di
+    // baris ketiga.
+    //
+    // Kenapa ini penting dan bukan hiasan: targetnya BEDA 6,4x antar cabang
+    // (Pusat 7 hari, Makassar 45 hari). Tanpa target di kartu, "9,4" di Pusat
+    // dan "48,3" di Makassar terbaca seperti dua dunia yang berlawanan —
+    // padahal keduanya sama-sama lewat target, dan Pusat justru yang paling
+    // jauh secara relatif. Angka besar itu tidak bisa dibandingkan antar kartu
+    // tanpa pembandingnya ikut tertulis.
+    //
+    // `ambang.max` = "Aman <= (hari)" di Pengaturan > Cabang/Area, yang juga
+    // dipakai Sugest PO sebagai batas pengisian ("PO diisi sampai sini").
+    const arahD = arahDoi(nilaiUtama, a.ambang);
+    const arahA = arahAtp(a.atp?.persen, atpTarget);
+
+    // Sisi KANAN pita. Di mode dua opsi DOI, ATP tidak memegang angka besar,
+    // jadi persennya ikut ditulis di sini bersama targetnya — kalau tidak,
+    // "Target 90%" akan berdiri tanpa angka yang dinilainya.
+    //
+    // Bentuknya dipilih menurut ruang yang ada, lihat `pilihKanan`: bentuk
+    // terpanjang tidak muat berdampingan dengan target DOI di kartu 294px.
+    // "72,0% / 90%" adalah bentuk aktual/target yang sudah dipakai poster ini
+    // di kotak "Available >5 pcs" (1.158 / 1.663), jadi bukan notasi baru.
+    const tTargetAtp = teksTargetAtp(atpTarget, arahA);
+    const pAtp = a.atp ? persenAtp(a.atp.persen) : '—';
+    const tDoi = a.ambang ? teksTarget(a.ambang.max, arahD) : '';
+    const kandidatKanan = !tTargetAtp
+      ? (keduanya ? [`ATP ${pAtp}`] : [])
+      : keduanya
+        ? [`ATP ${pAtp} · ${tTargetAtp}`, `ATP ${pAtp} / ${Math.round(atpTarget as number)}%`, `ATP ${pAtp}`]
+        : [tTargetAtp];
+    const kanan = pilihKanan(kandidatKanan, isi, tDoi);
+
+    if (a.ambang) {
+      // Dipotong pada ruang yang BENAR-BENAR tersisa setelah teks kanan. SVG
+      // tidak punya ellipsis maupun wrap: teks yang kepanjangan menimpa
+      // tetangganya tanpa ada yang gagal. Di 5 area tidak pernah terpotong —
+      // lihat wa-target.test.ts, yang mengukur sampai 10 area.
       bagian.push(
-        <Teks key="atp2" x={x + w - pad} y={cy + 16} size={11} fill={WARNA.tintaLabel} anchor="end">
-          {`ATP ${a.atp ? persenAtp(a.atp.persen) : '—'}`}
+        <Teks
+          key="tgt" x={x + pad} y={cy + 16} size={11} weight={700}
+          fill={arahD ? WARNA_TARGET[arahD] : WARNA.tintaLabel}
+        >
+          {potongTeks(tDoi, ruangTarget(isi, kanan), 11)}
+        </Teks>,
+      );
+    }
+
+    if (kanan) {
+      bagian.push(
+        <Teks
+          key="atp2" x={x + w - pad} y={cy + 16} size={11} weight={700} anchor="end"
+          // Diwarnai HANYA kalau isinya murni target ATP. Di mode dua opsi
+          // teksnya memuat persen DAN target dalam satu baris; mewarnai merah
+          // seluruhnya akan menyatakan persennya juga "salah", padahal yang
+          // dinilai cuma hubungan keduanya.
+          fill={!keduanya && arahA ? WARNA_TARGET[arahA] : WARNA.tintaLabel}
+        >
+          {potongTeks(kanan, isi, 11)}
         </Teks>,
       );
     }
@@ -392,7 +461,14 @@ export function Poster({ data, onPilihArea }: Props) {
     //
     // "—" saat pembaginya 0 BUKAN 0%: artinya belum ada SKU yang diputuskan
     // sebarannya di mana pun. Menggambarnya 0% akan terbaca seperti bencana.
-    { l: 'ATP keseluruhan', v: t?.atp ? persenAtp(t.atp.persen) : '—' },
+    // Diwarnai merah kalau di bawah target — satu sinyal untuk SELURUH
+    // perusahaan, di tempat yang paling dulu dilihat orang. Tanpa tone, target
+    // ATP cuma terbaca per kartu dan tidak ada ringkasannya.
+    {
+      l: 'ATP keseluruhan',
+      v: t?.atp ? persenAtp(t.atp.persen) : '—',
+      tone: arahAtp(t?.atp?.persen, data.atpTarget) === 'kurang' ? WARNA.kritisFg : undefined,
+    },
   ] as { l: string; v: string; tone?: string }[];
   const rw = (KANVAS.w - 2 * M) / ringkas.length;
   // Angka strip mengecil saat kolomnya bertambah. Tanpa ini "105 rb pcs" di 26px
@@ -442,6 +518,7 @@ export function Poster({ data, onPilihArea }: Props) {
           h={kartuH}
           blok={data.blok}
           atpSize={atpSize}
+          atpTarget={data.atpTarget}
           disp={disp}
           kritisMaks={0}
           tampil={tampil}

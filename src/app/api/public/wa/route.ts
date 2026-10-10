@@ -219,6 +219,10 @@ export async function GET(req: Request) {
             : undefined,
         }
       : null,
+    // Target ATP (%) — GLOBAL, satu angka untuk semua kartu. 0 atau kosong di
+    // Pengaturan berarti "tidak diatur": barisnya tidak digambar sama sekali,
+    // bukan digambar sebagai "Target 0%" yang akan membuat semua kartu lulus.
+    atpTarget: Number(raw.atp_target_persen ?? 0) > 0 ? Number(raw.atp_target_persen) : null,
     areas: perArea,
     // Tanggal tren dipakai sebagai label sumbu; dikirim sekali, bukan per area.
     trenLabel: perArea[0]?.tren.map((t) => t.date) ?? [],

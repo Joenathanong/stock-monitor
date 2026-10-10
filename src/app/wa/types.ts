@@ -109,6 +109,15 @@ export type DataWa = {
      */
     atp?: { persen: number | null; siap: number; dihitung: number };
   } | null;
+  /**
+   * Target ATP (%) dari Pengaturan — GLOBAL, bukan per area.
+   *
+   * Opsional dengan sengaja, alasan yang sama seperti `total.atp`: poster
+   * memuat datanya lewat HTTP dan dua sisi bisa berbeda versi sesaat saat
+   * deploy berjalan. Tanpa angka ini poster tetap tergambar, hanya tanpa baris
+   * target ATP — laporan harian tidak boleh padam karena satu medan baru.
+   */
+  atpTarget?: number | null;
   areas: AreaWa[];
   trenLabel: string[];
   hariIni: string;

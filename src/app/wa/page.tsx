@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Poster } from './poster';
 import type { AreaWa, DataWa } from './types';
+import { persenTeks as persenAtp } from '@/lib/atp';
 import { KANVAS, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
 
 /**
@@ -88,32 +89,26 @@ function Rincian({ a, disp, tampil, onTutup }: {
           </div>
 
           <div className="card card-pad">
-            <div className="card-title mb-2">SKU paling mendesak</div>
-            {a.kritis.length ? (
-              <ul className="space-y-2">
-                {a.kritis.map((r) => (
-                  <li key={r.sku} className="flex items-start gap-2">
-                    <span className="mt-1 h-3 w-[3px] flex-none rounded-sm" style={{ background: r.status === 'CRITICAL' ? WARNA.kritisSolid : WARNA.lowSolid }} />
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-semibold">{r.sku}</div>
-                      <div className="text-[12px] text-label">{r.name}</div>
-                      <div className="text-[12px]" style={{ color: r.status === 'CRITICAL' ? WARNA.kritisFg : WARNA.lowFg }}>
-                        DOI {hari(r.doi)} hari{r.sug > 0 ? ` · saran PO ${fmt(r.sug)} pcs` : ''}
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            ) : <div className="text-[13px] text-label">Tidak ada SKU kritis di area ini.</div>}
-          </div>
-
-          <div className="card card-pad">
             <div className="card-title mb-2">{`Tren ${labelDoi(tampil1(disp) ? 1 : 2, disp)}`}</div>
             {a.tren.length ? (
               <div className="text-[12px] text-label">
                 {a.tren.length} hari tercatat · terlama {a.tren[0]?.date} ({hari(tampil1(disp) ? a.tren[0]?.doi1 : a.tren[0]?.doi2)}) · terbaru {a.tren[a.tren.length - 1]?.date} ({hari(tampil1(disp) ? a.tren[a.tren.length - 1]?.doi1 : a.tren[a.tren.length - 1]?.doi2)})
               </div>
             ) : <div className="text-[12px] text-label">Riwayat belum cukup.</div>}
+          </div>
+
+          <div className="card card-pad">
+            <div className="card-title mb-2">Tren ATP</div>
+            {(a.trenAtp ?? []).length ? (
+              <div className="text-[12px] text-label">
+                {(a.trenAtp ?? []).length} hari tercatat · terlama {a.trenAtp![0]?.date} ({persenAtp(a.trenAtp![0]?.persen ?? null)})
+                {' · '}terbaru {a.trenAtp![a.trenAtp!.length - 1]?.date} ({persenAtp(a.trenAtp![a.trenAtp!.length - 1]?.persen ?? null)})
+              </div>
+            ) : (
+              <div className="text-[12px] text-label">
+                Belum ada potret ATP harian. Terisi sendiri tiap perhitungan 07.30 WIB.
+              </div>
+            )}
           </div>
         </div>
       </div>

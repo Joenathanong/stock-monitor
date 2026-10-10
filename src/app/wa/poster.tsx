@@ -6,7 +6,7 @@
 // yang bisa berbeda.
 import {
   FONT, FONT_MONO, KANVAS, WARNA, adsTeks, angkaRingkas, deretTren, hari, jalurSpark, labelDoi, lebarKartu,
-  rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, lebarTeksKira, potongTeks, JEDA_LABEL, labelPitaPisah, tataLabelStatus, tampil1, tampil2,
+  rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, TINGGI_SPARK, lebarTeksKira, potongTeks, JEDA_LABEL, labelPitaPisah, tataLabelStatus, tampil1, tampil2,
   KARTU, tinggiKartuTersedia, ukuranAtpMuat, UKURAN_DOI,
 } from '@/lib/wa-poster';
 // Dipakai dari atp.ts, TIDAK ditulis ulang di sini: angka di poster dan angka di
@@ -77,7 +77,10 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
   const tata = tataLetakStatus({
     tinggiKartu: h, blok, nBaris: semuaSeg.length, diminta: kritisMaks,
   });
-  const spark = jalurSpark(deretTren(a.tren, disp), isi, 56);
+  const spark = jalurSpark(deretTren(a.tren, disp), isi, TINGGI_SPARK);
+  // Deret ATP: persennya apa adanya. null (pembagi 0 hari itu) MEMUTUS garis,
+  // tidak disambung lurus — menyambungnya mengarang tren yang tidak pernah ada.
+  const sparkAtp = jalurSpark((a.trenAtp ?? []).map((t) => t.persen), isi, TINGGI_SPARK);
   const nKritis = a.byStatus?.CRITICAL ?? 0;
 
   const bagian: React.ReactNode[] = [];
@@ -297,52 +300,48 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
       }
       // Satu deret, jadi tidak perlu legenda — judul di atas sudah menyebutnya.
       // Label langsung hanya di dua ujung rentang, bukan di tiap titik.
-      bagian.push(<Teks key="smin" x={x + pad} y={cy + 56 + 13} size={11} fill={WARNA.tintaLabel}>{`terendah ${hari(spark.min)}`}</Teks>);
-      bagian.push(<Teks key="smax" x={x + w - pad} y={cy + 56 + 13} size={11} fill={WARNA.tintaLabel} anchor="end">{`tertinggi ${hari(spark.max)}`}</Teks>);
+      bagian.push(<Teks key="smin" x={x + pad} y={cy + TINGGI_SPARK + 13} size={11} fill={WARNA.tintaLabel}>{`terendah ${hari(spark.min)}`}</Teks>);
+      bagian.push(<Teks key="smax" x={x + w - pad} y={cy + TINGGI_SPARK + 13} size={11} fill={WARNA.tintaLabel} anchor="end">{`tertinggi ${hari(spark.max)}`}</Teks>);
     } else {
-      bagian.push(<Teks key="sp0" x={x + pad} y={cy + 32} size={11} fill={WARNA.tintaLabel}>Riwayat belum cukup</Teks>);
+      bagian.push(<Teks key="sp0" x={x + pad} y={cy + TINGGI_SPARK / 2 + 4} size={11} fill={WARNA.tintaLabel}>Riwayat belum cukup</Teks>);
     }
-    cy += 56 + 20;
+    cy += TINGGI_SPARK + 20;
   }
 
-  // --- SKU paling mendesak ---
-  // Berapa SKU yang MUAT, bukan berapa yang diminta. Daftar ini satu-satunya
-  // blok yang boleh dipendekkan tanpa kehilangan arti, jadi kalau ruangnya
-  // kurang, inilah yang mengalah — bukan kartunya yang meluber.
-  const poMuat = tata.poMuat;
-  if (blok.po && poMuat > 0) {
+  // --- tren ATP ---
+  //
+  // SPARKLINE TERPISAH, bukan garis kedua di grafik DOI. DOI satuannya HARI dan
+  // ATP satuannya PERSEN; menaruh keduanya di satu sumbu berarti salah satu
+  // skalanya berbohong — kesalahan grafik yang paling sering dibuat. Dua grafik
+  // kecil, masing-masing berjudul dan bersatuan sendiri.
+  //
+  // Warnanya SAMA dengan tren DOI dengan sengaja. Keduanya satu deret di
+  // bingkainya masing-masing, jadi warnanya tidak memikul arti apa pun —
+  // memberi warna berbeda justru menyiratkan dua kategori yang bisa
+  // dibandingkan, padahal tidak. Yang membedakan: judul dan satuan labelnya.
+  if (blok.trenAtp) {
     cy += 16;
-    bagian.push(<Teks key="kr" x={x + pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel}>PALING MENDESAK</Teks>);
+    bagian.push(<Teks key="ta" x={x + pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel}>TREN ATP — 30 HARI</Teks>);
     cy += 6;
-    if (a.kritis.length) {
-      a.kritis.slice(0, poMuat).forEach((r, i) => {
-        const ky = cy + i * 30;
-        const w0 = r.status === 'CRITICAL';
-        bagian.push(<rect key={`kd${i}`} x={x + pad} y={ky} width={3} height={22} rx={1.5} fill={w0 ? WARNA.kritisSolid : WARNA.lowSolid} />);
-        bagian.push(
-          <Teks key={`kn${i}`} x={x + pad + 10} y={ky + 10} size={11} weight={600}>
-            {r.sku.length > 22 ? `${r.sku.slice(0, 21)}…` : r.sku}
-          </Teks>,
-        );
-        bagian.push(
-          <Teks key={`kv${i}`} x={x + pad + 10} y={ky + 22} size={11} fill={w0 ? WARNA.kritisFg : WARNA.lowFg}>
-            {`DOI ${hari(r.doi)} hari${r.sug > 0 ? ` · PO ${angkaRingkas(r.sug)} pcs` : ''}`}
-          </Teks>,
-        );
-      });
+    if (sparkAtp.d) {
+      bagian.push(<path key="tap" d={sparkAtp.d} fill="none" stroke={WARNA.primary} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" transform={`translate(${x + pad} ${cy})`} />);
+      if (sparkAtp.titikAkhir) {
+        bagian.push(<circle key="tad" cx={x + pad + sparkAtp.titikAkhir.x} cy={cy + sparkAtp.titikAkhir.y} r={4} fill={WARNA.primary} stroke={WARNA.permukaan} strokeWidth={2} />);
+      }
+      // Label hanya di dua ujung rentang — bukan angka di tiap titik.
+      bagian.push(<Teks key="tamin" x={x + pad} y={cy + TINGGI_SPARK + 13} size={11} fill={WARNA.tintaLabel}>{`terendah ${persenAtp(sparkAtp.min)}`}</Teks>);
+      bagian.push(<Teks key="tamax" x={x + w - pad} y={cy + TINGGI_SPARK + 13} size={11} fill={WARNA.tintaLabel} anchor="end">{`tertinggi ${persenAtp(sparkAtp.max)}`}</Teks>);
     } else {
-      bagian.push(<Teks key="kr0" x={x + pad} y={cy + 16} size={11} fill={WARNA.amanFg}>Tidak ada SKU kritis</Teks>);
-    }
-    // Dipotong karena ruang TIDAK boleh terjadi tanpa diberitahu: pembaca harus
-    // tahu daftarnya tidak lengkap, kalau tidak ia menyangka sisanya tidak ada.
-    const sisa = a.kritis.length - poMuat;
-    if (sisa > 0) {
+      // Dibedakan dari "tidak ada datanya": satu titik berarti perekaman
+      // hariannya baru mulai, dan itu berbeda dari tabelnya kosong.
+      const n = (a.trenAtp ?? []).filter((t) => t.persen !== null).length;
       bagian.push(
-        <Teks key="krs" x={x + pad} y={cy + poMuat * 30 + 10} size={10} fill={WARNA.tintaLabel}>
-          {`+${sisa} SKU lagi — buka dashboard`}
+        <Teks key="tap0" x={x + pad} y={cy + TINGGI_SPARK / 2 + 4} size={11} fill={WARNA.tintaLabel}>
+          {n === 1 ? 'Baru 1 hari tercatat' : 'Riwayat ATP belum cukup'}
         </Teks>,
       );
     }
+    cy += TINGGI_SPARK + 20;
   }
 
   return (
@@ -387,6 +386,13 @@ export function Poster({ data, onPilihArea }: Props) {
     { l: 'Nilai stok', v: t ? rupiahRingkas(t.value) : '—' },
     { l: 'Nilai + Nilai SIT', v: t ? rupiahRingkas(t.value + t.valueTransit) : '—' },
     { l: 'Kritis + Low', v: t ? `${t.kritis + t.low} SKU` : '—', tone: t && t.kritis > 0 ? WARNA.kritisFg : undefined },
+    // ATP keseluruhan di kepala (permintaan user 10 Okt 2026). Sebelumnya
+    // kepala hanya meringkas DOI, padahal tiap kartu sudah memuat ATP-nya —
+    // jadi tidak ada satu pun angka ATP untuk SELURUH perusahaan.
+    //
+    // "—" saat pembaginya 0 BUKAN 0%: artinya belum ada SKU yang diputuskan
+    // sebarannya di mana pun. Menggambarnya 0% akan terbaca seperti bencana.
+    { l: 'ATP keseluruhan', v: t?.atp ? persenAtp(t.atp.persen) : '—' },
   ] as { l: string; v: string; tone?: string }[];
   const rw = (KANVAS.w - 2 * M) / ringkas.length;
   // Angka strip mengecil saat kolomnya bertambah. Tanpa ini "105 rb pcs" di 26px
@@ -437,7 +443,7 @@ export function Poster({ data, onPilihArea }: Props) {
           blok={data.blok}
           atpSize={atpSize}
           disp={disp}
-          kritisMaks={6}
+          kritisMaks={0}
           tampil={tampil}
           onKlik={onPilihArea ? () => onPilihArea(a.area) : undefined}
         />

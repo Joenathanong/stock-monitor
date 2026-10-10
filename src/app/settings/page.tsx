@@ -115,7 +115,12 @@ const groupsFor = (v: Record<string, string>, areas: AreaRow[] = []): { title: s
         hint: 'Batang Kritis / Low / Aman / Overstock per area; sisanya dilipat jadi "Lain".' },
       { key: 'wa_blok_tren', label: 'Tampilkan tren DOI 30 hari', type: 'bool',
         hint: 'Garis kecil per area. Hari yang belum pernah dihitung memutus garis, tidak disambung lurus.' },
-      { key: 'wa_blok_po', label: 'Tampilkan open PO & SKU paling mendesak', type: 'bool' },
+      { key: 'wa_blok_tren_atp', label: 'Tampilkan tren ATP 30 hari', type: 'bool',
+        hint: 'Grafik terpisah dari tren DOI — satuannya persen, bukan hari, jadi tidak boleh berbagi satu sumbu. '
+          + 'Sumbernya potret harian atp_daily; kalau belum ada riwayatnya, kotaknya menulis "Riwayat ATP belum cukup".' },
+      { key: 'wa_blok_po', label: 'Tampilkan angka "Perlu open PO"', type: 'bool',
+        hint: 'Daftar "SKU paling mendesak" dihapus dari poster 10 Okt 2026; pengaturan ini kini hanya '
+          + 'menyalakan angkanya di blok angka.' },
       { key: 'wa_kritis_maks', label: 'Berapa SKU mendesak disebut per area', type: 'number',
         hint: 'Maksimal 6. Lebih dari 3 mulai sempit di lebar kartu 294px.' },
     ],

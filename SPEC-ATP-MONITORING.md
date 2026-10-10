@@ -1255,3 +1255,71 @@ karena komponennya phase out, itu aturan baru yang terpisah.
 
 Excel: lembar Sebaran dapat kolom "Phase out" (keterangan saja — importer
 melewatinya, sama seperti kolom Stok dan Turunan).
+
+## Tren ATP di poster WA + ATP keseluruhan di kepala (10 Okt 2026)
+
+Permintaan user: grafik tren ATP seperti tren DOI di `/wa`, daftar "SKU paling
+mendesak" dihapus, dan ATP keseluruhan ditambahkan ke strip ringkasan di kepala
+(sebelumnya kepala hanya meringkas DOI, padahal tiap kartu sudah memuat ATP-nya).
+
+### Dua sparkline TERPISAH, bukan dua garis di satu sumbu
+
+DOI satuannya **hari**, ATP satuannya **persen**. Menumpuknya di satu grafik
+berarti salah satu skalanya berbohong — kesalahan grafik yang paling sering
+dibuat. Jadi dua grafik kecil berurutan, masing-masing berjudul dan bersatuan
+sendiri ("terendah 3,0 / tertinggi 7,0" vs "terendah 62,0% / tertinggi 74,0%").
+
+Warnanya **sama** dengan tren DOI, dengan sengaja: keduanya satu deret di
+bingkainya masing-masing, jadi warnanya tidak memikul arti apa pun. Memberi
+warna berbeda justru menyiratkan dua kategori yang bisa dibandingkan.
+
+### Sumbernya potret harian, bukan hitung ulang
+
+`trenAtp()` membaca `atp_daily`. ATP% hari lalu **tidak bisa** dibuat ulang hari
+ini — checklist sebarannya sudah berubah dan stoknya sudah ditimpa. Yang tidak
+direkam saat itu hilang selamanya.
+
+`persen` null (pembagi 0 hari itu) **memutus garis**, tidak disambung lurus:
+menyambungnya mengarang tren yang tidak pernah ada. Kurang dari dua titik tidak
+menggambar apa pun — hari pertama perekaman digambar sebagai garis datar akan
+terbaca seperti "ATP tidak bergerak", padahal belum ada yang dibandingkan.
+Pesannya dibedakan: "Baru 1 hari tercatat" vs "Riwayat ATP belum cukup".
+
+### Perekaman hariannya ditumpangkan ke cron compute
+
+Tanpa ini grafiknya **tidak akan pernah terisi**: `atp_daily` hanya ditulis
+kalau ada orang menekan tombolnya, dan `/api/cron/atp` tidak terdaftar di
+`vercel.json` (paket Hobby membatasi jumlah cron, dan dua slotnya sudah
+terpakai; menambah yang ketiga bisa menggagalkan DEPLOY — itu memadamkan
+seluruh aplikasi, bukan cuma ATP).
+
+Keberatan asli terhadap penumpangan ("hari di mana ATP lambat akan MEMBUNUH
+perhitungan DOI") dijawab oleh URUTAN: perekaman ATP dijalankan **sesudah**
+`runCompute` selesai dan dibungkus try/catch sendiri. Saat baris itu berjalan,
+snapshot DOI sudah tertulis — kegagalan ATP tidak bisa lagi merugikan DOI, yang
+hilang hanya satu titik di grafik.
+
+### Tinggi sparkline turun 56 → 44, dan alasannya diuji
+
+Kalau kedua grafik tetap 56px, jarak baris status terpaksa turun 20 → 16 —
+padahal kanvas sengaja dinaikkan ke 1000 pada 8 Okt justru untuk membeli jarak
+20 itu. Jadi yang mengalah tinggi grafiknya, bukan keterbacaan sebaran status:
+sparkline membawa **bentuk** tren, dan angkanya tetap ditulis di dua ujung.
+
+Terukur dan dikunci di `wa-poster.test.ts`: susunan poster sebenarnya (dua tren,
+tanpa daftar mendesak, 10 baris status) menghasilkan **pitch 20** dan tinggi
+kartu di bawah `tinggiKartuTersedia()`. Tesnya menyebutkan apa yang harus
+mengalah kalau suatu hari blok baru masuk lagi.
+
+Diverifikasi dengan merender poster sungguhan (react-dom/server → SVG → PNG) dan
+melihatnya: tidak ada elemen yang melewati kanvas (y maks 978 dari 1000), 10
+sparkline tergambar, 5 di antaranya terputus di hari berlubang, "PALING
+MENDESAK" tidak ada lagi, dan "ATP KESELURUHAN 72,0%" ada di kolom terakhir
+strip kepala.
+
+### Pengaturan
+
+`wa_blok_tren_atp` (bawaan 1) menyalakan grafiknya. `wa_blok_po` kini hanya
+menyalakan angka "Perlu open PO" di blok angka — daftar SKU-nya sudah tidak ada,
+dan labelnya di halaman Pengaturan diperbarui supaya tidak menjanjikan sesuatu
+yang tidak lagi digambar.

@@ -72,13 +72,24 @@ export type AreaWa = {
    */
   doiSit?: { doi1: number | null; doi2: number | null };
   tren: { date: string; doi1: number | null; doi2: number | null }[];
+  /**
+   * Tren ATP% area ini, dari `atp_daily`. OPSIONAL dengan sengaja — alasannya
+   * sama dengan `atp`: poster dan API bisa berbeda versi saat deploy berjalan,
+   * dan satu medan baru tidak boleh menghilangkan seluruh gambar.
+   *
+   * TIDAK digabung ke `tren` di atas: DOI satuannya HARI dan ATP satuannya
+   * PERSEN. Dua ukuran berbeda skala tidak boleh berbagi satu sumbu — itu
+   * kesalahan grafik yang paling sering dibuat. Karena itu dua sparkline
+   * terpisah, masing-masing dengan judul dan satuannya sendiri.
+   */
+  trenAtp?: { date: string; persen: number | null }[];
   kritis: KritisWa[];
 };
 
 export type DataWa = {
   ok: boolean;
   judul: string;
-  blok: { angka: boolean; status: boolean; tren: boolean; po: boolean };
+  blok: { angka: boolean; status: boolean; tren: boolean; trenAtp: boolean; po: boolean };
   doiDisplay: 'OPSI1' | 'OPSI2' | 'BOTH';
   dibuatPada: string;
   snapshotDate: string | null;
@@ -88,6 +99,15 @@ export type DataWa = {
     ads1: number; ads2: number;
     stock: number; transit: number; value: number; valueTransit: number;
     kritis: number; low: number;
+    /**
+     * ATP keseluruhan — siap dibagi dihitung, dijumlahkan LINTAS AREA.
+     *
+     * Bukan rata-rata persen per area: cabang 2 SKU dan cabang 1.600 SKU tidak
+     * boleh berbobot sama. Lihat `atpKeseluruhan()`.
+     *
+     * Opsional: poster lama tetap jalan tanpanya, kotaknya menulis "—".
+     */
+    atp?: { persen: number | null; siap: number; dihitung: number };
   } | null;
   areas: AreaWa[];
   trenLabel: string[];

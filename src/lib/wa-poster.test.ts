@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { pitaDoi } from './area-master';
-import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2, KANVAS, KARTU, tinggiKartuTersedia, BIAYA_BLOK, labelPitaPisah, tataLabelStatus, ukuranAtpMuat, lebarDoiBesar, doiPlusSit, UKURAN_DOI, UKURAN_ATP } from './wa-poster';
+import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2, KANVAS, KARTU, tinggiKartuTersedia, BIAYA_BLOK, labelPitaPisah, tataLabelStatus, ukuranAtpMuat, lebarDoiBesar, doiPlusSit, UKURAN_DOI, UKURAN_ATP, TINGGI_SPARK } from './wa-poster';
 
 test('rupiah diringkas per satuan', () => {
   assert.equal(rupiahRingkas(52_431_882_100), 'Rp 52,4 M');
@@ -581,4 +581,70 @@ test('DOI + SIT tidak pernah lebih kecil dari DOI tanpa SIT', () => {
     const dengan = doiPlusSit(stok, sit, ads)!;
     assert.ok(dengan >= tanpa, `${dengan} < ${tanpa}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Tren ATP sebagai grafik KEDUA (10 Okt 2026)
+// ---------------------------------------------------------------------------
+
+test('susunan poster sebenarnya MUAT di kartu, dan jarak baris status tetap 20', () => {
+  // Inilah tes yang menjaga kaki poster tidak terpotong diam-diam. Susunannya
+  // ditulis persis seperti yang dikirim route: dua tren, tanpa daftar mendesak.
+  const tersedia = tinggiKartuTersedia();
+  const blok = { angka: true, status: true, tren: true, trenAtp: true, po: true };
+  const nBaris = URUT_STATUS.length + URUT_LAIN.length;
+  const tata = tataLetakStatus({ tinggiKartu: tersedia, blok, nBaris, diminta: 0 });
+  const tinggi = tinggiKartu({ blok, nBaris, pitch: tata.pitch, kritisMaks: 0 });
+
+  assert.ok(tinggi <= tersedia, `kartu ${tinggi}px melebihi ${tersedia}px — kaki poster akan terpotong`);
+  assert.equal(
+    tata.pitch, 20,
+    'jarak baris status turun dari 20. Kanvas dinaikkan ke 1000 pada 8 Okt JUSTRU untuk '
+    + 'membeli jarak itu — kalau grafik kedua memakannya, yang harus mengalah tinggi '
+    + 'grafiknya (TINGGI_SPARK), bukan keterbacaan sebaran status.',
+  );
+});
+
+test('dua sparkline berbiaya SAMA — bukan satu dikecilkan diam-diam', () => {
+  assert.equal(BIAYA_BLOK.tren, BIAYA_BLOK.trenAtp);
+  assert.equal(BIAYA_BLOK.tren, 16 + 6 + TINGGI_SPARK + 20, 'biaya blok harus ikut TINGGI_SPARK');
+});
+
+test('tren ATP menambah tinggi kartu sebesar biayanya, tidak lebih', () => {
+  const dasar = { angka: true, status: true, tren: true };
+  const a = tinggiKartu({ blok: dasar, nBaris: 10, pitch: 20 });
+  const b = tinggiKartu({ blok: { ...dasar, trenAtp: true }, nBaris: 10, pitch: 20 });
+  assert.equal(b - a, BIAYA_BLOK.trenAtp);
+});
+
+test('sparkline ATP: titik null MEMUTUS garis, tidak disambung lurus', () => {
+  // Hari dengan pembagi 0 (belum ada SKU yang diputuskan sebarannya) bukan 0% —
+  // menyambungnya lurus mengarang tren yang tidak pernah ada.
+  const utuh = jalurSpark([70, 72, 74], 100, TINGGI_SPARK);
+  const bolong = jalurSpark([70, null, 74], 100, TINGGI_SPARK);
+  assert.equal((utuh.d.match(/M/g) ?? []).length, 1, 'tanpa lubang: satu potongan');
+  assert.equal((bolong.d.match(/M/g) ?? []).length, 2, 'ada lubang: garis terputus jadi dua');
+});
+
+test('sparkline ATP: kurang dari dua titik = tidak menggambar apa pun', () => {
+  // Hari pertama perekaman tidak boleh digambar sebagai garis datar — itu
+  // terbaca seperti "ATP tidak bergerak", padahal belum ada yang dibandingkan.
+  assert.equal(jalurSpark([], 100, TINGGI_SPARK).d, '');
+  assert.equal(jalurSpark([71.2], 100, TINGGI_SPARK).d, '');
+  assert.equal(jalurSpark([null, null], 100, TINGGI_SPARK).d, '');
+  assert.ok(jalurSpark([71.2, 69.0], 100, TINGGI_SPARK).d.length > 0);
+});
+
+test('sparkline ATP memakai skalanya SENDIRI, bukan skala DOI', () => {
+  // DOI satuannya hari (±0–30), ATP persen (0–100). Dua ukuran berbeda skala
+  // tidak boleh berbagi satu sumbu; masing-masing dinormalkan ke min/max-nya.
+  const doi = jalurSpark([4, 8, 6], 100, TINGGI_SPARK);
+  const atp = jalurSpark([70, 74, 72], 100, TINGGI_SPARK);
+  assert.deepEqual(
+    doi.d.replace(/[\d.]+/g, 'n'),
+    atp.d.replace(/[\d.]+/g, 'n'),
+    'bentuk jalurnya sama karena polanya sama — buktinya masing-masing dinormalkan sendiri',
+  );
+  assert.equal(doi.min, 4);
+  assert.equal(atp.min, 70);
 });

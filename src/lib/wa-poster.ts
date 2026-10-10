@@ -285,6 +285,9 @@ export function lebarKartu(jumlah: number, total = KANVAS.w, margin = 32, jarak 
  * poster — dan tidak ada yang gagal, tidak ada yang memperingatkan. Angka-angka
  * di sini HARUS sama dengan kenaikan `cy` di `poster.tsx`; tesnya mengunci itu.
  */
+/** Tinggi gambar sparkline (px). Dipakai poster.tsx; BIAYA_BLOK menghitungnya. */
+export const TINGGI_SPARK = 44;
+
 export const BIAYA_BLOK = {
   kepala: 30 + 12,
   /**
@@ -298,8 +301,26 @@ export const BIAYA_BLOK = {
   angka: 26 + 34 + 26 + (4 * 46 - 6 + 8),
   /** Judul + jeda + penutup, di luar barisnya sendiri. */
   statusTetap: 16 + 8 + 8,
-  tren: 16 + 6 + 56 + 20,
-  /** Judul + jeda, di luar daftar SKU-nya. */
+  /**
+   * Tinggi gambar sparkline turun 56 → 44 pada 10 Okt 2026, saat tren ATP
+   * masuk sebagai grafik KEDUA.
+   *
+   * Kalau keduanya tetap 56, jarak baris status terpaksa turun 20 → 16 — dan
+   * kanvas sengaja dinaikkan ke 1000 pada 8 Okt justru untuk membeli jarak 20
+   * itu. Jadi yang mengalah tinggi grafiknya, bukan keterbacaan sebaran status:
+   * sparkline membawa BENTUK tren, dan angkanya tetap ditulis di dua ujung.
+   * Terukur: 2 x 44 menyisakan pitch 20; 2 x 56 memaksa 16.
+   */
+  tren: 16 + 6 + 44 + 20,
+  /**
+   * Tren ATP — ukurannya SAMA PERSIS dengan tren DOI.
+   *
+   * Dua sparkline terpisah, bukan dua garis di satu sumbu: DOI satuannya HARI,
+   * ATP satuannya PERSEN. Menumpuknya di satu sumbu berarti salah satu skalanya
+   * berbohong.
+   */
+  trenAtp: 16 + 6 + 44 + 20,
+  /** Judul + jeda, di luar daftar SKU-nya. TIDAK DIPAKAI lagi sejak 10 Okt 2026. */
   poTetap: 16 + 6,
   poPerBaris: 30,
   /** Jarak antar baris status. Dipilih adaptif, lihat `tataLetakStatus`. */
@@ -308,7 +329,17 @@ export const BIAYA_BLOK = {
   pemisah: 10,
 } as const;
 
-export type BlokPoster = { angka?: boolean; status?: boolean; tren?: boolean; po?: boolean };
+export type BlokPoster = {
+  angka?: boolean; status?: boolean; tren?: boolean;
+  /** Tren ATP 30 hari — blok sendiri, lihat BIAYA_BLOK.trenAtp. */
+  trenAtp?: boolean;
+  /**
+   * Dulu menyalakan daftar "SKU paling mendesak" DI DALAM kartu. Daftar itu
+   * dihapus 10 Okt 2026 atas permintaan user; `po` kini hanya menyalakan angka
+   * "Perlu open PO" di blok angka, yang tidak punya biaya tinggi sendiri.
+   */
+  po?: boolean;
+};
 
 export function tinggiKartu(opsi: {
   blok: BlokPoster; nBaris?: number; pitch?: number; kritisMaks?: number;
@@ -328,6 +359,7 @@ export function tinggiKartu(opsi: {
   // vertikal, dan saya mendandaninya sebagai prinsip.
   if (b.status) t += BIAYA_BLOK.statusTetap + BIAYA_BLOK.pemisah + nBaris * pitch;
   if (b.tren) t += BIAYA_BLOK.tren;
+  if (b.trenAtp) t += BIAYA_BLOK.trenAtp;
   if (b.po && (opsi.kritisMaks ?? 0) > 0) t += BIAYA_BLOK.poTetap + (opsi.kritisMaks ?? 0) * BIAYA_BLOK.poPerBaris;
   return t;
 }

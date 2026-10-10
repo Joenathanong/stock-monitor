@@ -83,6 +83,7 @@ export const DEFAULT_SETTINGS = {
   wa_blok_angka: 1,             // DOI opsi 1 & 2, nilai stok, SIT, jumlah SKU
   wa_blok_status: 1,            // batang sebaran status per area
   wa_blok_tren: 1,              // garis tren DOI 30 hari per area
+  wa_blok_tren_atp: 1,          // garis tren ATP 30 hari per area (dari atp_daily)
   wa_blok_po: 1,                // saran open PO + SKU kritis teratas
   wa_kritis_maks: 3,            // berapa SKU kritis yang disebut namanya per area
   wa_judul: 'Ringkasan DOI Harian — IEG',

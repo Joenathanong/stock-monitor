@@ -562,6 +562,50 @@ export async function rekamAtpHarian(
   return n;
 }
 
+/** Satu hari tren ATP. `persen` null = pembaginya 0 hari itu, BUKAN 0%. */
+export type TitikTrenAtp = {
+  date: string;
+  persen: number | null;
+  siap: number;
+  dihitung: number;
+};
+
+/**
+ * Tren ATP per area dari `atp_daily`, URUT LAMA → BARU.
+ *
+ * Sumbernya tabel potret harian, bukan hitung ulang: ATP% hari lalu tidak bisa
+ * dibuat ulang hari ini — checklist sebarannya sudah berubah, stoknya sudah
+ * ditimpa. Yang tidak direkam saat itu hilang selamanya.
+ *
+ * `persen` dihitung DI SINI dari siap/dihitung, bukan disimpan di tabel: kalau
+ * disimpan, ia bisa berbeda dari pembagi di baris yang sama setelah pembulatan.
+ * null saat pembaginya 0 — hari ketika belum ada SKU yang diputuskan
+ * sebarannya di area itu. Menggambarnya sebagai 0% akan terbaca seperti
+ * bencana stok, dan `jalurSpark` memang MEMUTUS garis di titik null alih-alih
+ * menyambungnya lurus melewati hari itu.
+ */
+export async function trenAtp(hari = 30, areaId?: string | null): Promise<TitikTrenAtp[]> {
+  try {
+    const rows = await prisma.atpDaily.findMany({
+      where: areaId ? { areaId } : undefined,
+      orderBy: { snapshotDate: 'desc' },
+      take: Math.max(1, hari),
+    });
+    return rows
+      .map((r) => ({
+        date: toDateKeyUtc(r.snapshotDate),
+        siap: r.siap,
+        dihitung: r.dihitung,
+        persen: r.dihitung > 0 ? (r.siap / r.dihitung) * 100 : null,
+      }))
+      .reverse();
+  } catch (e) {
+    // Tabel belum ada bukan galat — poster harus tetap terkirim tanpa treknya.
+    if (tabelBelumAda(e)) return [];
+    throw e;
+  }
+}
+
 /**
  * Persen ATP per area untuk poster WA — ringan, tanpa daftar SKU.
  *

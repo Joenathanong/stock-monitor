@@ -7,7 +7,7 @@ import { ambangDoi } from '@/lib/area-master';
 import { muatArea } from '@/lib/area-store';
 import { toDateKeyUtc } from '@/lib/dates';
 import { tolakAksesPoster } from '@/lib/wa-akses';
-import { persenAtpPerArea } from '@/lib/atp-store';
+import { persenAtpPerArea, trenAtp } from '@/lib/atp-store';
 import { AMBANG_ATP_BAWAAN } from '@/lib/atp';
 import { doiPlusSit } from '@/lib/wa-poster';
 
@@ -41,9 +41,14 @@ export async function GET(req: Request) {
     angka: raw.wa_blok_angka !== '0',
     status: raw.wa_blok_status !== '0',
     tren: raw.wa_blok_tren !== '0',
+    trenAtp: raw.wa_blok_tren_atp !== '0',
     po: raw.wa_blok_po !== '0',
   };
-  const kritisMaks = Math.max(0, Math.min(6, Number(raw.wa_kritis_maks ?? 3)));
+  // Daftar "SKU paling mendesak" DIHAPUS dari poster 10 Okt 2026 atas
+  // permintaan user; `wa_blok_po` sekarang hanya menyalakan angka "Perlu open
+  // PO" di blok angka. `kritisMaks` tetap dibaca supaya pengaturan lama tidak
+  // menimbulkan galat, tapi tidak lagi menggambar apa pun.
+  const kritisMaks = 0;
   // Opsi DOI yang ditampilkan ikut Pengaturan yang sama dengan seluruh layar lain
   // (`doi_display`), bukan setelan sendiri — supaya poster dan dashboard tidak
   // pernah menyebut angka yang berbeda.
@@ -93,6 +98,10 @@ export async function GET(req: Request) {
       const snap = await latestSnapshot(area);
       const s = snap.summary;
       const tren = blok.tren ? (await summaryHistory(TREN_HARI, area)).reverse() : [];
+      // Dari `atp_daily` — potret harian, bukan hitung ulang: ATP% hari lalu
+      // tidak bisa dibuat ulang hari ini karena checklist dan stoknya sudah
+      // berubah. Gagal baca = daftar kosong, poster tetap terkirim.
+      const trAtp = blok.trenAtp ? await trenAtp(TREN_HARI, area).catch(() => []) : [];
       // Baris kritis: yang statusnya CRITICAL dulu, lalu LOW, masing-masing
       // diurut dari DOI terkecil — itu urutan yang benar-benar mendesak.
       const kritis = blok.po
@@ -169,6 +178,7 @@ export async function GET(req: Request) {
             }
           : undefined,
         tren: tren.map((t) => ({ date: t.date, doi1: t.doi1, doi2: t.doi2 })),
+        trenAtp: trAtp.map((t) => ({ date: t.date, persen: t.persen })),
         kritis,
       };
     }),
@@ -197,6 +207,16 @@ export async function GET(req: Request) {
           valueTransit: nilaiTransit(gab.rows),
           kritis: gab.summary.byStatus.CRITICAL,
           low: gab.summary.byStatus.LOW,
+          // ATP keseluruhan dari hasil yang SAMA dengan ATP per kartu —
+          // dijumlahkan lintas area, bukan dirata-rata persennya. Lihat
+          // `atpKeseluruhan()`.
+          atp: atpHasil
+            ? {
+                persen: atpHasil.keseluruhan.persen,
+                siap: atpHasil.keseluruhan.siap,
+                dihitung: atpHasil.keseluruhan.dihitung,
+              }
+            : undefined,
         }
       : null,
     areas: perArea,

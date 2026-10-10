@@ -162,8 +162,28 @@ export async function bahanUsulan(): Promise<{
   kodeSap: { sapCode: string; perCtn: number | null }[];
   supplierSiap: boolean;
 }> {
+  // SUMBER SKU OCS adalah `stock_current`, BUKAN `sku_master`.
+  //
+  // KEJADIAN NYATA 10 Okt 2026, dilaporkan user: tombol "Lihat usulan dari 6
+  // digit" menjawab "Unexpected end of JSON input". Penyebabnya query ini dulu
+  // berbunyi `SELECT sku, sapCode, name FROM sku_master` — dan `sku_master`
+  // TIDAK PUNYA kolom `sapCode` maupun `name`; isinya cuma sku, leadTimeDays,
+  // isExcluded, note. TiDB menolak dengan error 1054 (unknown column), lemparan
+  // itu terjadi DI LUAR blok try di bawah sehingga tidak tertangkap, dan route
+  // membalas 500 berbadan kosong. `res.json()` di layar lalu gagal mengurai
+  // badan kosong — pesan errornya sama sekali tidak menyebut kolom.
+  //
+  // Dua kesalahan sekaligus, dan yang kedua tidak akan ketahuan dari pesan
+  // error: `sku_master` adalah tabel TIMPAAN yang hanya berisi SKU yang pernah
+  // diedit orang (6 baris saat ini). Daftar SKU OCS yang sebenarnya — lengkap
+  // dengan kode SAP dan namanya — ada di `stock_current`. Memperbaiki nama
+  // kolomnya saja akan membuat usulan dihitung dari 6 SKU, bukan 471.
+  //
+  // DISTINCT per SKU: `stock_current` berkunci (sku, areaId), jadi satu SKU
+  // muncul sekali per cabang. Tanpa pengelompokan, usulan 6-digit dihitung
+  // lima kali untuk produk yang sama.
   const skuOcs = await prisma.$queryRawUnsafe<{ sku: string; sapCode: string | null; name: string | null }[]>(
-    'SELECT sku, sapCode, name FROM sku_master ORDER BY sku',
+    'SELECT sku, MAX(sapCode) AS sapCode, MAX(name) AS name FROM stock_current GROUP BY sku ORDER BY sku',
   );
   try {
     // perCtn terbesar per kode: baris dari dua gudang bisa beda, dan 0 berarti
@@ -174,7 +194,14 @@ export async function bahanUsulan(): Promise<{
     return {
       skuOcs,
       kodeSap: kodeSap.map((r) => ({ sapCode: r.sapCode, perCtn: Number(r.perCtn ?? 0) || null })),
-      supplierSiap: true,
+      // SIAP berarti ADA ISINYA, bukan sekadar tabelnya ada.
+      //
+      // Tabel kosong menghasilkan 0 kode SAP, jadi 0 usulan — dan pesan
+      // "0 produk diusulkan dari 0 kode SAP" terbaca seperti kesimpulan
+      // ("memang tidak ada yang cocok") padahal penyebabnya sederhana: saldo
+      // pemasok belum pernah ditarik. Keadaan yang bisa diperbaiki tidak boleh
+      // menyamar jadi keadaan yang sudah final.
+      supplierSiap: kodeSap.length > 0,
     };
   } catch (e) {
     if (tabelBelumAda(e) || /supplier_stock/i.test(e instanceof Error ? e.message : '')) {

@@ -75,13 +75,22 @@ export async function POST(req: Request) {
  */
 export async function PATCH(req: Request) {
   const body = (await req.json().catch(() => null)) as
-    | { sku?: string; leadTimeDays?: number | null; isExcluded?: boolean; note?: string | null; bulk?: { skus?: string[]; leadTimeDays: number } }
+    | { sku?: string; leadTimeDays?: number | null; isExcluded?: boolean; note?: string | null; bulk?: { skus?: string[]; leadTimeDays: number | null } }
     | null;
   if (!body) return fail('Body harus JSON');
 
   if (body.bulk) {
-    const days = Math.max(0, Math.round(Number(body.bulk.leadTimeDays)));
-    if (!Number.isFinite(days)) return fail('leadTimeDays tidak valid');
+    // `null` = KOSONGKAN, supaya SKU-nya ikut lead time cabang masing-masing.
+    //
+    // Ditambahkan 10 Okt 2026. Sebelumnya massal hanya bisa MENGISI angka, dan
+    // begitu lead time pindah ke per cabang, 465 dari 471 SKU punya angkanya
+    // sendiri yang menang atas angka cabang — tanpa cara mengosongkan massal,
+    // satu-satunya jalan menjadikannya ikut cabang adalah mengedit 465 baris
+    // satu per satu. Setelan yang tidak bisa dibatalkan bukan setelan.
+    const mentah = body.bulk.leadTimeDays;
+    const kosongkan = mentah === null;
+    const days = kosongkan ? null : Math.max(0, Math.round(Number(mentah)));
+    if (!kosongkan && !Number.isFinite(days as number)) return fail('leadTimeDays tidak valid');
     let skus = body.bulk.skus?.filter(Boolean) ?? [];
     if (!skus.length) {
       const all = await prisma.$queryRawUnsafe<{ sku: string }[]>(`SELECT DISTINCT sku FROM stock_current WHERE category = 'Sku'`);
@@ -96,7 +105,8 @@ export async function PATCH(req: Request) {
         ...chunk.flatMap((s) => [s, days]),
       );
     }
-    await prisma.auditLog.create({ data: { action: 'LEAD_TIME_BULK', entity: 'sku_master', detail: `${skus.length} SKU → ${days} hari` } });
+    const keterangan = kosongkan ? 'dikosongkan (ikut cabang)' : `${days} hari`;
+    await prisma.auditLog.create({ data: { action: 'LEAD_TIME_BULK', entity: 'sku_master', detail: `${skus.length} SKU → ${keterangan}` } });
     return json({ ok: true, updated: skus.length, leadTimeDays: days });
   }
 

@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { fail, json, safe } from '@/lib/http';
 import { muatArea, isiAreaBawaan } from '@/lib/area-store';
-import { areaBelumTerdaftar, validasiArea, normalKode, type BarisArea } from '@/lib/area-master';
+import { areaBelumTerdaftar, validasiArea, kolomTersimpan, normalKode, type BarisArea } from '@/lib/area-master';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,7 +43,10 @@ export async function PUT(req: Request) {
   const b = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   if (!b) return fail('Body harus JSON');
 
-  const calon: Partial<BarisArea> = {
+  // BarisArea utuh, bukan Partial: setiap kolom harus punya nilai di sini,
+  // supaya `kolomTersimpan` di bawah bisa menurunkan daftar kolomnya dari tipe
+  // ini dan tidak ada yang bisa tertinggal.
+  const calon: BarisArea = {
     code: normalKode(typeof b.code === 'string' ? b.code : ''),
     doiCritical: angka(b.doiCritical),
     name: String(b.name ?? '').trim(),
@@ -69,20 +72,14 @@ export async function PUT(req: Request) {
   });
   if (bentrok) return fail(`Nama area "${calon.name}" sudah dipakai kode ${bentrok.code}`);
 
-  const data = {
-    name: calon.name as string,
-    isActive: calon.isActive as boolean,
-    sortOrder: calon.sortOrder as number,
-    doiCritical: calon.doiCritical,
-    doiMin: calon.doiMin,
-    doiMax: calon.doiMax,
-    startDate: calon.startDate ? new Date(`${calon.startDate}T00:00:00.000Z`) : null,
-    note: calon.note,
-  };
-  const sebelum = await prisma.area.findUnique({ where: { code: calon.code as string } });
+  // Kolomnya DITURUNKAN dari barisnya, tidak diketik ulang. Daftar yang
+  // diketik ulang di sini pernah menjatuhkan dua kolom baru tanpa suara —
+  // lihat `kolomTersimpan`.
+  const data = kolomTersimpan(calon);
+  const sebelum = await prisma.area.findUnique({ where: { code: calon.code } });
   await prisma.area.upsert({
-    where: { code: calon.code as string },
-    create: { code: calon.code as string, ...data },
+    where: { code: calon.code },
+    create: { code: calon.code, ...data },
     update: data,
   });
   await prisma.auditLog.create({

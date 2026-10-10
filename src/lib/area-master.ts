@@ -162,6 +162,30 @@ export function ambangDoi(area: BarisArea | null | undefined): AmbangDoi | null 
 /** Apakah baris ini sudah punya ketiga ambangnya. */
 export const ambangLengkap = (a: BarisArea | null | undefined): boolean => ambangDoi(a) !== null;
 
+/**
+ * Kolom tabel `area` yang bisa diubah lewat form — SEMUANYA, tanpa `code`.
+ *
+ * KEJADIAN NYATA 10 Okt 2026, dilaporkan user beberapa jam setelah kolom lead
+ * time dipasang: "seting leadtime pusat sudah di set 1, kenapa data tabel masih
+ * menampilkan 2?" Jawabannya ternyata angkanya TIDAK PERNAH TERSIMPAN — di
+ * database nilainya masih null.
+ *
+ * Sebabnya: route PUT menyusun objek `data` untuk Prisma dengan MENGETIK ULANG
+ * nama kolomnya satu per satu. Dua kolom baru lolos validasi, diterima API, dan
+ * dijatuhkan diam-diam di langkah terakhir. User melihat pesan hijau
+ * "tersimpan" untuk perubahan yang tidak terjadi — bentuk kegagalan yang paling
+ * mahal, karena tidak ada yang bisa mencurigainya dari layar.
+ *
+ * Maka daftarnya tidak ditulis ulang lagi di route. Fungsi ini MENURUNKAN
+ * kolomnya dari barisnya sendiri, jadi kolom baru ikut tersimpan tanpa ada yang
+ * perlu ingat menambahkannya. Dijaga `area-master.test.ts`.
+ */
+export function kolomTersimpan(b: BarisArea): Omit<BarisArea, 'code' | 'startDate'> & { startDate: Date | null } {
+  const { code: _code, startDate, ...kolom } = b;
+  void _code;
+  return { ...kolom, startDate: startDate ? new Date(`${startDate}T00:00:00.000Z`) : null };
+}
+
 export type SetelanArea = {
   ambang: AmbangDoi | null;
   /** Lead time cabang (hari) — cadangan untuk SKU tanpa lead time sendiri. */

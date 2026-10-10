@@ -26,15 +26,26 @@ export default function SkuMasterPage() {
 
   function report(text: string, tone: 'ok' | 'error' | 'warn' = 'ok') { setMsg({ tone, text }); }
 
-  async function bulk(all: boolean) {
-    const days = Number(bulkDays);
-    if (!Number.isFinite(days) || days < 0) return report('Lead time tidak valid', 'error');
+  /**
+   * `kosongkan` = set null, supaya SKU-nya mengikuti lead time cabangnya.
+   *
+   * Perlu ada karena lead time per SKU MENANG atas lead time cabang. Dengan 465
+   * dari 471 SKU punya angkanya sendiri, mengubah lead time cabang tidak
+   * mengubah apa pun sampai angka per-SKU itu dikosongkan.
+   */
+  async function bulk(all: boolean, kosongkan = false) {
+    const days = kosongkan ? null : Number(bulkDays);
+    if (!kosongkan && (!Number.isFinite(days as number) || (days as number) < 0)) {
+      return report('Lead time tidak valid', 'error');
+    }
     const target = all ? 'SEMUA SKU' : `${sel.size} SKU terpilih`;
-    if (!confirm(`Set lead time ${days} hari untuk ${target}?`)) return;
+    const apa = kosongkan ? 'KOSONGKAN lead time (ikut cabang)' : `Set lead time ${days} hari`;
+    if (!confirm(`${apa} untuk ${target}?`)) return;
     setBusy(true);
     try {
       const r = await postJson('/api/sku-master', { bulk: { skus: all ? [] : [...sel], leadTimeDays: days } }, 'PATCH');
-      report(`${r.updated} SKU diset ${r.leadTimeDays} hari. Klik "Hitung ulang" agar status memakai lead time baru.`);
+      const hasil = kosongkan ? 'dikosongkan — kini ikut lead time cabang' : `diset ${r.leadTimeDays} hari`;
+      report(`${r.updated} SKU ${hasil}. Klik "Hitung ulang" agar status memakai lead time baru.`);
       setSel(new Set()); reload();
     } catch (e) { report(e instanceof Error ? e.message : String(e), 'error'); }
     finally { setBusy(false); }
@@ -108,6 +119,12 @@ export default function SkuMasterPage() {
             <div><label className="label">Lead time (hari)</label><input className="input w-28" value={bulkDays} onChange={(e) => setBulkDays(e.target.value)} /></div>
             <button className="btn" onClick={() => bulk(false)} disabled={busy || !sel.size}>Terapkan ke {sel.size} terpilih</button>
             <button className="btn btn-primary" onClick={() => bulk(true)} disabled={busy}>Terapkan ke SEMUA SKU</button>
+            <button
+              className="btn" onClick={() => bulk(true, true)} disabled={busy}
+              title="Hapus lead time per SKU supaya semuanya mengikuti lead time cabangnya masing-masing"
+            >
+              Kosongkan SEMUA (ikut cabang)
+            </button>
           </div>
           <div className="mt-2 text-[12px] text-label">Centang baris di tabel untuk memilih, atau terapkan ke semua sekaligus lalu ubah yang berbeda satu per satu.</div>
         </div>

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   KODE_AREA_BAWAAN, TANPA_KODE, petaKodeArea, namaAreaDari, areaAktif,
-  ambangDoi, pitaDoi, ringkasPita, validasiArea, peringatanArea, areaBelumTerdaftar, normalKode, type BarisArea,
+  ambangDoi, pitaDoi, ringkasPita, validasiArea, peringatanArea, kolomTersimpan, areaBelumTerdaftar, normalKode, type BarisArea,
 } from './area-master';
 
 const area = (o: Partial<BarisArea> = {}): BarisArea => ({
@@ -234,4 +234,46 @@ test('area yang ada di data tapi belum terdaftar ikut dilaporkan', () => {
 test('normalKode merapikan spasi & huruf', () => {
   assert.equal(normalKode('  gjsb '), 'GJSB');
   assert.equal(normalKode(null), '');
+});
+
+// ---------------------------------------------------------------------------
+// Penyimpanan: TIDAK BOLEH ADA KOLOM YANG DIJATUHKAN DIAM-DIAM
+// ---------------------------------------------------------------------------
+
+test('kolomTersimpan memuat SETIAP kolom baris, tanpa kecuali', () => {
+  // KEJADIAN NYATA 10 Okt 2026. Kolom lead time & target ATP dipasang pagi
+  // harinya; siangnya user melapor: "seting leadtime pusat sudah di set 1,
+  // kenapa data tabel masih menampilkan 2?" Ternyata angkanya tidak pernah
+  // tersimpan — di database masih null.
+  //
+  // Route PUT menyusun objek untuk Prisma dengan mengetik ulang nama kolomnya
+  // satu per satu. Dua kolom baru lolos validasi, diterima API, lalu dijatuhkan
+  // di langkah terakhir. Layar menampilkan pesan hijau "tersimpan" untuk
+  // perubahan yang tidak terjadi.
+  //
+  // Tes ini membandingkan kolom yang DISIMPAN dengan kolom yang ADA di baris.
+  // Menambah kolom ke BarisArea tanpa menyimpannya kini gagal di sini, bukan
+  // berbulan kemudian saat ada yang sadar angkanya tidak pernah berubah.
+  const lengkap: BarisArea = {
+    code: 'GBJD', name: 'Pusat', isActive: true, sortOrder: 10,
+    doiCritical: 4, doiMin: 6, doiMax: 7,
+    leadTimeDays: 1, atpTarget: 95, startDate: '2026-06-01', note: 'catatan',
+  };
+  const tersimpan = kolomTersimpan(lengkap);
+  const diharapkan = Object.keys(lengkap).filter((k) => k !== 'code').sort();
+  assert.deepEqual(
+    Object.keys(tersimpan).sort(), diharapkan,
+    'Ada kolom BarisArea yang tidak ikut tersimpan — persis bug 10 Okt 2026.',
+  );
+  // Nilainya ikut, bukan cuma kuncinya.
+  assert.equal(tersimpan.leadTimeDays, 1);
+  assert.equal(tersimpan.atpTarget, 95);
+  assert.equal(tersimpan.doiMin, 6);
+  assert.deepEqual(tersimpan.startDate, new Date('2026-06-01T00:00:00.000Z'));
+});
+
+test('kolomTersimpan membuang code dan mengubah tanggal jadi Date', () => {
+  const r = kolomTersimpan(area({ startDate: null }));
+  assert.equal('code' in r, false, 'code adalah kunci baris, bukan kolom yang diperbarui');
+  assert.equal(r.startDate, null, 'tanggal kosong tetap null, bukan Invalid Date');
 });

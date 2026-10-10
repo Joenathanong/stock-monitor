@@ -28,6 +28,7 @@ const LINKS: Item[] = [
   { href: '/stockout', label: 'Analisis Stok Kosong', module: 'Perhitungan', icon: 'empty', group: 'Monitoring' },
   { href: '/simulasi', label: 'Simulasi Target DOI', module: 'Perhitungan', icon: 'target', group: 'Monitoring' },
   { href: '/atp', label: 'ATP Monitoring', module: 'Perhitungan', icon: 'check', group: 'Monitoring' },
+  { href: '/sugest-po', label: 'Sugest PO', module: 'Perhitungan', icon: 'truck', group: 'Monitoring' },
   { href: '/wa', label: 'Poster WhatsApp', module: 'Laporan', icon: 'poster', group: 'Monitoring', blank: true },
   { href: '/transit', label: 'Stok Dalam Perjalanan', module: 'Master Data', icon: 'truck', group: 'Master data' },
   { href: '/sku-master', label: 'Lead Time & SKU', module: 'Master Data', icon: 'clock', group: 'Master data' },

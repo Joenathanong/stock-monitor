@@ -632,6 +632,58 @@ export function susunTurunan(
   };
 }
 
+/** Keadaan satu sel yang dibutuhkan untuk menjelaskan kenapa ia keluar pembagi. */
+export type SelPembagi = {
+  dibagikan: boolean | null;
+  blokir: AlasanBlokir[];
+  dikecualikan: GolonganAtp | null;
+};
+
+/**
+ * Kenapa sebuah baris TIDAK ikut pembagi, per cabang — satu teks pendek.
+ *
+ * KEJADIAN NYATA 12 Okt 2026, dilaporkan user: BDL-HANASUI-0000000489 tertulis
+ * "Ya" di kelima cabang pada berkas unduhan, padahal di layar ia dicoret karena
+ * KEDUA komponennya phase out. Angka di lembar Ringkasan sudah benar (ia masuk
+ * takDisebarTurunan), jadi tidak ada yang gagal — yang hilang cuma sebabnya,
+ * dan siapa pun yang membaca lembar Sebaran akan menyimpulkan bundling itu ikut
+ * dihitung. Nilai kolom cabang TIDAK BOLEH diubah (importer membacanya kembali
+ * sebagai keputusan), jadi keterangannya harus hidup di kolomnya sendiri.
+ *
+ * Area dikelompokkan menurut sebab yang SAMA, bukan ditulis satu per satu:
+ * hampir semua kasus nyata sebabnya identik di kelima cabang, dan lima
+ * pengulangan membuat kolomnya tidak terbaca.
+ *
+ * Sebab golongan dibedakan dari keputusan orang, karena artinya berbeda bagi
+ * pembacanya: yang bergolongan akan hidup kembali sendiri begitu SKU-nya keluar
+ * dari daftar, yang "tidak disebar" menunggu orang.
+ */
+export function teksKeluarPembagi(
+  area: Record<string, SelPembagi | undefined>,
+  areas: string[],
+): string {
+  const per = new Map<string, string[]>();
+  for (const a of areas) {
+    const x = area[a];
+    if (!x) continue;
+    const bagian: string[] = [];
+    if (x.dikecualikan) {
+      bagian.push(`${LABEL_GOLONGAN[x.dikecualikan]} — SKU ini sendiri`);
+    } else if (x.dibagikan === true && x.blokir.length) {
+      for (const sb of [...new Set(x.blokir.map((b) => b.sebab))]) {
+        const nama = x.blokir.filter((b) => b.sebab === sb).map((b) => b.sku).join(', ');
+        bagian.push(sb === 'TIDAK_DISEBAR'
+          ? `komponen tidak disebar: ${nama}`
+          : `komponen ${LABEL_GOLONGAN[sb].toLowerCase()}: ${nama}`);
+      }
+    }
+    if (!bagian.length) continue;
+    const kunci = bagian.join(' + ');
+    per.set(kunci, [...(per.get(kunci) ?? []), a]);
+  }
+  return [...per.entries()].map(([sebab, ar]) => `${ar.join(',')} — ${sebab}`).join(' ; ');
+}
+
 /** Satu SKU yang belum punya keputusan sebaran sama sekali. */
 export type SkuBelumDiset = {
   sku: string;

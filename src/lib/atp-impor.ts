@@ -60,10 +60,18 @@ export type HasilImpor = {
 };
 
 /** Nama kolom dinormalkan sama seperti di xlsx.ts, supaya "Pusat " cocok. */
-const normal = (s: string) => s.toLowerCase().replace(/[\s_\-.]/g, '');
+export const normalKolom = (s: string) => s.toLowerCase().replace(/[\s_\-.]/g, '');
+const normal = normalKolom;
 
 /** Kolom keterangan di lembar unduhan — bukan keputusan, bukan kolom asing. */
-const KOLOM_KETERANGAN = new Set(['sku', 'nama', 'brand', 'kategori', 'turunan', 'phaseout']);
+export const KOLOM_KETERANGAN = new Set([
+  'sku', 'nama', 'brand', 'kategori', 'turunan', 'phaseout',
+  // Ditambahkan 12 Okt 2026 bersama kolomnya di lembar unduhan. Kalau lupa
+  // ditambahkan, unggah ulang berkas kita SENDIRI akan melaporkannya sebagai
+  // "kolom asing" — peringatan yang artinya "berkasnya salah", untuk berkas
+  // yang justru kita hasilkan. Dijaga `golongan-atp.test.ts`.
+  'takdihitungatp', 'keluarpembagi',
+]);
 
 /**
  * Kolom stok ("Stok Pusat", "Stok total") — dibaca manusia, diabaikan mesin.
@@ -73,7 +81,7 @@ const KOLOM_KETERANGAN = new Set(['sku', 'nama', 'brand', 'kategori', 'turunan',
  * jadi cabang yang namanya kebetulan diawali "Stok" tetap terbaca sebagai
  * cabang — penjaga ini hanya mengenai kolom yang bukan cabang mana pun.
  */
-const kolomStok = (k: string) => /^stok/.test(k);
+export const kolomStok = (k: string) => /^stok/.test(k);
 
 /**
  * Susun daftar perubahan dari baris Excel.

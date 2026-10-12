@@ -1,6 +1,6 @@
 import { writeWorkbook, type Lembar } from '@/lib/xlsx';
 import { muatAtp } from '@/lib/atp-store';
-import { persenTeks, AMBANG_ATP_BAWAAN, GOLONGAN_ATP, LABEL_GOLONGAN, type SebabTolak } from '@/lib/atp';
+import { persenTeks, AMBANG_ATP_BAWAAN, GOLONGAN_ATP, LABEL_GOLONGAN, teksKeluarPembagi, type SebabTolak } from '@/lib/atp';
 import { toDateKeyUtc } from '@/lib/dates';
 
 export const dynamic = 'force-dynamic';
@@ -132,8 +132,13 @@ export async function GET(req: Request) {
         ...filterTeks,
         'Kosong = BELUM DIPUTUSKAN (bukan "tidak"). Keduanya di luar pembagi, '
           + 'tapi hanya yang kosong masih menunggu orang memutuskan.',
-        'Kolom "Stok <cabang>", "Stok total", "Turunan" dan "Phase out" hanya keterangan — '
-          + 'isinya diabaikan saat berkas ini diunggah lagi. Yang dibaca hanya kolom bernama cabang.',
+        'Kolom "Stok <cabang>", "Stok total", "Turunan", "Phase out", "Tak dihitung ATP" dan '
+          + '"Keluar pembagi" hanya keterangan — isinya diabaikan saat berkas ini diunggah lagi. '
+          + 'Yang dibaca hanya kolom bernama cabang.',
+        'PENTING: kolom cabang adalah CENTANG ANDA, bukan jawaban "ikut dihitung atau tidak". '
+          + 'Sebuah baris bisa tertulis "Ya" tapi tetap di luar pembagi — sebabnya ada di kolom '
+          + '"Keluar pembagi" (di layar baris itu dicoret dengan tanda stop). Keduanya memang '
+          + 'berbeda dan harus berbeda: centangnya tidak pernah diubah oleh aturan.',
       ],
       columns: [
         // Urutan disamakan dengan layar (permintaan user 9 Okt 2026):
@@ -155,6 +160,17 @@ export async function GET(req: Request) {
         { header: 'Nama', key: 'name', width: 46 },
         { header: 'Kategori', key: 'kat', width: 11 },
         { header: 'Brand', key: 'brand', width: 12 },
+        // Kolom TERAKHIR dan sengaja lebar: tanpa ini berkas ini kehilangan
+        // satu-satunya hal yang membedakan "dicentang Ya" dari "ikut dihitung".
+        //
+        // KEJADIAN NYATA 12 Okt 2026, dilaporkan user: BDL-HANASUI-0000000489
+        // tertulis "Ya" di seluruh cabang pada berkas unduhan, padahal di layar
+        // ia dicoret dengan tanda stop karena KEDUA komponennya phase out. Angka
+        // di lembar Ringkasan sudah benar (ia masuk takDisebarTurunan), tapi
+        // siapa pun yang membaca lembar Sebaran akan menyimpulkan bundling itu
+        // ikut pembagi. Nilai kolom cabangnya tidak boleh diubah — importer
+        // membacanya kembali — jadi keterangannya ditaruh di kolomnya sendiri.
+        { header: 'Keluar pembagi', key: 'keluar', width: 72 },
       ],
       rows: baris.map((s) => {
         const r: Record<string, unknown> = {
@@ -165,6 +181,7 @@ export async function GET(req: Request) {
               ? `LEWAT ${s.phaseOut.lewatHari} hari (${s.phaseOut.dispositionLabel})`
               : s.phaseOut.dispositionLabel + (s.phaseOut.targetOutDate ? ` s/d ${s.phaseOut.targetOutDate}` : ''),
           golongan: s.golongan ? LABEL_GOLONGAN[s.golongan] : '',
+          keluar: teksKeluarPembagi(s.area, data.areas),
           name: s.name,
           kat: s.kategori,
           brand: s.brand || '(tanpa brand)',

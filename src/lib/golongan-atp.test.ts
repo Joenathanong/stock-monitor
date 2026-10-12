@@ -4,11 +4,12 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   adalahClearance, golonganSku, golonganDikecualikan, bundlingTerblokir, hitungAtp,
-  atpKeseluruhan, skuBelumDiset, kunciSebaran, KECUALI_BAWAAN,
+  atpKeseluruhan, skuBelumDiset, kunciSebaran, KECUALI_BAWAAN, teksKeluarPembagi,
   type BarisStokAtp, type Sebaran, type PetaBundle, type SetelanKecuali, type BahanGolongan,
   type OpsiGolongan, type HasilArea,
 } from './atp';
 import { setelanArea, type BarisArea } from './area-master';
+import { KOLOM_KETERANGAN, kolomStok, normalKolom } from './atp-impor';
 
 /**
  * Penjaga aturan golongan ATP — Phase Out / Clearance / Gimmick (12 Okt 2026).
@@ -375,4 +376,76 @@ test('setiap pemanggil aturan ATP menyalurkan setelan golongan', () => {
     }
   }
   assert.deepEqual(salah, [], `pemanggilan tanpa setelan golongan:\n${salah.join('\n')}`);
+});
+
+test('setiap kolom keterangan di lembar unduhan dikenali importer', () => {
+  // KEJADIAN NYATA: kolom "Tak dihitung ATP" dan "Keluar pembagi" ditambahkan ke
+  // lembar Sebaran, dan importer belum mengenalnya. Akibatnya mengunggah ulang
+  // berkas yang DIHASILKAN APLIKASI SENDIRI akan melaporkan "kolom asing" —
+  // peringatan yang berarti "berkas Anda salah", untuk berkas yang kita buat.
+  //
+  // Tesnya membaca HEADER literal dari route export, bukan daftar yang diketik
+  // ulang di sini: daftar kedua akan ikut ketinggalan sama seperti yang pertama.
+  const kode = readFileSync(join('src', 'app', 'api', 'atp', 'export', 'route.ts'), 'utf8');
+  const lembarSebaran = kode.slice(kode.indexOf("nama: 'Sebaran'"), kode.indexOf("nama: 'Stok'"));
+  const header = [...lembarSebaran.matchAll(/header: '([^']+)'/g)].map((m) => m[1]);
+  assert.ok(header.length >= 8, `header lembar Sebaran tidak terbaca: ${header.length}`);
+
+  // Nama cabang dinamis (`header: a`) tidak muncul sebagai teks, jadi seluruh
+  // header literal di sini memang HARUS kolom keterangan.
+  const asing = header.filter((h) => {
+    const k = normalKolom(h);
+    return !KOLOM_KETERANGAN.has(k) && !kolomStok(k);
+  });
+  assert.deepEqual(asing, [], `kolom ini akan dilaporkan sebagai "kolom asing" saat unggah ulang:\n${asing.join('\n')}`);
+});
+
+// --- kolom "Keluar pembagi" di berkas unduhan --------------------------------
+
+test('kasus nyata BDL-HANASUI-0000000489: sebabnya terbaca di berkas', () => {
+  // Bentuk persis seperti data produksi 12 Okt 2026: dicentang "Ya" di kelima
+  // cabang, kedua komponennya phase out, jadi keluar pembagi di kelimanya.
+  const blokir = [
+    { sku: 'CUSHION-SOULMATTE-FAIRY-PINKISH-5', sebab: 'PHASE_OUT' as const },
+    { sku: 'SETTINGPOWDER-TRANSLUCENT-4', sebab: 'PHASE_OUT' as const },
+  ];
+  const areas = ['Makassar', 'Medan', 'Pusat', 'Surabaya', 'Yogyakarta'];
+  const area = Object.fromEntries(areas.map((a) => [a, { dibagikan: true, blokir, dikecualikan: null }]));
+  assert.equal(
+    teksKeluarPembagi(area, areas),
+    'Makassar,Medan,Pusat,Surabaya,Yogyakarta — komponen phase out: '
+      + 'CUSHION-SOULMATTE-FAIRY-PINKISH-5, SETTINGPOWDER-TRANSLUCENT-4',
+  );
+});
+
+test('baris yang memang ikut pembagi menghasilkan kolom KOSONG', () => {
+  // Kalau terisi untuk baris normal, kolomnya jadi derau dan berhenti dibaca.
+  const areas = ['Pusat'];
+  assert.equal(teksKeluarPembagi({ Pusat: { dibagikan: true, blokir: [], dikecualikan: null } }, areas), '');
+  assert.equal(teksKeluarPembagi({ Pusat: { dibagikan: false, blokir: [], dikecualikan: null } }, areas), '');
+  assert.equal(teksKeluarPembagi({ Pusat: { dibagikan: null, blokir: [], dikecualikan: null } }, areas), '');
+});
+
+test('sebab berbeda antar cabang tidak digabung jadi satu', () => {
+  const areas = ['Pusat', 'Medan'];
+  const teks = teksKeluarPembagi({
+    Pusat: { dibagikan: true, blokir: [], dikecualikan: 'GIMMICK' },
+    Medan: { dibagikan: true, blokir: [{ sku: 'KOMP-A', sebab: 'TIDAK_DISEBAR' }], dikecualikan: null },
+  }, areas);
+  assert.equal(teks, 'Pusat — Gimmick — SKU ini sendiri ; Medan — komponen tidak disebar: KOMP-A');
+});
+
+test('golongan SKU sendiri menang atas daftar blokir komponen', () => {
+  // Kalau komponennya juga disebut, kolomnya menyalahkan komponen untuk baris
+  // yang sebenarnya keluar karena dirinya sendiri — dan orang akan mengejar
+  // komponen yang tidak perlu diapa-apakan.
+  const areas = ['Pusat'];
+  assert.equal(
+    teksKeluarPembagi({ Pusat: {
+      dibagikan: true,
+      blokir: [{ sku: 'KOMP-A', sebab: 'TIDAK_DISEBAR' }],
+      dikecualikan: 'CLEARANCE',
+    } }, areas),
+    'Pusat — Clearance (CS-) — SKU ini sendiri',
+  );
 });

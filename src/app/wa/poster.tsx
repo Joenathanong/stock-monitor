@@ -231,7 +231,19 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
       ? (keduanya ? [`ATP ${pAtp}`] : [])
       : keduanya
         ? [`ATP ${pAtp} · ${tTargetAtp}`, `ATP ${pAtp} / ${Math.round(atpTarget as number)}%`, `ATP ${pAtp}`]
-        : [tTargetAtp];
+        // DUA bentuk, bukan satu — ditambahkan 12 Okt 2026 bersama ukuran teks 16.
+        //
+        // Pada ukuran itu, kartu 5 cabang (262px) pas untuk "Target 45h (+)" +
+        // "Target 95% (-)" (258px) tapi TIDAK kalau ambangnya tiga digit:
+        // "Target 999h (+)" menyisakan 120px sementara bentuk panjangnya 125px.
+        // Tanpa bentuk kedua, yang dipotong adalah target DOI di kiri — dan
+        // "Target 99…" membalik artinya, persis jenis kerusakan yang dijaga
+        // `wa-target.test.ts`.
+        //
+        // Yang dipendekkan KATA-nya, bukan angka atau tandanya: "Tgt 95% (-)"
+        // masih menyebut berapa targetnya dan masih membawa penanda arah untuk
+        // yang tidak bisa membedakan warnanya.
+        : [tTargetAtp, tTargetAtp.replace(/^Target /, 'Tgt ')];
     const kanan = pilihKanan(kandidatKanan, isi, tDoi);
 
     if (a.ambang) {

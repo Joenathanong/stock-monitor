@@ -109,9 +109,12 @@ test('tanpa angka atau tanpa target, nilainya null — bukan "baik"', () => {
 
 test('ejaan target memakai ambang apa adanya, plus tandanya', () => {
   const pusat = { kritis: 4, min: 6, max: 7 };
-  assert.equal(teksTarget(7), 'Target 7 hari');
-  assert.equal(teksTarget(7, nilaiDoi(9, pusat)), 'Target 7 hari (+)');
-  assert.equal(teksTarget(7, nilaiDoi(5, pusat)), 'Target 7 hari (-)');
+  // Satuan "h", bukan "hari": dipendekkan 12 Okt 2026 untuk membeli ruang bagi
+  // ukuran teks 16. Ejaannya dikunci di sini karena ia yang menentukan lebar,
+  // dan lebar itu yang menentukan apakah dua teks di baris ini bertumpuk.
+  assert.equal(teksTarget(7), 'Target 7h');
+  assert.equal(teksTarget(7, nilaiDoi(9, pusat)), 'Target 7h (+)');
+  assert.equal(teksTarget(7, nilaiDoi(5, pusat)), 'Target 7h (-)');
   assert.equal(teksTargetAtp(90), 'Target 90%');
   assert.equal(teksTargetAtp(90, nilaiAtp(72, 90)), 'Target 90% (-)');
   assert.equal(teksTargetAtp(90, nilaiAtp(95, 90)), 'Target 90% (+)');
@@ -133,7 +136,11 @@ test('di 5 cabang, target DOI TIDAK pernah terpotong', () => {
   // "Target 4…" membalik artinya, persis seperti ambang "<=14D" yang terpotong
   // jadi "<=1D". Diuji sampai 999 hari supaya ambang yang digeser jauh pun aman.
   const isi = isiUntuk(5);
-  for (const kandidat of [[], ['Target 90% (-)'], KANDIDAT_KANAN]) {
+  // Daftar kandidat disamakan dengan poster.tsx, TERMASUK bentuk pendeknya:
+  // sejak ukuran teks 16, bentuk pendek itulah yang menjaga target DOI tidak
+  // terpotong saat ambangnya tiga digit. Menguji hanya bentuk panjang berarti
+  // menguji poster yang tidak pernah digambar.
+  for (const kandidat of [[], ['Target 90% (-)', 'Tgt 90% (-)'], KANDIDAT_KANAN]) {
     for (const max of [7, 20, 21, 35, 45, 99, 365, 999]) {
       for (const arah of ['', ' (+)', ' (-)'] as const) {
         const teks = teksTarget(max, { tanda: arah, baik: true });
@@ -198,6 +205,6 @@ test('target DOI dan teks kanan tidak pernah bertumpuk, sampai 10 cabang', () =>
 test('tanpa teks kanan, seluruh lebar kartu milik target DOI', () => {
   const isi = isiUntuk(5);
   assert.equal(ruangTarget(isi, '', SIZE), isi);
-  assert.equal(pilihKanan([], isi, 'Target 7 hari', SIZE), '');
+  assert.equal(pilihKanan([], isi, 'Target 7h', SIZE), '');
   assert.ok(ruangTarget(isi, KANDIDAT_KANAN[0], SIZE) < isi);
 });

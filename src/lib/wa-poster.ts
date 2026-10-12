@@ -562,14 +562,25 @@ export function nilaiAtp(
 export const warnaTarget = (baik: boolean): string => (baik ? WARNA.amanFg : WARNA.kritisFg);
 
 /**
- * Ukuran teks baris target. Dinaikkan 11 -> 13 pada 12 Okt 2026 atas permintaan
- * user ("perbesar sedikit text target ATP dan target DOI").
+ * Ukuran teks baris target: 11 -> 13 (12 Okt 2026) -> 16 (permintaan kedua user
+ * hari yang sama, "besarkan text target").
  *
- * Bukan angka bebas: tes tata letak memakai ukuran ini juga, jadi menaikkannya
- * lagi akan gagal di tes kalau teksnya tidak muat lagi berdampingan — bukan
- * tergambar bertumpuk di poster yang sudah terkirim ke grup.
+ * 16 ADALAH BATASNYA, dan batas itu diukur bukan ditebak. Isi kartu 5 cabang
+ * 262px, dan baris ini memuat DUA teks berdampingan: target DOI di kiri, target
+ * ATP di kanan. Dengan kata "hari" ditulis penuh, kasus terburuk
+ * ("Target 45 hari (+)" milik Makassar) sudah 131px pada ukuran 13 dan
+ * 151px pada 15 — di 15 sisi kirinya mulai terpotong elipsis. Satuannya
+ * dipendekkan jadi "h" supaya ukurannya bisa naik; dengan itu 16 masih muat
+ * utuh, 17 tidak.
+ *
+ * Kalau suatu saat ini dinaikkan lagi, yang harus dibayar adalah kata
+ * "Target" — dan itu keputusan yang bukan milik kode: di poster yang dibaca
+ * orang lain di grup WhatsApp, "Tgt 45h" menghemat 30px dengan menukar
+ * kejelasan. `wa-target.test.ts` mengukur sampai 10 cabang, jadi menaikkannya
+ * tanpa memendekkan teks akan GAGAL DI TES, bukan tergambar bertumpuk di poster
+ * yang sudah terkirim.
  */
-export const UKURAN_TARGET = 13;
+export const UKURAN_TARGET = 16;
 
 /**
  * Teks target DOI sebuah area — SATU ejaan, dipakai poster dan tesnya.
@@ -583,7 +594,9 @@ export const UKURAN_TARGET = 13;
  */
 export function teksTarget(max: number | null | undefined, n: NilaiTarget | null = null): string {
   if (max === null || max === undefined || !Number.isFinite(max)) return '';
-  return `Target ${max} hari${n ? n.tanda : ''}`;
+  // "h", bukan "hari" — menghemat ±30px, dan itulah yang membuat ukuran 16 muat
+  // berdampingan dengan target ATP di kartu 5 cabang. Lihat `UKURAN_TARGET`.
+  return `Target ${max}h${n ? n.tanda : ''}`;
 }
 
 /** Teks target ATP. Persen bulat: targetnya memang diisi bulat di Pengaturan. */
@@ -633,7 +646,10 @@ export function pilihKanan(
   // yang berdiri tepat di atasnya, sedangkan target ATP punya angkanya sendiri
   // di sisi lain kartu.
   const sisaTerpendek = isi - lebarTeksKira(kandidat[kandidat.length - 1], size) - JEDA_LABEL;
-  if (sisaTerpendek < lebarTeksKira('Target 7 h', size)) return '';
+  // Tolok ukur "sisi kiri masih berarti": satu target terpendek yang utuh.
+  // Ejaannya disamakan dengan `teksTarget` supaya tolok ukurnya tidak mengukur
+  // bentuk teks yang tidak pernah digambar.
+  if (sisaTerpendek < lebarTeksKira('Target 7h', size)) return '';
   return kandidat[kandidat.length - 1];
 }
 

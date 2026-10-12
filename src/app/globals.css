@@ -389,6 +389,33 @@ body {
 .grid-grip { flex: none; cursor: grab; color: var(--ink-muted); font-size: 11px; line-height: 1; user-select: none; }
 .grid-grip:active { cursor: grabbing; }
 .dgrid th:hover .grid-grip { color: var(--ink-label); }
+
+/* ---- JUDUL KOLOM SELALU MENANG ATAS IKONNYA (12 Okt 2026) ----
+   Dilaporkan user: "semua judul tabel saat ini tidak terbaca karena ter-hide".
+   Sebabnya aritmetika, bukan gaya. Kepala kolom adalah flex row berisi gagang
+   geser (±10px) + label + ikon urut (±11px) + tombol filter (18px), dengan
+   jarak 4px dan padding 8px kiri-kanan. Perkakasnya saja sudah ±55px —
+   sementara kolom sempit seperti "ABC" (60px) cuma punya 44px isi. Labelnya
+   dapat jatah 0px, lalu `text-overflow: ellipsis` menyembunyikannya seluruhnya.
+   Kolomnya tampak tak berjudul, dan yang kelihatan cuma deretan ikon.
+   Semakin rapi kolomnya diatur sempit, semakin banyak judul yang hilang.
+   Jadi perkakas yang mengalah, bukan judulnya: saat kursor tidak di kepala
+   kolom, gagang dan tombol filter disembunyikan dan seluruh lebar jadi milik
+   label. Ikon urut & filter yang SEDANG AKTIF tetap tampil — kalau ikut
+   disembunyikan, kolom yang terfilter terlihat sama persis dengan yang tidak,
+   dan orang membaca tabel tersaring sebagai tabel penuh.
+   Hanya untuk tetikus: di layar sentuh tidak ada hover, dan di bawah 768px
+   tabel ini berubah jadi kartu sehingga kepala kolomnya tidak dipakai. */
+@media (hover: hover) and (pointer: fine) {
+  .dgrid th .grid-grip,
+  .dgrid th .grid-filter-btn,
+  .dgrid th .grid-sort { display: none; }
+  .dgrid th:hover .grid-grip { display: inline; }
+  .dgrid th:hover .grid-filter-btn,
+  .dgrid th .grid-filter-btn.is-on { display: inline-flex; }
+  .dgrid th:hover .grid-sort,
+  .dgrid th .grid-sort.is-on { display: inline; }
+}
 /* Kolom yang sedang ditarik diredupkan; yang akan ditempati diberi garis
    sisipan di tepi KIRI — itu posisi tempat kolomnya akan jatuh. */
 .dgrid th.is-drag { opacity: .45; }

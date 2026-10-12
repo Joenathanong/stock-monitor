@@ -444,7 +444,51 @@ export async function runCompute(
       waktu.step(`${labelArea(area)} ${out.rows.length} SKU`);
     }
 
-    const catatan = `${withStockSync ? `stok ${stockRows} baris` : 'tanpa tarik stok'} · ${daftarArea.length} area · ${waktu}`;
+    /*
+      POTRET ATP HARIAN — direkam di sini, SESUDAH snapshot DOI tertulis.
+
+      Pindah ke sini 12 Okt 2026 dari `/api/cron/compute`. Dua alasan, dan
+      keduanya dilaporkan user:
+
+      1. "Kenapa tren ATP selalu 'Riwayat ATP belum cukup'?" Perekamannya dulu
+         hanya ada di route cron, jadi menekan tombol Hitung ulang berapa kali
+         pun TIDAK pernah menambah satu titik pun ke grafiknya. Riwayatnya
+         bergantung pada satu cron harian, dan kalau cron itu gagal sekali,
+         harinya hilang permanen — `atp_daily` tidak bisa dibuat ulang besok.
+      2. Hasilnya dulu cuma dikembalikan di badan respons HTTP, yang tidak
+         dibaca siapa pun. Jadi kalau perekamannya gagal, tidak ada satu pun
+         layar yang menunjukkannya — dan pertanyaan "kenapa grafiknya kosong"
+         tidak bisa dijawab tanpa membaca kode. Sekarang hasilnya masuk
+         `sync_log` sebagai baris ATP dan terlihat di /riwayat.
+
+      Dibungkus try/catch DAN dibatasi anggaran: saat baris ini berjalan,
+      snapshot DOI sudah aman tertulis. Kegagalan atau kehabisan waktu di sini
+      tidak boleh merugikan DOI — yang hilang hanya satu titik di grafik tren.
+    */
+    let catatanAtp = '';
+    if (anggaran.left() < 8_000) {
+      catatanAtp = 'ATP dilewati — waktu habis';
+    } else {
+      const logAtp = await startLog('ATP', trigger);
+      try {
+        const { muatAtp, rekamAtpHarian } = await import('./atp-store');
+        const { AMBANG_ATP_BAWAAN } = await import('./atp');
+        const { hasil: perArea, siap } = await muatAtp();
+        if (!siap) {
+          catatanAtp = 'ATP dilewati — tabel atp_share belum ada';
+          await finishLog(logAtp.id, 'ok', 0, catatanAtp);
+        } else {
+          const n = await rekamAtpHarian(perArea, AMBANG_ATP_BAWAAN);
+          catatanAtp = `ATP ${n} area direkam`;
+          await finishLog(logAtp.id, 'ok', n, catatanAtp);
+        }
+      } catch (e) {
+        catatanAtp = `ATP GAGAL: ${e instanceof Error ? e.message : 'tidak diketahui'}`;
+        await finishLog(logAtp.id, 'error', 0, catatanAtp);
+      }
+    }
+
+    const catatan = `${withStockSync ? `stok ${stockRows} baris` : 'tanpa tarik stok'} · ${daftarArea.length} area · ${waktu} · ${catatanAtp}`;
     await finishLog(log.id, 'ok', totalSku, catatan);
     return {
       ok: true, today: todayKey(), skuCount: totalSku, stockRows, areas: daftarArea,

@@ -52,7 +52,7 @@ export async function releaseLock(name: string, owner: string) {
 
 export const lockOwner = () => `${process.env.VERCEL ? 'vercel' : 'local'}:${process.pid}:${Date.now()}`;
 
-export async function startLog(kind: 'STOCK' | 'SALES' | 'COMPUTE' | 'BUNDLE', trigger: string) {
+export async function startLog(kind: 'STOCK' | 'SALES' | 'COMPUTE' | 'BUNDLE' | 'ATP', trigger: string) {
   return prisma.syncLog.create({ data: { kind, trigger, status: 'running' } });
 }
 

@@ -490,153 +490,154 @@ export function doiPlusSit(
 export const JEDA_LABEL = 8;
 
 /**
- * Posisi sebuah angka TERHADAP targetnya. Dipakai target DOI dan target ATP.
+ * Penilaian sebuah angka terhadap targetnya — DUA KANAL YANG TERPISAH.
  *
- * `null` berarti belum bisa dinilai (angkanya tidak ada, atau targetnya tidak
- * diatur) — BUKAN "aman". Menandainya aman akan menyatakan sesuatu yang belum
- * diketahui.
+ * `tanda` menyatakan POSISI (di atas / di bawah target), `baik` menyatakan
+ * APAKAH ITU BAGUS. Dipisah karena dua ukuran di kartu ini berlawanan arah:
+ *
+ *   DOI — target adalah batas ATAS. Makin kecil makin bagus (uang tidak
+ *         mengendap), jadi di bawah target = baik.
+ *   ATP — target adalah batas BAWAH. Makin besar makin bagus (makin banyak SKU
+ *         bisa dijanjikan), jadi di atas target = baik.
+ *
+ * Kalau keduanya dipadatkan jadi satu nilai, tanda yang sama akan berarti hal
+ * berbeda di dua angka yang bersebelahan di kartu yang sama — dan pembaca
+ * poster tidak punya cara menebak yang mana. Dipisah begini, tiap kanal cuma
+ * punya satu arti: tanda selalu posisi, warna selalu baik-atau-buruk.
  */
-export type ArahTarget = 'aman' | 'lewat' | 'kurang';
+export type NilaiTarget = {
+  /** '(+)' di atas target, '(-)' di bawah, '' tepat di target. */
+  tanda: string;
+  /** Apakah posisi itu memenuhi targetnya. */
+  baik: boolean;
+};
+
+const tandaDari = (nilai: number, target: number): string =>
+  (nilai > target ? ' (+)' : nilai < target ? ' (-)' : '');
 
 /**
- * DOI aktual terhadap pita AMAN area itu.
+ * DOI aktual terhadap batas AMAN cabang.
  *
- * Dua sisi, bukan satu. User meminta "merah jika aktual lebih dari target", dan
- * itu benar — tapi kalau HANYA sisi itu yang ditandai, kartu ber-DOI 2 hari
- * (kritis, berisiko kehabisan) akan menampilkan "Target 7 hari" dengan warna
- * tenang yang sama seperti kartu yang memang sehat. Sisi bawah justru yang
- * lebih mahal akibatnya, jadi ia ikut ditandai.
+ * KEPUTUSAN USER 12 Okt 2026: "target DOI itu adalah max (semakin kecil semakin
+ * bagus), jadi seharusnya jika IEG tidak sampai 7, targetnya menjadi hijau.
+ * Ini berlaku di semua cabang."
  *
- * Batasnya SENGAJA disalin dari `pitaDoi` di area-master.ts, bukan diimpor:
- * area-master memuat prisma, dan berkas ini ikut terbundel ke browser lewat
- * poster.tsx. Supaya penyalinan itu tidak bisa diam-diam melenceng, ada tes
- * yang membandingkan keduanya nilai demi nilai (wa-target.test.ts).
+ * Sebelumnya DOI di bawah pita aman juga dimerahkan, dengan alasan kehabisan
+ * stok lebih mahal daripada kelebihan. Alasan itu tidak salah, tapi tempatnya
+ * bukan di baris ini: risiko kehabisan sudah dibawa lencana "N kritis" di
+ * kepala kartu dan pita Kritis/Low tepat di bawahnya. Baris target menjawab
+ * pertanyaan yang BERBEDA — "apakah kita di dalam plafon persediaan?" — dan
+ * memberi dua jawaban berbeda pada satu baris membuat keduanya kabur.
  */
-export function arahDoi(
+export function nilaiDoi(
   doi: number | null | undefined,
   ambang: AmbangDoi | null | undefined,
-): ArahTarget | null {
+): NilaiTarget | null {
   if (doi === null || doi === undefined || !Number.isFinite(doi) || !ambang) return null;
-  if (doi > ambang.max) return 'lewat';
-  if (doi <= ambang.min) return 'kurang';
-  return 'aman';
+  return { tanda: tandaDari(doi, ambang.max), baik: doi <= ambang.max };
 }
 
 /**
- * ATP aktual terhadap target ketersediaan.
+ * ATP aktual terhadap target ketersediaan — arahnya KEBALIKAN dari DOI.
  *
- * Hanya punya sisi bawah: ATP di ATAS target bukan masalah, jadi tidak ada
- * 'lewat'. Ini kebalikan DOI, dan memang begitu sifatnya — stok berlebih itu
- * uang mengendap, ketersediaan berlebih itu tidak ada.
+ * Target 0 atau kosong berarti belum diatur, bukan "semua lulus": `!(target>0)`
+ * menangkap null, undefined, NaN dan 0 sekaligus.
  */
-export function arahAtp(
+export function nilaiAtp(
   persen: number | null | undefined,
   target: number | null | undefined,
-): ArahTarget | null {
+): NilaiTarget | null {
   if (persen === null || persen === undefined || !Number.isFinite(persen)) return null;
-  // `!(target > 0)` menangkap null, undefined, NaN DAN 0 sekaligus. Nol penting:
-  // itu nilai yang muncul kalau setelannya belum pernah diisi, dan "ATP >= 0%"
-  // akan meluluskan SEMUA kartu diam-diam — kebalikan dari maksud setelan ini.
   if (target === null || target === undefined || !(Number(target) > 0)) return null;
-  return persen < target ? 'kurang' : 'aman';
+  return { tanda: tandaDari(persen, Number(target)), baik: persen >= Number(target) };
 }
 
 /**
- * Warna teks target. MERAH = di luar target, apa pun arahnya.
+ * Warna teks target: HIJAU kalau targetnya terpenuhi, MERAH kalau tidak.
  *
- * Satu warna untuk satu arti. Memberi merah pada 'lewat' dan oranye pada
- * 'kurang' akan terbaca seolah kekurangan stok lebih ringan daripada
- * kelebihan — padahal kebalikannya.
+ * Arahnya tidak ditentukan di sini — itu urusan `nilaiDoi`/`nilaiAtp`, yang
+ * tahu ukurannya masing-masing. Fungsi ini sengaja cuma tahu "baik atau tidak",
+ * supaya tidak ada tempat kedua yang ikut memutuskan arah.
  */
-export const WARNA_TARGET: Record<ArahTarget, string> = {
-  aman: WARNA.tintaLabel,
-  lewat: WARNA.kritisFg,
-  kurang: WARNA.kritisFg,
-};
+export const warnaTarget = (baik: boolean): string => (baik ? WARNA.amanFg : WARNA.kritisFg);
 
 /**
- * Tanda arah — supaya 'lewat' dan 'kurang' tidak hanya dibedakan oleh WARNA.
+ * Ukuran teks baris target. Dinaikkan 11 -> 13 pada 12 Okt 2026 atas permintaan
+ * user ("perbesar sedikit text target ATP dan target DOI").
  *
- * Poster ini dikirim ke grup WhatsApp dan sering diteruskan sebagai gambar,
- * dicetak, atau dilihat orang yang tidak membedakan merah-hijau. Warna sendirian
- * tidak boleh memikul arti (WCAG 2.2 §1.4.1), dan di sini ia memikul arti yang
- * BERLAWANAN di dua sisi — tanpa tanda ini, dua keadaan yang menuntut tindakan
- * berlawanan terlihat persis sama.
- *
- * Dipakai "+/-" ASCII, bukan segitiga Unicode: poster diserialkan jadi SVG lalu
- * dirender ke JPG oleh bot, dan glyph di luar Latin dasar bergantung pada font
- * yang kebetulan ada di mesin perender. Yang hilang akan jadi kotak tofu di
- * gambar yang sudah terkirim ke grup.
+ * Bukan angka bebas: tes tata letak memakai ukuran ini juga, jadi menaikkannya
+ * lagi akan gagal di tes kalau teksnya tidak muat lagi berdampingan — bukan
+ * tergambar bertumpuk di poster yang sudah terkirim ke grup.
  */
-export const TANDA_TARGET: Record<ArahTarget, string> = {
-  aman: '',
-  lewat: ' (+)',
-  kurang: ' (-)',
-};
+export const UKURAN_TARGET = 13;
 
 /**
  * Teks target DOI sebuah area — SATU ejaan, dipakai poster dan tesnya.
  *
- * `max` adalah "Aman ≤ (hari)" di Pengaturan > Cabang/Area: batas atas pita
+ * `max` adalah "Aman <= (hari)" di Pengaturan > Cabang/Area: batas atas pita
  * AMAN, dan sekaligus batas yang diisi Sugest PO ("PO diisi sampai sini").
- * Itulah yang dimaksud "Target DOI" di aplikasi ini — label global di
- * Pengaturan pun menyebutnya "Target DOI maksimum (hari)".
  *
  * Kosong kalau ambangnya tidak ada: lebih baik tidak menulis apa-apa daripada
- * menulis "Target — hari", yang terbaca seperti ada nilai yang hilang padahal
+ * menulis "Target - hari", yang terbaca seperti ada nilai yang hilang padahal
  * area itu memang memakai ambang global.
  */
-export function teksTarget(max: number | null | undefined, arah: ArahTarget | null = null): string {
+export function teksTarget(max: number | null | undefined, n: NilaiTarget | null = null): string {
   if (max === null || max === undefined || !Number.isFinite(max)) return '';
-  return `Target ${max} hari${arah ? TANDA_TARGET[arah] : ''}`;
+  return `Target ${max} hari${n ? n.tanda : ''}`;
 }
 
 /** Teks target ATP. Persen bulat: targetnya memang diisi bulat di Pengaturan. */
-export function teksTargetAtp(target: number | null | undefined, arah: ArahTarget | null = null): string {
+export function teksTargetAtp(target: number | null | undefined, n: NilaiTarget | null = null): string {
   if (target === null || target === undefined || !Number.isFinite(target)) return '';
-  return `Target ${Math.round(target)}%${arah ? TANDA_TARGET[arah] : ''}`;
+  return `Target ${Math.round(target)}%${n ? n.tanda : ''}`;
 }
 
-/**
- * Ruang untuk teks target DOI di pita 26px, SETELAH teks di sisi kanannya.
- *
- * Keduanya berbagi satu baris: target DOI rata kiri, target ATP (atau "ATP …"
- * di mode dua opsi) rata kanan. SVG tidak memotong apa pun, jadi kalau jumlah
- * kartu bertambah — lebar kartu menyusut — keduanya akan saling menimpa tanpa
- * ada yang gagal. Angka ini yang dipakai `potongTeks` supaya tabrakan itu tidak
- * mungkin terjadi.
- */
 /**
  * Pilih bentuk teks sisi KANAN yang masih memberi sisi kiri lebar penuhnya.
  *
  * KEJADIAN NYATA 10 Okt 2026, ditemukan tes sebelum sempat tergambar. Saat dua
  * opsi DOI ditampilkan, sisi kanan harus memuat persen ATP DAN targetnya:
  * "ATP 100,0% · Target 100% (-)" = 172px. Di kartu 5 cabang (isi 262px) itu
- * menyisakan 82px untuk target DOI yang butuh 105px — terpotong jadi
- * "Target 7 har…". Di 7 cabang teks kanannya saja (172px) sudah melebihi
- * seluruh isi kartu (174px), jadi keduanya tergambar BERTUMPUK.
+ * menyisakan 82px untuk target DOI yang butuh 105px - terpotong. Di 7 cabang
+ * teks kanannya saja sudah melebihi seluruh isi kartu, jadi keduanya tergambar
+ * BERTUMPUK.
  *
  * Jadi bentuknya tidak dipatok satu. Daftarnya diurut dari yang paling
  * informatif ke yang paling pendek, dan dipilih yang PERTAMA masih memberi sisi
  * kiri lebar penuhnya. Kalau tidak ada yang cukup, dipakai yang terpendek dan
- * sisi kiri yang dipotong oleh `potongTeks` — satu teks terpotong rapi, bukan
+ * sisi kiri yang dipotong oleh `potongTeks` - satu teks terpotong rapi, bukan
  * dua teks saling menimpa.
  */
 export function pilihKanan(
   kandidat: string[],
   isi: number,
   kiri: string,
-  size = 11,
+  size = UKURAN_TARGET,
 ): string {
   if (!kandidat.length) return '';
   const wKiri = lebarTeksKira(kiri, size);
   for (const c of kandidat) {
     if (wKiri + JEDA_LABEL + lebarTeksKira(c, size) <= isi) return c;
   }
+
+  // Bahkan bentuk TERPENDEK pun tidak menyisakan ruang yang berarti untuk sisi
+  // kiri. Di titik itu sisi kanan DIHILANGKAN seluruhnya.
+  //
+  // Ditemukan tes 12 Okt 2026 saat ukuran teks dinaikkan 11 -> 13: di kartu 9
+  // cabang (isi 124px) teks kanan terpendek sudah memakan 102px, menyisakan
+  // 22px — cukup untuk "T…" dan tidak lebih. Dua potongan tak terbaca lebih
+  // buruk daripada satu angka utuh, dan jumlah keduanya justru MELEBIHI lebar
+  // kartu, jadi yang tergambar adalah dua teks saling menimpa.
+  //
+  // Yang dipertahankan sisi KIRI, bukan kanan: target DOI milik angka besar
+  // yang berdiri tepat di atasnya, sedangkan target ATP punya angkanya sendiri
+  // di sisi lain kartu.
+  const sisaTerpendek = isi - lebarTeksKira(kandidat[kandidat.length - 1], size) - JEDA_LABEL;
+  if (sisaTerpendek < lebarTeksKira('Target 7 h', size)) return '';
   return kandidat[kandidat.length - 1];
 }
 
-export function ruangTarget(isi: number, kanan: string, size = 11): number {
+export function ruangTarget(isi: number, kanan: string, size = UKURAN_TARGET): number {
   return isi - (kanan ? lebarTeksKira(kanan, size) + JEDA_LABEL : 0);
 }
 

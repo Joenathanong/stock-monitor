@@ -5,7 +5,7 @@ import { DataGrid, type Column } from '@/components/DataGrid';
 import { AreaPicker, useArea, labelArea } from '@/components/AreaPicker';
 import { AbcChip, Alert, Empty, Kpi, StatusChip, fmt, useApi } from '@/components/ui';
 import type { HasilSugestPo } from '@/lib/sugest-po-store';
-import type { HasilOpenPo } from '@/lib/openpo';
+import type { BarisSugest } from '@/lib/sugest-po-store';
 
 type Resp = HasilSugestPo & { ok: boolean };
 
@@ -16,7 +16,7 @@ type Resp = HasilSugestPo & { ok: boolean };
  * yang qty-nya 0 TANPA alasan yang terbaca akan dikira kesalahan aplikasi, dan
  * yang terjadi berikutnya selalu sama: orang memesan di luar sistem.
  */
-const ALASAN: Record<HasilOpenPo['alasan'], { teks: string; chip: string }> = {
+const ALASAN: Record<BarisSugest['alasan'], { teks: string; chip: string }> = {
   OK: { teks: 'Terpenuhi penuh, karton utuh', chip: 'chip-ok' },
   KURANG: { teks: 'Saldo pemasok tidak cukup', chip: 'chip-warn' },
   PECAHAN_TIPIS: { teks: 'Kurang dari 1 karton, tapi stok tipis', chip: 'chip-warn' },
@@ -31,15 +31,21 @@ const ALASAN: Record<HasilOpenPo['alasan'], { teks: string; chip: string }> = {
 
 const kunci = (b: { areaId: string; sku: string }) => `${b.areaId}\u0000${b.sku}`;
 
-const sumberTeks = (b: HasilOpenPo) =>
+const sumberTeks = (b: BarisSugest) =>
   b.ambil.map((a) => `${a.supplierWhs ? `${a.supplierWhs}/` : ''}${a.sapCode} ${a.ctn}x${a.perCtn}`).join(' · ');
 
 export default function SugestPoPage() {
   const { area, setArea, withArea, siap } = useArea();
   const { data, error, loading, reload } = useApi<Resp>(siap ? withArea('/api/sugest-po') : null);
   const [buka, setBuka] = useState<string | null>(null);
+  // Rekap per kode sumber disembunyikan secara bawaan (permintaan user 12 Okt
+  // 2026). Dengan 229 kode ia jadi dinding chip yang mendorong tabelnya turun.
+  const [rekap, setRekap] = useState(false);
+  const opsi = data?.opsi ?? 1;
+  const fmtDoi = (v: number | null | undefined) =>
+    (v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(1).replace('.', ','));
 
-  const columns = useMemo<Column<HasilOpenPo>[]>(() => [
+  const columns = useMemo<Column<BarisSugest>[]>(() => [
     { key: 'area', label: 'Area', get: (r) => r.areaId, width: 110, isTitle: true },
     { key: 'sku', label: 'SKU', get: (r) => r.sku, mono: true, width: 230,
       render: (r) => <Link className="link" href={`/sku/${encodeURIComponent(r.sku)}`}>{r.sku}</Link> },
@@ -49,11 +55,21 @@ export default function SugestPoPage() {
       render: (r) => <AbcChip cls={(r.abc ?? 'C') as 'A' | 'B' | 'C'} /> },
     { key: 'status', label: 'Status', get: (r) => r.status, width: 110,
       render: (r) => <StatusChip status={r.status} /> },
-    { key: 'doi', label: 'DOI', get: (r) => r.doi, type: 'number', mono: true, width: 80 },
+    // Hanya opsi yang dipilih di Pengaturan, dan nomornya ditulis di judul —
+    // tanpa itu, dua orang bisa membandingkan angka dari opsi yang berbeda.
+    { key: 'doi', label: `DOI Opsi ${opsi}`, get: (r) => r.doi, type: 'number', mono: true, width: 110,
+      title: 'DOI sekarang (stok + SIT) ÷ ADS',
+      render: (r) => <span className="mono">{fmtDoi(r.doi)}</span> },
     { key: 'need', label: 'Kebutuhan', get: (r) => r.need, type: 'number', mono: true, width: 110 },
     { key: 'qty', label: 'Qty PO', get: (r) => r.qtyTotal, type: 'number', mono: true, width: 100,
       render: (r) => <b>{fmt(r.qtyTotal)}</b> },
     { key: 'ctn', label: 'Karton', get: (r) => r.ctnTotal, type: 'number', mono: true, width: 90 },
+    // DOI SESUDAH barang PO ini masuk. Yang dijaga di sini: apakah pembulatan
+    // ke karton utuh membawa SKU-nya melewati target cabangnya — terlihat
+    // SEBELUM PO-nya ditekan, bukan sesudah barangnya datang.
+    { key: 'doiAfter', label: 'DOI stlh PO', get: (r) => r.doiSesudah, type: 'number', mono: true, width: 120,
+      title: '(stok + SIT + qty PO) ÷ ADS — DOI setelah barang PO ini masuk',
+      render: (r) => <span className="mono">{fmtDoi(r.doiSesudah)}</span> },
     { key: 'kurang', label: 'Kurang', get: (r) => r.kurang, type: 'number', mono: true, width: 100,
       render: (r) => (r.kurang > 0 ? <span style={{ color: 'var(--critical)' }}>{fmt(r.kurang)}</span> : <span className="text-muted">-</span>) },
     { key: 'sumber', label: 'Sumber', get: (r) => sumberTeks(r), width: 260, prio: 'p2',
@@ -117,24 +133,89 @@ export default function SugestPoPage() {
 
       {r && r.perKode.length ? (
         <section className="card card-pad">
-          <div className="card-title mb-2">Rekap per kode sumber</div>
-          <div className="flex flex-wrap gap-2 text-[12px]">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="card-title">Rekap per kode sumber ({r.perKode.length} kode)</div>
+            <button className="btn btn-sm" onClick={() => setRekap((v) => !v)} aria-expanded={rekap}>
+              {rekap ? 'Sembunyikan' : 'Tampilkan'}
+            </button>
+          </div>
+          <div className="text-[12px] text-label">
+            Inilah daftar pesanan yang benar-benar dikirim ke gudang pemasok. Tabel di bawah disusun per
+            SKU per cabang, tapi PO ke EJI ditulis per <b>kode SAP</b> — satu kode melayani beberapa cabang
+            sekaligus, jadi baris-baris di tabel digabung jadi satu angka pesanan di sini.
+          </div>
+          {!rekap ? null : (
+          <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
             {r.perKode.map((k) => (
               <span key={`${k.supplierWhs ?? ''}-${k.sapCode}`} className="chip chip-info mono">
                 {k.supplierWhs ? `${k.supplierWhs}/` : ''}{k.sapCode}: {fmt(k.qty)} pcs · {fmt(k.ctn)} ctn
               </span>
             ))}
           </div>
+          )}
+          {!rekap ? null : (
+            <div className="mt-2 text-[12px] text-label">
+              Saldo dipakai BERSAMA antar cabang: satu karton tidak pernah dijanjikan ke dua cabang sekaligus.
+              Urutan pelayanan saat saldo diperebutkan - Kritis dulu, lalu kelas ABC, lalu DOI terkecil.
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {/* DOI cabang: sekarang vs sesudah SELURUH PO cabang itu masuk, melawan
+          targetnya. Angka cabangnya dari ringkasan DOI yang sama dengan
+          Dashboard — menjumlahkannya dari baris PO akan salah, karena daftar PO
+          cuma memuat SKU Kritis & Low sedangkan DOI cabang dihitung dari
+          SELURUH SKU-nya. */}
+      {data?.perArea?.length ? (
+        <section className="card card-pad">
+          <div className="card-title mb-2">DOI cabang setelah open PO</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead><tr className="text-label">
+                <th className="py-1 text-left">Cabang</th>
+                <th className="num">Baris PO</th>
+                <th className="num">Qty PO</th>
+                <th className="num">DOI sekarang</th>
+                <th className="num">DOI stlh PO</th>
+                <th className="num">Target</th>
+                <th className="py-1 text-left">Hasil</th>
+              </tr></thead>
+              <tbody>
+                {data.perArea.map((a) => {
+                  const lewat = a.doiSesudah !== null && a.target !== null && a.doiSesudah > a.target;
+                  return (
+                    <tr key={a.areaId}>
+                      <td className="py-1"><b>{a.areaId}</b></td>
+                      <td className="num mono">{fmt(a.baris)}</td>
+                      <td className="num mono">{fmt(a.qtyPo)}</td>
+                      <td className="num mono">{fmtDoi(a.doiSekarang)}</td>
+                      <td className="num mono"><b>{fmtDoi(a.doiSesudah)}</b></td>
+                      <td className="num mono">{a.target ?? '—'}</td>
+                      <td className="py-1">
+                        {a.doiSesudah === null || a.target === null
+                          ? <span className="text-muted">—</span>
+                          : <span className={`chip ${lewat ? 'chip-bad' : 'chip-ok'}`}>
+                              {lewat ? `lewat target ${fmtDoi(a.doiSesudah - a.target)} hari` : 'masih dalam target'}
+                            </span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           <div className="mt-2 text-[12px] text-label">
-            Saldo dipakai BERSAMA antar cabang: satu karton tidak pernah dijanjikan ke dua cabang sekaligus.
-            Urutan pelayanan saat saldo diperebutkan - Kritis dulu, lalu kelas ABC, lalu DOI terkecil.
+            DOI cabang memakai <b>Opsi {opsi}</b>, sama dengan kolom DOI di tabel. Angka &quot;sesudah&quot;
+            menganggap SELURUH qty PO cabang itu sudah masuk gudang — jadi ia batas atas, bukan ramalan
+            tanggal.
           </div>
         </section>
       ) : null}
 
       <section className="card">
         <div className="p-3">
-          <DataGrid<HasilOpenPo>
+          <DataGrid<BarisSugest>
             id="sugest-po"
             rows={data?.baris ?? []}
             columns={columns}
@@ -157,7 +238,7 @@ export default function SugestPoPage() {
 }
 
 /** Rincian satu baris: pemecahan ke tiap kode sumber, apa adanya. */
-function Rincian({ b }: { b: HasilOpenPo }) {
+function Rincian({ b }: { b: BarisSugest }) {
   return (
     <div className="p-3 text-[12px]">
       <div className="mb-2">

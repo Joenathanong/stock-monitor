@@ -24,6 +24,7 @@ import { whsPemasok } from './eji';
 import { groupPerSku, sapPerGroup, kunciSaldo, type BarisSkuLink, type SaldoPemasok } from './sku-link';
 import { hitungSemua, type HasilOpenPo, type RingkasOpenPo } from './openpo';
 import { susunBarisPo, STATUS_PO, type BarisSnapshotPo } from './sugest-po';
+import { setelanArea } from './area-master';
 
 type BarisSnapshot = BarisSnapshotPo & {
   sapCode: string | null;
@@ -45,6 +46,47 @@ export type DiagnosaSugest = {
   tanpaMapping: { sku: string; name: string; areaId: string; need: number }[];
 };
 
+/**
+ * Satu baris PO, ditambah DOI SESUDAH barangnya masuk.
+ *
+ * Diminta user 12 Okt 2026: "tambahkan doi after open po pada tabelnya, jadi
+ * akan terdeteksi setelah open PO ... agar target doi bisa tetap terjaga
+ * melalui pantauan datanya."
+ *
+ * Gunanya bukan sekadar informasi. Saran PO mengisi sampai (batas Aman + lead
+ * time), dan pembulatan ke karton utuh bisa melewatinya — kolom ini yang
+ * memperlihatkan BERAPA lewatnya, per baris, sebelum PO-nya ditekan.
+ */
+export type BarisSugest = HasilOpenPo & {
+  /** Stok + SIT saat ini (pcs). */
+  posisi: number;
+  /** ADS opsi yang dipakai (pcs/hari). */
+  ads: number;
+  /** (posisi + qty PO) / ADS. null kalau ADS 0 — "berapa hari" tak punya jawaban. */
+  doiSesudah: number | null;
+};
+
+/**
+ * Ringkasan per cabang: DOI sekarang, DOI sesudah seluruh PO cabang itu masuk,
+ * dan target cabangnya.
+ *
+ * Angka cabang diambil dari `doi_summary` — ringkasan yang SAMA dengan yang
+ * dipakai Dashboard dan poster. Dijumlahkan sendiri dari baris PO akan salah:
+ * daftar PO hanya memuat SKU Kritis & Low, sedangkan DOI cabang dihitung dari
+ * SELURUH SKU-nya.
+ */
+export type RingkasArea = {
+  areaId: string;
+  baris: number;
+  qtyPo: number;
+  stok: number;
+  transit: number;
+  ads: number;
+  doiSekarang: number | null;
+  doiSesudah: number | null;
+  target: number | null;
+};
+
 export type HasilSugestPo = {
   /** Cabang yang sedang disaring; null = semua cabang. */
   areaId: string | null;
@@ -59,8 +101,10 @@ export type HasilSugestPo = {
   snapshotDate: DateKey | null;
   computedAt: string | null;
   opsi: 1 | 2;
-  baris: HasilOpenPo[];
+  baris: BarisSugest[];
   ringkas: RingkasOpenPo;
+  /** Per cabang — hanya cabang yang punya baris PO. */
+  perArea: RingkasArea[];
   diagnosa: DiagnosaSugest;
 };
 
@@ -79,7 +123,10 @@ export async function muatSugestPo(areaPilihan?: string | null): Promise<HasilSu
   // ikut: PO dikirim ke gudang cabang, dan baris gabungan akan menghitung
   // kebutuhan yang sama untuk kedua kalinya — saldo pemasok yang sama lalu
   // dijanjikan dua kali.
-  const cabang = (await muatArea().catch(() => []))
+  // Dipakai dua kali: daftar pilihan cabang, dan target per cabang di
+  // ringkasan DOI sesudah PO. Dimuat SEKALI.
+  const barisArea = await muatArea().catch(() => []);
+  const cabang = barisArea
     .filter((a) => a.isActive)
     .filter((a) => a.code !== KODE_GABUNGAN)
     .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
@@ -94,7 +141,7 @@ export async function muatSugestPo(areaPilihan?: string | null): Promise<HasilSu
     return {
       areaId: areaSaring, areas: cabang,
       snapshotDate: null, computedAt: null, opsi,
-      baris: [], ringkas: ringkasKosong(),
+      baris: [], ringkas: ringkasKosong(), perArea: [],
       diagnosa: await diagnosa([], whsPemasok(raw.po_whs_order)),
     };
   }
@@ -148,20 +195,97 @@ export async function muatSugestPo(areaPilihan?: string | null): Promise<HasilSu
     lipatMaks: Number(raw.po_lipat_maks ?? 2),
   });
 
+  // Posisi & ADS per (cabang, SKU) — dari baris snapshot yang sama, bukan
+  // ditarik ulang.
+  const posisiPerBaris = new Map(rows.map((r) => [
+    `${r.areaId}\u0000${r.sku}`,
+    { posisi: Number(r.availableQty ?? 0) + Number(r.transitQty ?? 0), ads: Number(opsi === 1 ? r.ads1 : r.ads2) || 0 },
+  ]));
+  const baris: BarisSugest[] = hasil.map((h) => {
+    const p = posisiPerBaris.get(`${h.areaId}\u0000${h.sku}`) ?? { posisi: 0, ads: 0 };
+    return {
+      ...h,
+      posisi: p.posisi,
+      ads: p.ads,
+      // ADS 0 -> null, BUKAN 0 atau tak hingga. "Berapa hari stok ini bertahan"
+      // tidak punya jawaban kalau barangnya tidak terjual.
+      doiSesudah: p.ads > 0 ? (p.posisi + h.qtyTotal) / p.ads : null,
+    };
+  });
+
+  const perArea = await ringkasPerArea(baris, snapshotDate, barisArea, opsi);
+
   return {
     areaId: areaSaring,
     areas: cabang,
     snapshotDate,
     computedAt: ringkasan?.computedAt ? ringkasan.computedAt.toISOString() : null,
     opsi,
-    baris: hasil,
+    baris,
     ringkas,
+    perArea,
     diagnosa: {
       ...(await diagnosa(stokRows, gudang)),
       mapping: link.length,
       tanpaMapping: tanpaMapping.sort((a, b) => b.need - a.need).slice(0, 50),
     },
   };
+}
+
+/**
+ * Ringkasan per cabang. Angka cabangnya dari `doi_summary`, bukan dijumlahkan
+ * dari baris PO — lihat alasannya di `RingkasArea`.
+ */
+async function ringkasPerArea(
+  baris: BarisSugest[],
+  snapshotDate: DateKey,
+  areaRows: Awaited<ReturnType<typeof muatArea>>,
+  opsi: 1 | 2,
+): Promise<RingkasArea[]> {
+  const po = new Map<string, { baris: number; qty: number }>();
+  for (const b of baris) {
+    const e = po.get(b.areaId) ?? { baris: 0, qty: 0 };
+    e.baris++; e.qty += b.qtyTotal;
+    po.set(b.areaId, e);
+  }
+  if (!po.size) return [];
+
+  const ringkasan = await prisma.doiSummary.findMany({
+    where: { snapshotDate: new Date(`${snapshotDate}T00:00:00.000Z`), areaId: { in: [...po.keys()] } },
+  }).catch(() => []);
+  const out: RingkasArea[] = [];
+  for (const [areaId, p] of po) {
+    const r = ringkasan.find((x) => x.areaId === areaId);
+    let stok = 0, transit = 0, ads = 0, doiSekarang: number | null = null;
+    if (r) {
+      try {
+        const payload = JSON.parse(r.payload) as { summary?: { total?: Record<string, number | null> } };
+        const t = payload.summary?.total ?? {};
+        stok = Number(t.stock ?? 0);
+        transit = Number(t.transit ?? 0);
+        // Opsi yang DIPILIH, bukan selalu opsi 1 — sama dengan yang dipakai
+        // kolom DOI di tabel, kalau tidak ringkasan cabang dan barisnya
+        // mengukur hal yang berbeda.
+        const kAds = opsi === 1 ? 'ads1' : 'ads2';
+        const kDoi = opsi === 1 ? 'doi1' : 'doi2';
+        ads = Number(t[kAds] ?? 0);
+        doiSekarang = t[kDoi] === null || t[kDoi] === undefined ? null : Number(t[kDoi]);
+      } catch {
+        // Payload rusak diperlakukan seperti tidak ada ringkasannya.
+      }
+    }
+    out.push({
+      areaId,
+      baris: p.baris,
+      qtyPo: p.qty,
+      stok, transit, ads,
+      doiSekarang,
+      doiSesudah: ads > 0 ? (stok + transit + p.qty) / ads : null,
+      target: setelanArea(areaRows, areaId).ambang?.max ?? null,
+    });
+  }
+  out.sort((a, b) => a.areaId.localeCompare(b.areaId));
+  return out;
 }
 
 const ringkasKosong = (): RingkasOpenPo => ({

@@ -1,5 +1,5 @@
 import { muatSugestPo } from '@/lib/sugest-po-store';
-import { writeSheet } from '@/lib/xlsx';
+import { writeWorkbook } from '@/lib/xlsx';
 import { areaDariUrl } from '@/lib/http-area';
 
 export const dynamic = 'force-dynamic';
@@ -22,26 +22,33 @@ export async function GET(req: Request) {
   const baris = h.baris.flatMap((b) => (b.ambil.length
     ? b.ambil.map((a) => ({
         areaId: b.areaId, sku: b.sku, name: b.name, abc: b.abc ?? '', status: b.status,
-        doi: b.doi, need: b.need,
+        doi: b.doi, doiSesudah: b.doiSesudah, need: b.need,
         whs: a.supplierWhs ?? '', sapCode: a.sapCode, perCtn: a.perCtn, ctn: a.ctn, qty: a.qty,
         kurang: b.kurang, alasan: b.alasan, keterangan: b.keterangan,
       }))
     : [{
         areaId: b.areaId, sku: b.sku, name: b.name, abc: b.abc ?? '', status: b.status,
-        doi: b.doi, need: b.need,
+        doi: b.doi, doiSesudah: b.doiSesudah, need: b.need,
         whs: '', sapCode: '', perCtn: 0, ctn: 0, qty: 0,
         kurang: b.kurang, alasan: b.alasan, keterangan: b.keterangan,
       }]));
 
-  const buffer = await writeSheet(
-    'Sugest PO',
-    [
+  const buffer = await writeWorkbook([{
+    nama: 'Sugest PO',
+    catatan: [
+      `Snapshot ${h.snapshotDate ?? '—'} · cabang ${area ?? 'semua'} · DOI Opsi ${h.opsi}`,
+      'Satu baris per SKU x kode sumber. SKU tanpa kode SAP tetap ada dengan kebutuhannya; kolom gudang & kode kosong.',
+    ],
+    columns: [
       { header: 'Area', key: 'areaId', width: 14 },
       { header: 'SKU', key: 'sku', width: 34 },
       { header: 'Nama', key: 'name', width: 46 },
       { header: 'ABC', key: 'abc', width: 6 },
       { header: 'Status', key: 'status', width: 12 },
+      // HANYA opsi yang dipilih — nomornya ditulis di judul supaya kolomnya
+      // tidak bisa disalahbaca sebagai opsi yang lain.
       { header: `DOI Opsi ${h.opsi}`, key: 'doi', width: 12 },
+      { header: `DOI setelah PO (Opsi ${h.opsi})`, key: 'doiSesudah', width: 24 },
       { header: 'Kebutuhan (pcs)', key: 'need', width: 16 },
       { header: 'Gudang', key: 'whs', width: 10 },
       { header: 'Kode SAP', key: 'sapCode', width: 18 },
@@ -52,8 +59,24 @@ export async function GET(req: Request) {
       { header: 'Alasan', key: 'alasan', width: 22 },
       { header: 'Keterangan', key: 'keterangan', width: 44 },
     ],
-    baris,
-  );
+    rows: baris,
+  }, {
+    // Lembar kedua: satu baris per CABANG, bukan per SKU. Dicampur ke lembar
+    // pertama, angkanya akan ikut terjumlah saat orang membuat pivot.
+    nama: 'DOI per cabang',
+    columns: [
+      { header: 'Cabang', key: 'areaId', width: 16 },
+      { header: 'Baris PO', key: 'baris', width: 10 },
+      { header: 'Qty PO (pcs)', key: 'qtyPo', width: 14 },
+      { header: 'Stok (pcs)', key: 'stok', width: 14 },
+      { header: 'SIT (pcs)', key: 'transit', width: 14 },
+      { header: `ADS Opsi ${h.opsi}`, key: 'ads', width: 14 },
+      { header: `DOI sekarang (Opsi ${h.opsi})`, key: 'doiSekarang', width: 22 },
+      { header: `DOI setelah PO (Opsi ${h.opsi})`, key: 'doiSesudah', width: 24 },
+      { header: 'Target (hari)', key: 'target', width: 14 },
+    ],
+    rows: h.perArea,
+  }]);
 
   const nama = `sugest-po-${area ?? 'semua'}-${h.snapshotDate ?? 'kosong'}.xlsx`;
   return new Response(new Uint8Array(buffer), {

@@ -8,7 +8,7 @@ import {
   FONT, FONT_MONO, KANVAS, WARNA, adsTeks, angkaRingkas, deretTren, hari, jalurSpark, labelDoi, lebarKartu,
   rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, TINGGI_SPARK, lebarTeksKira, potongTeks, JEDA_LABEL, labelPitaPisah, tataLabelStatus, tampil1, tampil2,
   KARTU, tinggiKartuTersedia, ukuranAtpMuat, UKURAN_DOI,
-  teksTarget, teksTargetAtp, ruangTarget, pilihKanan, arahDoi, arahAtp, WARNA_TARGET,
+  teksTarget, teksTargetAtp, ruangTarget, pilihKanan, nilaiDoi, nilaiAtp, warnaTarget, UKURAN_TARGET,
 } from '@/lib/wa-poster';
 // Dipakai dari atp.ts, TIDAK ditulis ulang di sini: angka di poster dan angka di
 // halaman /atp harus sama ejaannya ("71,0%"), dan dua fungsi dengan satu tugas
@@ -173,11 +173,14 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
     //
     // `ambang.max` = "Aman <= (hari)" di Pengaturan > Cabang/Area, yang juga
     // dipakai Sugest PO sebagai batas pengisian ("PO diisi sampai sini").
-    const arahD = arahDoi(nilaiUtama, a.ambang);
+    // Hijau kalau targetnya terpenuhi, merah kalau tidak — dan arah "terpenuhi"
+    // berlawanan di dua ukuran ini: DOI di BAWAH target itu baik, ATP di ATAS
+    // target itu baik. Lihat `nilaiDoi`/`nilaiAtp`.
+    const nD = nilaiDoi(nilaiUtama, a.ambang);
     // Target ATP CABANG INI, bukan satu angka untuk semua — sejalan dengan
     // ambang DOI yang juga per cabang.
     const atpTarget = a.atpTarget ?? null;
-    const arahA = arahAtp(a.atp?.persen, atpTarget);
+    const nA = nilaiAtp(a.atp?.persen, atpTarget);
 
     // Sisi KANAN pita. Di mode dua opsi DOI, ATP tidak memegang angka besar,
     // jadi persennya ikut ditulis di sini bersama targetnya — kalau tidak,
@@ -187,9 +190,9 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
     // terpanjang tidak muat berdampingan dengan target DOI di kartu 294px.
     // "72,0% / 90%" adalah bentuk aktual/target yang sudah dipakai poster ini
     // di kotak "Available >5 pcs" (1.158 / 1.663), jadi bukan notasi baru.
-    const tTargetAtp = teksTargetAtp(atpTarget, arahA);
+    const tTargetAtp = teksTargetAtp(atpTarget, nA);
     const pAtp = a.atp ? persenAtp(a.atp.persen) : '—';
-    const tDoi = a.ambang ? teksTarget(a.ambang.max, arahD) : '';
+    const tDoi = a.ambang ? teksTarget(a.ambang.max, nD) : '';
     const kandidatKanan = !tTargetAtp
       ? (keduanya ? [`ATP ${pAtp}`] : [])
       : keduanya
@@ -204,10 +207,10 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
       // lihat wa-target.test.ts, yang mengukur sampai 10 area.
       bagian.push(
         <Teks
-          key="tgt" x={x + pad} y={cy + 16} size={11} weight={700}
-          fill={arahD ? WARNA_TARGET[arahD] : WARNA.tintaLabel}
+          key="tgt" x={x + pad} y={cy + 17} size={UKURAN_TARGET} weight={700}
+          fill={nD ? warnaTarget(nD.baik) : WARNA.tintaLabel}
         >
-          {potongTeks(tDoi, ruangTarget(isi, kanan), 11)}
+          {potongTeks(tDoi, ruangTarget(isi, kanan), UKURAN_TARGET)}
         </Teks>,
       );
     }
@@ -215,14 +218,14 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
     if (kanan) {
       bagian.push(
         <Teks
-          key="atp2" x={x + w - pad} y={cy + 16} size={11} weight={700} anchor="end"
+          key="atp2" x={x + w - pad} y={cy + 17} size={UKURAN_TARGET} weight={700} anchor="end"
           // Diwarnai HANYA kalau isinya murni target ATP. Di mode dua opsi
           // teksnya memuat persen DAN target dalam satu baris; mewarnai merah
           // seluruhnya akan menyatakan persennya juga "salah", padahal yang
           // dinilai cuma hubungan keduanya.
-          fill={!keduanya && arahA ? WARNA_TARGET[arahA] : WARNA.tintaLabel}
+          fill={!keduanya && nA ? warnaTarget(nA.baik) : WARNA.tintaLabel}
         >
-          {potongTeks(kanan, isi, 11)}
+          {potongTeks(kanan, isi, UKURAN_TARGET)}
         </Teks>,
       );
     }
@@ -468,7 +471,10 @@ export function Poster({ data, onPilihArea }: Props) {
     {
       l: 'ATP keseluruhan',
       v: t?.atp ? persenAtp(t.atp.persen) : '—',
-      tone: arahAtp(t?.atp?.persen, data.atpTarget) === 'kurang' ? WARNA.kritisFg : undefined,
+      tone: (() => {
+        const n = nilaiAtp(t?.atp?.persen, data.atpTarget);
+        return n ? warnaTarget(n.baik) : undefined;
+      })(),
     },
   ] as { l: string; v: string; tone?: string }[];
   const rw = (KANVAS.w - 2 * M) / ringkas.length;

@@ -64,6 +64,25 @@ export type BarisSugest = HasilOpenPo & {
   ads: number;
   /** (posisi + qty PO) / ADS. null kalau ADS 0 — "berapa hari" tak punya jawaban. */
   doiSesudah: number | null;
+  /**
+   * Target untuk `doiSesudah`: **batas Aman + lead time cabang**, BUKAN batas
+   * Aman saja.
+   *
+   * KEJADIAN NYATA 12 Okt 2026, ditanyakan user: "DOI setelah open PO Pusat
+   * rata-rata 8, padahal batas aman Pusat 7?" Memang 8, dan memang benar —
+   * kebutuhan PO dihitung `(aman + lead time) x ADS - posisi`, jadi dengan lead
+   * time Pusat 1 hari titik pendaratannya 8. Angka 7 itu untuk saat barang
+   * SAMPAI; selama 1 hari menunggu, jualan tetap jalan.
+   *
+   * Dibuktikan di data produksi hari itu: dari 178 baris Pusat, 3 baris yang
+   * qty-nya kebetulan pas karton membaca 8,00 PERSIS (min 8,00 maks 8,01).
+   *
+   * Dibandingkan dengan 7, kolom itu TIDAK AKAN PERNAH bisa hijau di Pusat
+   * walau semuanya berjalan tepat seperti rancangan — dan alarm yang menyala
+   * permanen adalah alarm yang akhirnya diabaikan. Jadi targetnya yang
+   * diperbaiki, bukan hitungannya.
+   */
+  targetSesudah: number | null;
 };
 
 /**
@@ -84,7 +103,12 @@ export type RingkasArea = {
   ads: number;
   doiSekarang: number | null;
   doiSesudah: number | null;
+  /** Batas Aman cabang — target untuk DOI SEKARANG. */
   target: number | null;
+  /** Lead time cabang (hari). 0 = barang dianggap sampai hari itu juga. */
+  leadTime: number;
+  /** Batas Aman + lead time — target untuk DOI SESUDAH PO. Lihat `BarisSugest`. */
+  targetSesudah: number | null;
 };
 
 export type HasilSugestPo = {
@@ -201,6 +225,15 @@ export async function muatSugestPo(areaPilihan?: string | null): Promise<HasilSu
     `${r.areaId}\u0000${r.sku}`,
     { posisi: Number(r.availableQty ?? 0) + Number(r.transitQty ?? 0), ads: Number(opsi === 1 ? r.ads1 : r.ads2) || 0 },
   ]));
+  // Target "setelah PO" per cabang, dihitung SEKALI: batas Aman + lead time.
+  // Dari `setelanArea` supaya tidak ada dua tempat yang menentukan target.
+  const targetSesudahPerArea = new Map<string, number | null>();
+  for (const areaId of new Set(hasil.map((h) => h.areaId))) {
+    const st = setelanArea(barisArea, areaId);
+    const max = st.ambang?.max ?? null;
+    targetSesudahPerArea.set(areaId, max === null ? null : max + Math.max(0, st.leadTimeDays ?? 0));
+  }
+
   const baris: BarisSugest[] = hasil.map((h) => {
     const p = posisiPerBaris.get(`${h.areaId}\u0000${h.sku}`) ?? { posisi: 0, ads: 0 };
     return {
@@ -210,6 +243,7 @@ export async function muatSugestPo(areaPilihan?: string | null): Promise<HasilSu
       // ADS 0 -> null, BUKAN 0 atau tak hingga. "Berapa hari stok ini bertahan"
       // tidak punya jawaban kalau barangnya tidak terjual.
       doiSesudah: p.ads > 0 ? (p.posisi + h.qtyTotal) / p.ads : null,
+      targetSesudah: targetSesudahPerArea.get(h.areaId) ?? null,
     };
   });
 
@@ -255,6 +289,11 @@ async function ringkasPerArea(
   }).catch(() => []);
   const out: RingkasArea[] = [];
   for (const [areaId, p] of po) {
+    // Dari `setelanArea`, satu-satunya tempat aturan cadangan cabang ditulis —
+    // jadi target di sini tidak bisa berbeda dari yang dipakai mesin DOI.
+    const setelan = setelanArea(areaRows, areaId);
+    const max = setelan.ambang?.max ?? null;
+    const lead = Math.max(0, setelan.leadTimeDays ?? 0);
     const r = ringkasan.find((x) => x.areaId === areaId);
     let stok = 0, transit = 0, ads = 0, doiSekarang: number | null = null;
     if (r) {
@@ -281,7 +320,9 @@ async function ringkasPerArea(
       stok, transit, ads,
       doiSekarang,
       doiSesudah: ads > 0 ? (stok + transit + p.qty) / ads : null,
-      target: setelanArea(areaRows, areaId).ambang?.max ?? null,
+      target: max,
+      leadTime: lead,
+      targetSesudah: max === null ? null : max + lead,
     });
   }
   out.sort((a, b) => a.areaId.localeCompare(b.areaId));

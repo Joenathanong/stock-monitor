@@ -575,13 +575,34 @@ export type RingkasTurunan = {
  * stok/aktif = null. Komponen yang hilang dari daftar stok adalah justru hal
  * yang perlu dilihat orang — membuangnya membuat bundle terlihat lengkap.
  */
+/**
+ * Kunci pencarian komposisi untuk SKU bundle yang penulisannya kotor.
+ *
+ * KEJADIAN NYATA 12 Okt 2026: baris `"- BDL-HANASUI-0000001615"` di
+ * `stock_current` menampilkan "belum ditarik" di kolom Turunan selamanya —
+ * berapa kali pun komposisi ditarik. Sebabnya daftar bundle OCS menyebut kodenya
+ * BERSIH (`BDL-HANASUI-0000001615`), jadi pencarian sama-persis tidak pernah
+ * ketemu. Barisnya duplikat kotor dengan stok 0 di kelima cabang, tapi labelnya
+ * menuduh penarikan yang sebenarnya sudah berhasil — dan itu membuat orang
+ * menekan "Tarik komposisi bundling" berulang kali tanpa hasil.
+ *
+ * Hanya dipakai sebagai CADANGAN: pencarian sama-persis tetap menang, jadi SKU
+ * bersih tidak berubah perilakunya sama sekali.
+ */
+export const kunciBundle = (sku: string): string => {
+  const s = String(sku ?? '').trim();
+  const m = /(BDL-.*)$/i.exec(s);
+  return m ? m[1] : s;
+};
+
 export function susunTurunan(
   bundleSku: string,
   peta: PetaBundle,
   stokPerSku: Map<string, Map<string, { availableQty: number; isActive: boolean; name: string }>>,
   areas: string[],
 ): RingkasTurunan {
-  const komposisi = peta.get(bundleSku) ?? [];
+  // Sama-persis dulu, baru kunci yang dibersihkan — lihat `kunciBundle`.
+  const komposisi = peta.get(bundleSku) ?? peta.get(kunciBundle(bundleSku)) ?? [];
   const kosong: RingkasTurunan = {
     n: 0, turunan: [], muat: {}, pembatas: {}, adaNonaktif: false,
   };

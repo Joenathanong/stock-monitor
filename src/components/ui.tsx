@@ -140,8 +140,14 @@ export async function postForm(url: string, form: FormData) {
  *
  * 70 dtk akan membatalkan permintaan KEDUA di tengah jalan — dan yang dibatalkan
  * itu justru perhitungannya, jadi SIT-nya baru, snapshot-nya tidak.
+ *
+ * Naik lagi ke 200 dtk 12 Okt 2026 saat komposisi bundling ikut Refresh
+ * (langkah ketiga). Langkah itu hampir selalu selesai di bawah 1 dtk karena
+ * jeda `bundle_refresh_hours` menjawab "masih segar" dari satu kueri; yang
+ * dibayar 200 dtk ini adalah satu klik per 12 jam, saat penarikan 2,5 MB-nya
+ * benar-benar jalan.
  */
-const REFRESH_TIMEOUT_MS = 140_000;
+const REFRESH_TIMEOUT_MS = 200_000;
 
 export function RefreshButton({ onDone, withStock = true, label, className }: { onDone?: () => void; withStock?: boolean; label?: string; className?: string }) {
   const [busy, setBusy] = useState(false);
@@ -216,6 +222,39 @@ export function RefreshButton({ onDone, withStock = true, label, className }: { 
           detail: catatanTransit || (bermasalah ? 'Ada langkah yang gagal atau baru sebagian.' : undefined),
         });
       }
+      // --- Langkah 3: komposisi bundling ---
+      //
+      // Permintaan SENDIRI, bukan ditempelkan ke /api/compute: payload OCS-nya
+      // 2,5 MB dan /api/compute sudah berlomba dengan batas 60 dtk untuk
+      // pekerjaan yang tidak boleh gagal (snapshot DOI + titik tren ATP).
+      // Dipisah, penarikan bundling dapat satu fungsi penuh dan kegagalannya
+      // tidak bisa merugikan keduanya.
+      //
+      // Tanpa `force`: jeda `bundle_refresh_hours` tetap dihormati, jadi menekan
+      // Refresh lima kali sehari tidak menarik 2,5 MB lima kali. Yang ingin
+      // menarik SEKARANG pakai tombol "Tarik komposisi bundling" di /atp, yang
+      // memang memaksa.
+      //
+      // Dijalankan PALING AKHIR dan errornya ditelan ke catatan: komposisi
+      // bundling cuma mengisi kolom Turunan dan aturan golongan ATP, sementara
+      // dua langkah sebelumnya menulis data yang tidak bisa dibuat ulang.
+      let catatanBundle = '';
+      if (withStock) {
+        try {
+          const b = await postJson('/api/atp/bundle', {}, 'POST', ac.signal);
+          if (!b?.ok) catatanBundle = `Komposisi bundling gagal: ${String(b?.message ?? b?.error ?? '').slice(0, 80)}`;
+          else if (!b.skipped && b.bundle) catatanBundle = `Komposisi bundling diperbarui: ${b.bundle} bundle.`;
+        } catch (e) {
+          if (e instanceof Error && e.name === 'AbortError') throw e;
+          // 403 untuk pengguna baca-saja BUKAN kegagalan yang perlu diteriakkan:
+          // Refresh-nya tetap berhasil, cuma langkah yang butuh izin tulis
+          // dilewati. Disebut apa adanya supaya tidak terlihat seperti sukses
+          // penuh, tapi nadanya tidak merah.
+          catatanBundle = `Komposisi bundling dilewati (${e instanceof Error ? e.message.slice(0, 60) : e}).`;
+        }
+      }
+      if (catatanBundle) toast({ tone: 'info', title: catatanBundle });
+
       onDone?.();
     } catch (e) {
       toast({

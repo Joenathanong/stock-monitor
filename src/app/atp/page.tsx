@@ -639,6 +639,16 @@ export default function AtpPage() {
           // selnya harus menjelaskan yang mana — "—" polos membuat orang mengira
           // bundle-nya memang tidak punya komponen.
           const bundle = r.kategori === 'Bundle';
+          // TIGA keadaan, bukan dua — dan ketiganya butuh tindakan berbeda.
+          //
+          // Sampai 12 Okt 2026 sel ini selalu menulis "belum ditarik" untuk
+          // bundle tanpa komposisi, termasuk ketika komposisi sudah ditarik dan
+          // OCS-nya memang tidak menyebut bundle itu. Labelnya menuduh
+          // penarikan yang berhasil, jadi orang menekan "Tarik komposisi
+          // bundling" berulang kali tanpa hasil. Terukur hari itu: 5 dari 2.033
+          // baris bundle tanpa komposisi, dan 4 di antaranya bundle BARU yang
+          // memang belum ikut penarikan terakhir.
+          const sudahAda = (data?.bundleTersimpan ?? 0) > 0;
           return (
             <span
               className="empty"
@@ -647,10 +657,15 @@ export default function AtpPage() {
                   ? `${r.sku} bukan kategori Bundle, jadi tidak punya turunan.`
                   : data?.bundleSiap === false
                     ? 'Tabel bundle_item belum ada — jalankan npm run db:push.'
-                    : 'Komposisinya belum ada di database. Tekan "Tarik komposisi bundling" di atas.'
+                    : sudahAda
+                      ? `Komposisi sudah ditarik (${fmt(data?.bundleTersimpan ?? 0)} bundle tersimpan), tapi `
+                        + `${r.sku} tidak ada di daftar bundle OCS. Biasanya bundle BARU yang belum ikut `
+                        + 'penarikan terakhir — tekan Refresh, atau "Tarik komposisi bundling" untuk menarik sekarang. '
+                        + 'Kalau setelah itu masih kosong, bundle ini memang belum didaftarkan komposisinya di OCS.'
+                      : 'Komposisi bundling belum pernah ditarik. Tekan Refresh, atau "Tarik komposisi bundling" di atas.'
               }
             >
-              {bundle ? 'belum ditarik' : '—'}
+              {bundle ? (sudahAda ? 'tidak terdaftar' : 'belum ditarik') : '—'}
             </span>
           );
         }

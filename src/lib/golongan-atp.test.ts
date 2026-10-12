@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   adalahClearance, golonganSku, golonganDikecualikan, bundlingTerblokir, hitungAtp,
   atpKeseluruhan, skuBelumDiset, kunciSebaran, KECUALI_BAWAAN, teksKeluarPembagi,
+  susunTurunan, kunciBundle,
   type BarisStokAtp, type Sebaran, type PetaBundle, type SetelanKecuali, type BahanGolongan,
   type OpsiGolongan, type HasilArea,
 } from './atp';
@@ -448,4 +449,44 @@ test('golongan SKU sendiri menang atas daftar blokir komponen', () => {
     } }, areas),
     'Pusat — Clearance (CS-) — SKU ini sendiri',
   );
+});
+
+// --- komposisi untuk SKU bundle berpenulisan kotor ---------------------------
+
+test('SKU bundle berawalan kotor tetap menemukan komposisinya', () => {
+  // KEJADIAN NYATA 12 Okt 2026: baris '- BDL-HANASUI-0000001615' di
+  // stock_current menulis "belum ditarik" selamanya, karena daftar bundle OCS
+  // menyebut kodenya bersih. Labelnya menuduh penarikan yang sudah berhasil.
+  const peta: PetaBundle = new Map([['BDL-HANASUI-0000001615', [{ itemSku: 'KOMP-A', qty: 1 }, { itemSku: 'KOMP-B', qty: 2 }]]]);
+  const stok = new Map([
+    ['KOMP-A', new Map([['Pusat', { availableQty: 10, isActive: true, name: 'A' }]])],
+    ['KOMP-B', new Map([['Pusat', { availableQty: 10, isActive: true, name: 'B' }]])],
+  ]);
+  const hasil = susunTurunan('- BDL-HANASUI-0000001615', peta, stok, ['Pusat']);
+  assert.equal(hasil.n, 2);
+  assert.equal(hasil.muat.Pusat, 5, 'min(10/1, 10/2) = 5');
+});
+
+test('pencarian sama-persis tetap menang, kunci bersih hanya cadangan', () => {
+  // Kalau kunci yang dibersihkan dipakai lebih dulu, dua SKU berbeda yang
+  // kebetulan berakhiran sama bisa saling menukar komposisi.
+  const peta: PetaBundle = new Map([
+    ['- BDL-X', [{ itemSku: 'KOTOR', qty: 1 }]],
+    ['BDL-X', [{ itemSku: 'BERSIH', qty: 1 }]],
+  ]);
+  const stok = new Map([
+    ['KOTOR', new Map([['Pusat', { availableQty: 1, isActive: true, name: 'k' }]])],
+    ['BERSIH', new Map([['Pusat', { availableQty: 1, isActive: true, name: 'b' }]])],
+  ]);
+  assert.equal(susunTurunan('- BDL-X', peta, stok, ['Pusat']).turunan[0].itemSku, 'KOTOR');
+  assert.equal(susunTurunan('BDL-X', peta, stok, ['Pusat']).turunan[0].itemSku, 'BERSIH');
+});
+
+test('kunciBundle membuang awalan sampah, bukan mengarang kode', () => {
+  assert.equal(kunciBundle('- BDL-HANASUI-0000001615'), 'BDL-HANASUI-0000001615');
+  assert.equal(kunciBundle('90 BDL-FYNE-00000000068'), 'BDL-FYNE-00000000068');
+  assert.equal(kunciBundle('BDL-X'), 'BDL-X');
+  // Bukan bundle: dikembalikan apa adanya (hanya di-trim), tidak dipotong-potong.
+  assert.equal(kunciBundle('  ACNE-CLEANSER  '), 'ACNE-CLEANSER');
+  assert.equal(kunciBundle(''), '');
 });

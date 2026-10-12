@@ -479,10 +479,16 @@ export async function syncTransit(
 /**
  * Tarik komposisi bundling OCS ke `bundle_item`.
  *
- * TIDAK ikut tombol Refresh. Komposisi bundling itu master data yang jarang
- * berubah, payloadnya 2,5 MB, dan Refresh sudah punya pekerjaan yang harus
- * selesai dalam 60 detik. Jadi penarikannya: tombol sendiri di /atp, cron ATP,
- * atau `npm run sync:bundle`.
+ * IKUT tombol Refresh sejak 12 Okt 2026 (permintaan user), tapi sebagai
+ * PERMINTAAN HTTP SENDIRI — bukan di dalam `/api/compute`. Bedanya penting:
+ * payload OCS-nya 2,5 MB, sementara `/api/compute` sudah berlomba dengan batas
+ * 60 detik untuk dua hal yang tidak boleh gagal (snapshot DOI dan titik tren
+ * ATP, yang tidak bisa dibuat ulang besok). Dengan fungsi sendiri, penarikan ini
+ * tidak bisa memakan jatah keduanya.
+ *
+ * Jeda `bundle_refresh_hours` tetap dihormati saat ikut Refresh, jadi lima klik
+ * sehari tidak berarti lima kali 2,5 MB. Yang memaksa: tombol "Tarik komposisi
+ * bundling" di /atp, cron ATP, atau `npm run sync:bundle`.
  *
  * Pembersihan baris lama dikerjakan dengan `pulledAt < now` SETELAH penulisan,
  * dan HANYA kalau penulisannya ada isinya — persis pola `sync:supplier`. Kalau

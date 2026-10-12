@@ -12,10 +12,14 @@ export const maxDuration = 60;
 /**
  * Tarik komposisi bundling dari OCS.
  *
- * SENGAJA endpoint sendiri, tidak ikut /api/compute (tombol Refresh): komposisi
- * bundling itu master data yang jarang berubah, dan Refresh sudah punya
- * pekerjaan yang harus selesai dalam 60 detik. `?force=1` mengabaikan jeda
- * `bundle_refresh_hours`.
+ * Endpoint sendiri, dan SEJAK 12 Okt 2026 tombol Refresh memanggilnya sebagai
+ * langkah ketiga. Tetap tidak digabung ke /api/compute: payloadnya 2,5 MB dan
+ * /api/compute sudah berlomba dengan batas 60 detik untuk snapshot DOI dan titik
+ * tren ATP — pekerjaan yang tidak bisa dibuat ulang besok kalau waktunya habis.
+ *
+ * Refresh memanggilnya TANPA `force`, jadi jeda `bundle_refresh_hours` menjawab
+ * "masih segar" dari satu kueri pada klik-klik berikutnya. `?force=1` (tombol di
+ * /atp) mengabaikan jeda itu.
  */
 export async function POST(req: Request) {
   const sesi = await sessionFromRequest(req);

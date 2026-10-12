@@ -25,6 +25,7 @@ import { groupPerSku, sapPerGroup, kunciSaldo, type BarisSkuLink, type SaldoPema
 import { hitungSemua, type HasilOpenPo, type RingkasOpenPo } from './openpo';
 import { susunBarisPo, STATUS_PO, type BarisSnapshotPo } from './sugest-po';
 import { setelanArea } from './area-master';
+import { type DoiDisplay } from './wa-poster';
 
 type BarisSnapshot = BarisSnapshotPo & {
   sapCode: string | null;
@@ -125,6 +126,11 @@ export type HasilSugestPo = {
   snapshotDate: DateKey | null;
   computedAt: string | null;
   opsi: 1 | 2;
+  /**
+   * Setelan `doi_display`. Dibawa ke layar supaya judul kolom bisa menghilangkan
+   * nomor opsi ketika memang cuma satu yang ditampilkan — lihat `satuOpsi`.
+   */
+  doiDisplay: DoiDisplay;
   baris: BarisSugest[];
   ringkas: RingkasOpenPo;
   /** Per cabang — hanya cabang yang punya baris PO. */
@@ -134,6 +140,10 @@ export type HasilSugestPo = {
 
 /** Qty & DOI mana yang dipakai, mengikuti `doi_display` di Pengaturan. */
 const opsiDipakai = (doiDisplay: string | undefined): 1 | 2 => (doiDisplay === 'OPSI2' ? 2 : 1);
+
+/** `doi_display` mentah -> bentuk bertipe. Nilai asing jatuh ke BOTH, sama dengan `toDoiSettings`. */
+const displayDipakai = (v: string | undefined): DoiDisplay =>
+  (v === 'OPSI1' || v === 'OPSI2' ? v : 'BOTH');
 
 export async function muatSugestPo(areaPilihan?: string | null): Promise<HasilSugestPo> {
   // GABUNGAN di pemilih area berarti "semua cabang", bukan nama area yang
@@ -165,6 +175,7 @@ export async function muatSugestPo(areaPilihan?: string | null): Promise<HasilSu
     return {
       areaId: areaSaring, areas: cabang,
       snapshotDate: null, computedAt: null, opsi,
+      doiDisplay: displayDipakai(raw.doi_display),
       baris: [], ringkas: ringkasKosong(), perArea: [],
       diagnosa: await diagnosa([], whsPemasok(raw.po_whs_order)),
     };
@@ -255,6 +266,7 @@ export async function muatSugestPo(areaPilihan?: string | null): Promise<HasilSu
     snapshotDate,
     computedAt: ringkasan?.computedAt ? ringkasan.computedAt.toISOString() : null,
     opsi,
+    doiDisplay: displayDipakai(raw.doi_display),
     baris,
     ringkas,
     perArea,

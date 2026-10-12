@@ -260,8 +260,23 @@ export const tampil1 = (d: DoiDisplay | undefined) => d !== 'OPSI2';
 export const tampil2 = (d: DoiDisplay | undefined) => d !== 'OPSI1';
 
 /** "DOI OPSI 1" saat keduanya tampil; "DOI" saja saat cuma satu — nomornya jadi tanpa makna. */
+/**
+ * Hanya SATU opsi DOI yang ditampilkan di seluruh aplikasi?
+ *
+ * Satu-satunya tempat aturan ini ditulis. Nomor opsi hanya berarti kalau ada
+ * DUA angka yang bisa tertukar; begitu cuma satu yang dipajang, "Opsi 1" jadi
+ * derau yang menyuruh pembaca mencari Opsi 2 yang tidak ada di mana pun
+ * (keluhan user 12 Okt 2026 di /sugest-po).
+ *
+ * Ejaannya berbeda per tempat — poster memakai huruf besar, judul tabel tidak —
+ * tapi ATURANNYA tidak boleh ada dua, karena dua salinan akan menyimpang dan
+ * satu layar akan menulis "DOI" sementara layar lain "DOI Opsi 1" untuk angka
+ * yang sama persis.
+ */
+export const satuOpsi = (d: DoiDisplay | undefined): boolean => d === 'OPSI1' || d === 'OPSI2';
+
 export const labelDoi = (n: 1 | 2, d: DoiDisplay | undefined) =>
-  d === 'OPSI1' || d === 'OPSI2' ? 'DOI' : `DOI OPSI ${n}`;
+  (satuOpsi(d) ? 'DOI' : `DOI OPSI ${n}`);
 
 /** Deret tren yang dipakai sparkline: opsi yang ditampilkan, bukan selalu opsi 1. */
 export const deretTren = (

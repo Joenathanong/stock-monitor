@@ -1,6 +1,7 @@
 import { muatSugestPo } from '@/lib/sugest-po-store';
 import { writeWorkbook } from '@/lib/xlsx';
 import { areaDariUrl } from '@/lib/http-area';
+import { satuOpsi } from '@/lib/wa-poster';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -18,6 +19,11 @@ export const maxDuration = 120;
 export async function GET(req: Request) {
   const area = areaDariUrl(req);
   const h = await muatSugestPo(area);
+  // Nomor opsi hanya ditulis kalau memang ada dua. Aturannya dari `satuOpsi`,
+  // sama dengan layar — judul kolom berkas dan judul kolom tabel tidak boleh
+  // menamai angka yang sama dengan dua cara.
+  const lDoi = satuOpsi(h.doiDisplay) ? 'DOI' : `DOI Opsi ${h.opsi}`;
+  const lAds = satuOpsi(h.doiDisplay) ? 'ADS' : `ADS Opsi ${h.opsi}`;
 
   const baris = h.baris.flatMap((b) => (b.ambil.length
     ? b.ambil.map((a) => ({
@@ -36,7 +42,7 @@ export async function GET(req: Request) {
   const buffer = await writeWorkbook([{
     nama: 'Sugest PO',
     catatan: [
-      `Snapshot ${h.snapshotDate ?? '—'} · cabang ${area ?? 'semua'} · DOI Opsi ${h.opsi}`,
+      `Snapshot ${h.snapshotDate ?? '—'} · cabang ${area ?? 'semua'} · ${lDoi}`,
       'Satu baris per SKU x kode sumber. SKU tanpa kode SAP tetap ada dengan kebutuhannya; kolom gudang & kode kosong.',
     ],
     columns: [
@@ -47,8 +53,8 @@ export async function GET(req: Request) {
       { header: 'Status', key: 'status', width: 12 },
       // HANYA opsi yang dipilih — nomornya ditulis di judul supaya kolomnya
       // tidak bisa disalahbaca sebagai opsi yang lain.
-      { header: `DOI Opsi ${h.opsi}`, key: 'doi', width: 12 },
-      { header: `DOI setelah PO (Opsi ${h.opsi})`, key: 'doiSesudah', width: 24 },
+      { header: lDoi, key: 'doi', width: 12 },
+      { header: `${lDoi} setelah PO`, key: 'doiSesudah', width: 24 },
       { header: 'Kebutuhan (pcs)', key: 'need', width: 16 },
       { header: 'Gudang', key: 'whs', width: 10 },
       { header: 'Kode SAP', key: 'sapCode', width: 18 },
@@ -70,9 +76,9 @@ export async function GET(req: Request) {
       { header: 'Qty PO (pcs)', key: 'qtyPo', width: 14 },
       { header: 'Stok (pcs)', key: 'stok', width: 14 },
       { header: 'SIT (pcs)', key: 'transit', width: 14 },
-      { header: `ADS Opsi ${h.opsi}`, key: 'ads', width: 14 },
-      { header: `DOI sekarang (Opsi ${h.opsi})`, key: 'doiSekarang', width: 22 },
-      { header: `DOI setelah PO (Opsi ${h.opsi})`, key: 'doiSesudah', width: 24 },
+      { header: lAds, key: 'ads', width: 14 },
+      { header: `${lDoi} sekarang`, key: 'doiSekarang', width: 22 },
+      { header: `${lDoi} setelah PO`, key: 'doiSesudah', width: 24 },
       { header: 'Target (hari)', key: 'target', width: 14 },
     ],
     rows: h.perArea,

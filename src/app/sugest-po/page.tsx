@@ -6,6 +6,7 @@ import { AreaPicker, useArea, labelArea } from '@/components/AreaPicker';
 import { AbcChip, Alert, Empty, Kpi, StatusChip, fmt, useApi } from '@/components/ui';
 import type { HasilSugestPo } from '@/lib/sugest-po-store';
 import type { BarisSugest } from '@/lib/sugest-po-store';
+import { satuOpsi } from '@/lib/wa-poster';
 
 type Resp = HasilSugestPo & { ok: boolean };
 
@@ -42,6 +43,14 @@ export default function SugestPoPage() {
   // 2026). Dengan 229 kode ia jadi dinding chip yang mendorong tabelnya turun.
   const [rekap, setRekap] = useState(false);
   const opsi = data?.opsi ?? 1;
+  /*
+    Nomor opsi HANYA ditulis kalau ada dua angka yang bisa tertukar.
+    Permintaan user 12 Okt 2026: "jika memang hanya 1 opsi yang dipilih,
+    tampilkan saja DOI". Aturannya dipinjam dari `satuOpsi` — satu-satunya
+    tempat ia ditulis — supaya poster /wa dan tabel ini tidak pernah menamai
+    angka yang sama dengan dua cara.
+  */
+  const labelKolomDoi = satuOpsi(data?.doiDisplay) ? 'DOI' : `DOI Opsi ${opsi}`;
   const fmtDoi = (v: number | null | undefined) =>
     (v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(1).replace('.', ','));
 
@@ -57,7 +66,7 @@ export default function SugestPoPage() {
       render: (r) => <StatusChip status={r.status} /> },
     // Hanya opsi yang dipilih di Pengaturan, dan nomornya ditulis di judul —
     // tanpa itu, dua orang bisa membandingkan angka dari opsi yang berbeda.
-    { key: 'doi', label: `DOI Opsi ${opsi}`, get: (r) => r.doi, type: 'number', mono: true, width: 110,
+    { key: 'doi', label: labelKolomDoi, get: (r) => r.doi, type: 'number', mono: true, width: 110,
       title: 'DOI sekarang (stok + SIT) ÷ ADS',
       render: (r) => <span className="mono">{fmtDoi(r.doi)}</span> },
     { key: 'need', label: 'Kebutuhan', get: (r) => r.need, type: 'number', mono: true, width: 110 },
@@ -124,7 +133,11 @@ export default function SugestPoPage() {
       render: (r) => <span className="mono text-[11px]">{sumberTeks(r) || '-'}</span> },
     { key: 'alasan', label: 'Alasan', get: (r) => ALASAN[r.alasan].teks, width: 240, prio: 'p3',
       render: (r) => <span className={`chip ${ALASAN[r.alasan].chip}`}>{ALASAN[r.alasan].teks}</span> },
-  ], []);
+    // BUG LAMA yang ikut ketahuan: daftar ini dulu `[]`, jadi judul kolom
+    // dihitung sekali saat data masih null dan tidak pernah diperbarui. Selama
+    // opsinya kebetulan 1 tidak ada yang sadar; begitu judulnya ikut setelan,
+    // kolomnya akan membeku di "DOI Opsi 1" selamanya.
+  ], [labelKolomDoi]);
 
   const d = data?.diagnosa;
   const r = data?.ringkas;
@@ -261,7 +274,7 @@ export default function SugestPoPage() {
             </table>
           </div>
           <div className="mt-2 text-[12px] text-label">
-            DOI cabang memakai <b>Opsi {opsi}</b>, sama dengan kolom DOI di tabel. Angka &quot;sesudah&quot;
+            DOI cabang memakai <b>{labelKolomDoi}</b>, sama dengan kolom DOI di tabel. Angka &quot;sesudah&quot;
             menganggap SELURUH qty PO cabang itu sudah masuk gudang — jadi ia batas atas, bukan ramalan
             tanggal.
           </div>

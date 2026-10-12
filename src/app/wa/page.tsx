@@ -59,11 +59,21 @@ function RincianAtp({ area, ambang, autoBuka }: { area: string; ambang: number; 
   const [galat, setGalat] = useState<string | null>(null);
   const [sibuk, setSibuk] = useState(false);
   const [lebar, setLebar] = useState<string | null>(null);
+  const [cari, setCari] = useState('');
 
   useEffect(() => {
     if (!buka || data || sibuk) return;
     setSibuk(true);
-    fetch(`/api/atp/rincian?area=${encodeURIComponent(area)}&ambang=${ambang}`, { credentials: 'include' })
+    // `batas` dinaikkan ke 2.000 (permintaan user 12 Okt 2026: daftarnya jangan
+    // terpotong). Kelompok terbesar hari ini 1.095 baris di Pusat, dan satu
+    // cabang seluruhnya 1.671 baris — jadi 2.000 memuat semuanya dengan
+    // kelonggaran, dalam SATU permintaan.
+    //
+    // Pemotongannya TETAP ADA di server dan tidak dibuang: tanpa batas sama
+    // sekali, satu cabang yang suatu hari punya puluhan ribu baris akan
+    // mengirim berkas puluhan MB ke telepon orang tanpa ada yang memilih itu.
+    // Kalau batas ini suatu saat tersentuh lagi, barisnya akan mengatakannya.
+    fetch(`/api/atp/rincian?area=${encodeURIComponent(area)}&ambang=${ambang}&batas=2000`, { credentials: 'include' })
       .then(async (r) => {
         const j = await r.json().catch(() => null);
         if (!r.ok || !j?.ok) {
@@ -115,7 +125,7 @@ function RincianAtp({ area, ambang, autoBuka }: { area: string; ambang: number; 
                 <div key={g.kunci} className="mt-1.5">
                   <button
                     className="flex w-full items-center gap-2 text-left"
-                    onClick={() => setLebar((v) => (v === g.kunci ? null : g.kunci))}
+                    onClick={() => { setCari(''); setLebar((v) => (v === g.kunci ? null : g.kunci)); }}
                     title={g.masukPembagi ? 'Ikut menentukan persen ATP' : 'Keluar dari pembagi — tidak mempengaruhi persen'}
                   >
                     <span className="text-[12px]" style={{ minWidth: 190 }}>{g.label}</span>
@@ -132,18 +142,36 @@ function RincianAtp({ area, ambang, autoBuka }: { area: string; ambang: number; 
                     <span className="w-[14px] text-[11px] text-label">{lebar === g.kunci ? '−' : '+'}</span>
                   </button>
                   {lebar === g.kunci ? (
-                    <div className="mt-1 max-h-[220px] overflow-auto rounded border p-2" style={{ borderColor: 'var(--border-subtle)' }}>
-                      {g.sku.map((r) => (
+                    <div className="mt-1 rounded border p-2" style={{ borderColor: 'var(--border-subtle)' }}>
+                      {/* Penyaring, bukan hiasan: kelompok "Dihitung & siap" di
+                          Pusat 1.095 baris, dan menggulir 1.095 baris untuk
+                          mencari satu SKU bukan transparansi, cuma tumpukan. */}
+                      {g.sku.length > 20 ? (
+                        <input
+                          className="input mb-2 w-full"
+                          placeholder={`Saring ${fmt(g.sku.length)} baris — ketik SKU atau namanya`}
+                          value={cari}
+                          onChange={(e) => setCari(e.target.value)}
+                        />
+                      ) : null}
+                      <div className="max-h-[320px] overflow-auto">
+                      {g.sku
+                        .filter((r) => {
+                          const q = cari.trim().toLowerCase();
+                          return !q || r.sku.toLowerCase().includes(q) || (r.name ?? '').toLowerCase().includes(q);
+                        })
+                        .map((r) => (
                         <div key={r.sku} className="flex gap-2 py-0.5 text-[11px]">
                           <span className="font-mono" style={{ minWidth: 230 }}>{r.sku}</span>
                           <span className="tabular-nums" style={{ minWidth: 60, textAlign: 'right' }}>{fmt(r.qty)}</span>
-                          <span className="text-label">{r.ket}</span>
+                          <span className="text-label">{r.ket || r.name}</span>
                         </div>
                       ))}
+                      </div>
                       {g.lebih > 0 ? (
-                        <div className="mt-1 text-[11px] text-label">
-                          … {fmt(g.lebih)} baris lagi tidak ditampilkan — buka <b>/atp</b> untuk daftar lengkap
-                          yang bisa difilter dan diunduh.
+                        <div className="mt-1 text-[11px]" style={{ color: 'var(--critical)' }}>
+                          … {fmt(g.lebih)} baris lagi tidak ditampilkan — melebihi batas 2.000 baris per kelompok.
+                          Buka <b>/atp</b> untuk daftar lengkap yang bisa difilter dan diunduh.
                         </div>
                       ) : null}
                     </div>

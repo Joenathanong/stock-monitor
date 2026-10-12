@@ -33,7 +33,13 @@ const JARAK = 16;
 type Props = {
   data: DataWa;
   /** Dipanggil saat kartu area diklik — halaman yang membuka popupnya. */
-  onPilihArea?: (area: string) => void;
+  /**
+   * `fokus` menentukan rincian mana yang langsung dibuka. Angka ATP punya
+   * sasaran kliknya SENDIRI (permintaan user 12 Okt 2026: "angka atp di klik
+   * dapat menampilkan detail list") — tanpa itu seluruh kartu membuka rincian
+   * umum, dan orang yang menekan persen ATP harus mencari lagi di dalamnya.
+   */
+  onPilihArea?: (area: string, fokus?: 'atp') => void;
 };
 
 const Teks = ({
@@ -51,7 +57,7 @@ const Teks = ({
   </text>
 );
 
-function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onKlik }: {
+function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onKlik, onKlikAtp }: {
   a: AreaWa; x: number; y: number; w: number; h: number;
   blok: DataWa['blok']; disp: DataWa['doiDisplay']; kritisMaks: number;
   /** Ukuran angka ATP — dihitung SEKALI untuk seluruh poster, lihat ukuranAtpMuat. */
@@ -59,6 +65,8 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
   /** Status yang ditampilkan — SAMA untuk semua kartu, lihat `kunciTampil`. */
   tampil: ReturnType<typeof kunciTampil>;
   onKlik?: () => void;
+  /** Klik pada ANGKA ATP saja — membuka rincian yang langsung terbuka di ATP. */
+  onKlikAtp?: () => void;
 }) {
   const pad = KARTU.pad;
   const isi = w - 2 * pad;
@@ -137,7 +145,7 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
     // ATP setebal dan sebesar angka DOI (permintaan user 8 Okt 2026). Ukurannya
     // dari `atpSize`, yang dihitung sekali untuk SELURUH poster supaya kelima
     // kartu seragam — bukan menyusut sendiri-sendiri.
-    bagian.push(
+    const angkaKanan = (
       <Teks
         key="v2" x={x + w - pad} y={cy}
         size={keduanya ? 22 : atpSize}
@@ -146,7 +154,33 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
         anchor="end" mono
       >
         {keduanya ? hari(a.doi2) : (a.atp ? persenAtp(a.atp.persen) : '—')}
-      </Teks>,
+      </Teks>
+    );
+    // Angka ATP dibungkus sasaran klik sendiri — dengan <rect> transparan di
+    // belakangnya, karena <text> hanya bisa diklik tepat pada goresan hurufnya
+    // dan menekan celah antar angka akan terasa seperti tombol yang rusak.
+    //
+    // `stopPropagation` supaya rincian tidak dibuka DUA kali (kartu + angka),
+    // dan supaya yang menang adalah fokus ATP, bukan rincian umum.
+    //
+    // Hanya saat ATP memegang slot ini. Di mode dua opsi DOI angka ini doi2,
+    // dan memberinya klik ATP akan mengirim orang ke panel yang salah.
+    bagian.push(
+      !keduanya && onKlikAtp ? (
+        <g key="v2g" onClick={(e) => { e.stopPropagation(); onKlikAtp(); }} style={{ cursor: 'pointer' }}>
+          {/* SETENGAH KANAN kartu saja, bukan lebar tetap. Dengan 5 cabang satu
+              kartu cuma ±220px, jadi kotak selebar 150px akan menutupi angka
+              DOI di sebelah kiri — dan menekan angka DOI akan membuka panel
+              ATP. Sasaran klik yang melebar ke tetangganya terasa seperti
+              aplikasi yang salah tekan, bukan seperti fitur. */}
+          <rect
+            x={x + pad + (isi + 8) / 2} y={cy - atpSize}
+            width={(isi - 8) / 2} height={atpSize + 12}
+            fill="transparent"
+          />
+          {angkaKanan}
+        </g>
+      ) : angkaKanan,
     );
     // --- PITA 26px: TARGET DOI (kiri) dan TARGET ATP (kanan) ---
     //
@@ -529,6 +563,7 @@ export function Poster({ data, onPilihArea }: Props) {
           kritisMaks={0}
           tampil={tampil}
           onKlik={onPilihArea ? () => onPilihArea(a.area) : undefined}
+          onKlikAtp={onPilihArea ? () => onPilihArea(a.area, 'atp') : undefined}
         />
       ))}
 

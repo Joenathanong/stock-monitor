@@ -64,12 +64,60 @@ export default function SugestPoPage() {
     { key: 'qty', label: 'Qty PO', get: (r) => r.qtyTotal, type: 'number', mono: true, width: 100,
       render: (r) => <b>{fmt(r.qtyTotal)}</b> },
     { key: 'ctn', label: 'Karton', get: (r) => r.ctnTotal, type: 'number', mono: true, width: 90 },
-    // DOI SESUDAH barang PO ini masuk. Yang dijaga di sini: apakah pembulatan
-    // ke karton utuh membawa SKU-nya melewati target cabangnya — terlihat
-    // SEBELUM PO-nya ditekan, bukan sesudah barangnya datang.
+    // DOI SESUDAH barang PO ini masuk.
+    //
+    // Dibandingkan dengan **batas Aman + lead time**, bukan batas Aman saja.
+    // Kebutuhan PO memang dihitung sampai titik itu — Pusat 7 + 1 = 8 — karena
+    // angka 7 berlaku saat barang SAMPAI, sementara kolom ini mengukur saat PO
+    // DITEKAN. Dibandingkan 7, kolomnya tidak akan pernah bisa hijau walau
+    // semuanya tepat (ditanyakan user 12 Okt 2026).
+    //
+    // Yang benar-benar dijaga di sini: kelebihan DI ATAS titik itu, yang datang
+    // dari pembulatan ke karton utuh.
     { key: 'doiAfter', label: 'DOI stlh PO', get: (r) => r.doiSesudah, type: 'number', mono: true, width: 120,
-      title: '(stok + SIT + qty PO) ÷ ADS — DOI setelah barang PO ini masuk',
-      render: (r) => <span className="mono">{fmtDoi(r.doiSesudah)}</span> },
+      title: '(stok + SIT + qty PO) ÷ ADS, diukur saat PO ditekan.\n'
+        + 'Targetnya batas Aman + lead time cabang — barang belum sampai, jadi hari tunggunya ikut dihitung.\n'
+        + 'Merah = melewati target itu, hampir selalu karena pembulatan ke karton utuh.',
+      render: (r) => {
+        const t = r.targetSesudah;
+        const lewat = r.doiSesudah !== null && t !== null && r.doiSesudah > t + 0.05;
+        return (
+          <span
+            className="mono"
+            style={lewat ? { color: 'var(--critical)', fontWeight: 600 } : undefined}
+            title={r.doiSesudah === null || t === null ? undefined
+              : lewat ? `Target ${t} hari (Aman + lead time) — lewat ${fmtDoi(r.doiSesudah - t)} hari`
+                : `Target ${t} hari (Aman + lead time) — masih di dalam`}
+          >
+            {fmtDoi(r.doiSesudah)}
+          </span>
+        );
+      } },
+    // KARTON RAKSASA — permintaan user 12 Okt 2026, kolom sendiri bukan cuma
+    // keterangan. Terukur di Pusat hari itu: BODY-SERUM-ALOE-VERA butuh 1 pcs
+    // tapi karton terkecilnya 24, jadi DOI-nya melonjak ke 21 hari. Tanpa kolom
+    // ini lonjakan itu terbaca seperti salah hitung, padahal akibat keputusan
+    // "jangan sampai ada barang kosong" (11 Okt 2026).
+    { key: 'lipat', label: 'Lipat karton', get: (r) => (r.need > 0 && r.qtyTotal > 0 ? r.qtyTotal / r.need : null),
+      type: 'number', mono: true, width: 120, prio: 'p2',
+      title: 'Qty PO ÷ kebutuhan. 1x = pas. Lebih dari itu berarti karton terkecilnya memaksa mengirim '
+        + 'lebih banyak daripada yang dibutuhkan — tetap dikirim supaya tidak kosong, dan inilah sebab '
+        + 'DOI stlh PO bisa jauh di atas target.',
+      render: (r) => {
+        if (!(r.need > 0) || !(r.qtyTotal > 0)) return <span className="text-muted">-</span>;
+        const x = r.qtyTotal / r.need;
+        if (x <= 1.05) return <span className="text-muted">1×</span>;
+        return (
+          <span
+            className={`chip ${x >= 2 ? 'chip-bad' : ''}`}
+            title={`Kebutuhan ${fmt(r.need)} pcs, dikirim ${fmt(r.qtyTotal)} pcs (${fmt(r.ctnTotal)} karton)`
+              + `${x >= 2 ? ' — karton terkecilnya jauh lebih besar dari kebutuhan.' : '.'}`
+              + ' Tetap dikirim supaya tidak sampai kosong.'}
+          >
+            {x >= 10 ? `${Math.round(x)}×` : `${x.toFixed(1).replace('.', ',')}×`}
+          </span>
+        );
+      } },
     { key: 'kurang', label: 'Kurang', get: (r) => r.kurang, type: 'number', mono: true, width: 100,
       render: (r) => (r.kurang > 0 ? <span style={{ color: 'var(--critical)' }}>{fmt(r.kurang)}</span> : <span className="text-muted">-</span>) },
     { key: 'sumber', label: 'Sumber', get: (r) => sumberTeks(r), width: 260, prio: 'p2',
@@ -178,12 +226,16 @@ export default function SugestPoPage() {
                 <th className="num">Qty PO</th>
                 <th className="num">DOI sekarang</th>
                 <th className="num">DOI stlh PO</th>
-                <th className="num">Target</th>
+                <th className="num" title="Batas Aman cabang — target untuk DOI SEKARANG">Target</th>
+                <th className="num" title="Batas Aman + lead time — target untuk DOI SETELAH PO, karena barangnya belum sampai">+ lead time</th>
                 <th className="py-1 text-left">Hasil</th>
               </tr></thead>
               <tbody>
                 {data.perArea.map((a) => {
-                  const lewat = a.doiSesudah !== null && a.target !== null && a.doiSesudah > a.target;
+                  // Dibandingkan `targetSesudah` (Aman + lead time), bukan `target`:
+                  // alasan panjangnya di `BarisSugest.targetSesudah`.
+                  const tS = a.targetSesudah;
+                  const lewat = a.doiSesudah !== null && tS !== null && a.doiSesudah > tS + 0.05;
                   return (
                     <tr key={a.areaId}>
                       <td className="py-1"><b>{a.areaId}</b></td>
@@ -192,11 +244,14 @@ export default function SugestPoPage() {
                       <td className="num mono">{fmtDoi(a.doiSekarang)}</td>
                       <td className="num mono"><b>{fmtDoi(a.doiSesudah)}</b></td>
                       <td className="num mono">{a.target ?? '—'}</td>
+                      <td className="num mono" title={a.leadTime ? `${a.target} + lead time ${a.leadTime} hari` : 'lead time cabang 0 hari'}>
+                        {tS ?? '—'}
+                      </td>
                       <td className="py-1">
-                        {a.doiSesudah === null || a.target === null
+                        {a.doiSesudah === null || tS === null
                           ? <span className="text-muted">—</span>
                           : <span className={`chip ${lewat ? 'chip-bad' : 'chip-ok'}`}>
-                              {lewat ? `lewat target ${fmtDoi(a.doiSesudah - a.target)} hari` : 'masih dalam target'}
+                              {lewat ? `lewat ${fmtDoi(a.doiSesudah - tS)} hari` : 'masih dalam target'}
                             </span>}
                       </td>
                     </tr>

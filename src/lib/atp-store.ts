@@ -16,10 +16,11 @@ import { toDateKeyUtc, todayKey, diffDays } from './dates';
 import { pencocokPhaseOut, DISPOSITION_LABEL, type Disposition } from './phase-out';
 import {
   AMBANG_ATP_BAWAAN, kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan, skuBelumDiset,
-  susunTurunan, bundlingTerblokir, golonganSku, golonganDikecualikan,
+  susunTurunan, bundlingTerblokir, golonganSku, golonganDikecualikan, rincianAtp,
   type BarisStokAtp, type Sebaran, type HasilArea, type SebabTolak, type SaringAktif,
   type SkuBelumDiset, type PetaBundle, type RingkasTurunan,
   type OpsiGolongan, type SetelanKecuali, type GolonganAtp, type AlasanBlokir,
+  type RincianArea,
 } from './atp';
 import { muatArea } from './area-store';
 import { setelanArea } from './area-master';
@@ -586,6 +587,34 @@ export async function muatAtp(
     // pengingat ini tidak akan pernah bisa kosong.
     baru: skuBelumDiset(rows, sebaran, 'AKTIF', opsi),
   };
+}
+
+/**
+ * Rincian ATP satu cabang — bahan untuk "kenapa angkanya begitu".
+ *
+ * Sengaja endpoint/ fungsi SENDIRI, bukan ikut `muatAtp`: halaman /wa cuma butuh
+ * satu cabang, dan `muatAtp` menyusun matriks 1.671 SKU x 5 cabang beserta
+ * turunan bundling tiap baris. Menariknya seluruhnya untuk satu angka yang
+ * diklik adalah cara membuat rincian terasa lambat lalu tidak dipakai.
+ *
+ * Yang TIDAK dipakai di sini: `susunTurunan`. Rincian hanya perlu tahu komponen
+ * mana yang memblokir, dan itu sudah ada di `blokir` — satu bacaan bundle_item,
+ * bukan penyusunan turunan per baris.
+ */
+export async function rincianAtpArea(
+  areaId: string,
+  ambang: number = AMBANG_ATP_BAWAAN,
+  batas = 300,
+): Promise<RincianArea & { siapTabel: boolean }> {
+  const [rows, { sebaran, siap }, bundle] = await Promise.all([
+    muatStokAtp(), muatSebaran(), muatKomposisiBundle(),
+  ]);
+  const phaseOut = await muatPhaseOut(rows);
+  const opsi = await muatOpsiGolongan(rows, phaseOut);
+  // HANYA area ini — perambatan bundling memang per area, jadi mempersempitnya
+  // di sini tidak mengubah hasilnya sama sekali, cuma pekerjaannya.
+  const blokir = bundlingTerblokir(bundle.peta, sebaran, [areaId], opsi);
+  return { ...rincianAtp(rows, areaId, sebaran, ambang, blokir, opsi, batas), siapTabel: siap };
 }
 
 /**

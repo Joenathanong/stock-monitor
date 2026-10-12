@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Poster } from './poster';
 import type { AreaWa, DataWa } from './types';
-import { persenTeks as persenAtp } from '@/lib/atp';
+import { persenTeks as persenAtp, type RincianArea, type GrupRincian } from '@/lib/atp';
 import { KANVAS, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
 
 /**
@@ -17,10 +17,129 @@ import { KANVAS, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, se
  */
 const fmt = (n: number) => n.toLocaleString('id-ID');
 
-function Rincian({ a, disp, tampil, onTutup }: {
+/**
+ * Rincian ATP satu cabang — "angka ini dari mana".
+ *
+ * Permintaan user 12 Okt 2026: angka ATP di poster bisa diklik dan memperlihatkan
+ * mana yang ikut hitungan, mana yang tidak, DAN kenapa yang tidak itu tidak
+ * dihitung. Sebelum ini persennya benar tapi tidak bisa diperiksa dari layar;
+ * satu-satunya cara membuktikannya adalah membaca kode.
+ *
+ * Ditarik SAAT DIBUKA, bukan ikut data poster: daftarnya ribuan baris sementara
+ * poster harus tetap ringan — ia juga dipakai bot WhatsApp yang cuma memotret
+ * gambar.
+ */
+function RincianAtp({ area, ambang, autoBuka }: { area: string; ambang: number; autoBuka: boolean }) {
+  const [buka, setBuka] = useState(autoBuka);
+  const [data, setData] = useState<RincianArea | null>(null);
+  const [galat, setGalat] = useState<string | null>(null);
+  const [sibuk, setSibuk] = useState(false);
+  const [lebar, setLebar] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!buka || data || sibuk) return;
+    setSibuk(true);
+    fetch(`/api/atp/rincian?area=${encodeURIComponent(area)}&ambang=${ambang}`, { credentials: 'include' })
+      .then(async (r) => {
+        const j = await r.json().catch(() => null);
+        if (!r.ok || !j?.ok) {
+          // 401 disebut apa adanya: /wa bisa dibuka dengan token poster tanpa
+          // login, dan rincian per SKU sengaja TIDAK ikut token itu.
+          throw new Error(r.status === 401
+            ? 'Rincian ATP hanya untuk pengguna yang login. Buka /atp setelah masuk.'
+            : String(j?.error ?? `Gagal memuat (${r.status})`));
+        }
+        setData(j as RincianArea);
+      })
+      .catch((e) => setGalat(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSibuk(false));
+  }, [buka, data, sibuk, area, ambang]);
+
+  const pembagi = data ? data.grup.filter((g) => g.masukPembagi) : [];
+  const keluar = data ? data.grup.filter((g) => !g.masukPembagi) : [];
+
+  return (
+    <div className="card card-pad">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="card-title">Rincian ATP</div>
+        <button className="btn btn-sm" onClick={() => setBuka((v) => !v)}>
+          {buka ? 'Sembunyikan' : 'Tampilkan rincian'}
+        </button>
+      </div>
+      <div className="text-[12px] text-label">
+        ATP = SKU yang <b>siap</b> (available &gt; {ambang} pcs) dibagi SKU yang <b>ikut pembagi</b>.
+        Yang di luar pembagi tidak menaikkan maupun menurunkan persennya — daftar di bawah
+        menyebut satu per satu beserta sebabnya.
+      </div>
+
+      {!buka ? null : galat ? (
+        <div className="mt-2 text-[12px]" style={{ color: 'var(--critical)' }}>{galat}</div>
+      ) : !data ? (
+        <div className="mt-2 text-[12px] text-label">Memuat rincian…</div>
+      ) : (
+        <>
+          <div className="mt-3 text-[13px]">
+            <b className="font-mono">{persenAtp(data.persen)}</b>
+            {' = '}<span className="font-mono">{fmt(data.siap)}</span> siap ÷{' '}
+            <span className="font-mono">{fmt(data.dihitung)}</span> ikut pembagi
+          </div>
+
+          {[['Ikut pembagi', pembagi], ['Di luar pembagi', keluar]].map(([judul, daftar]) => (
+            <div key={String(judul)} className="mt-3">
+              <div className="text-[12px] font-semibold text-label">{String(judul)}</div>
+              {(daftar as GrupRincian[]).map((g) => (
+                <div key={g.kunci} className="mt-1.5">
+                  <button
+                    className="flex w-full items-center gap-2 text-left"
+                    onClick={() => setLebar((v) => (v === g.kunci ? null : g.kunci))}
+                    title={g.masukPembagi ? 'Ikut menentukan persen ATP' : 'Keluar dari pembagi — tidak mempengaruhi persen'}
+                  >
+                    <span className="text-[12px]" style={{ minWidth: 190 }}>{g.label}</span>
+                    <span className="h-2 flex-1 rounded-full" style={{ background: 'var(--border-subtle)' }}>
+                      <span
+                        className="block h-2 rounded-full"
+                        style={{
+                          width: `${(g.n / Math.max(1, data.grup.reduce((t, x) => t + x.n, 0))) * 100}%`,
+                          background: g.masukPembagi ? 'var(--c1)' : 'var(--border)',
+                        }}
+                      />
+                    </span>
+                    <span className="w-[56px] text-right text-[12px] font-semibold tabular-nums">{fmt(g.n)}</span>
+                    <span className="w-[14px] text-[11px] text-label">{lebar === g.kunci ? '−' : '+'}</span>
+                  </button>
+                  {lebar === g.kunci ? (
+                    <div className="mt-1 max-h-[220px] overflow-auto rounded border p-2" style={{ borderColor: 'var(--border-subtle)' }}>
+                      {g.sku.map((r) => (
+                        <div key={r.sku} className="flex gap-2 py-0.5 text-[11px]">
+                          <span className="font-mono" style={{ minWidth: 230 }}>{r.sku}</span>
+                          <span className="tabular-nums" style={{ minWidth: 60, textAlign: 'right' }}>{fmt(r.qty)}</span>
+                          <span className="text-label">{r.ket}</span>
+                        </div>
+                      ))}
+                      {g.lebih > 0 ? (
+                        <div className="mt-1 text-[11px] text-label">
+                          … {fmt(g.lebih)} baris lagi tidak ditampilkan — buka <b>/atp</b> untuk daftar lengkap
+                          yang bisa difilter dan diunduh.
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+function Rincian({ a, disp, tampil, fokus, onTutup }: {
   a: AreaWa; disp: DoiDisplay;
   /** Status yang ditampilkan — dihitung lintas area, sama dengan posternya. */
   tampil: ReturnType<typeof kunciTampil>;
+  /** 'atp' = dibuka dari angka ATP, jadi rinciannya langsung terbuka. */
+  fokus?: 'atp';
   onTutup: () => void;
 }) {
   const seg = segmenStatus(a.byStatus, tampil);
@@ -97,6 +216,8 @@ function Rincian({ a, disp, tampil, onTutup }: {
             ) : <div className="text-[12px] text-label">Riwayat belum cukup.</div>}
           </div>
 
+          <RincianAtp area={a.area} ambang={a.stok?.ambang ?? 5} autoBuka={fokus === 'atp'} />
+
           <div className="card card-pad">
             <div className="card-title mb-2">Tren ATP</div>
             {(a.trenAtp ?? []).length ? (
@@ -119,7 +240,9 @@ function Rincian({ a, disp, tampil, onTutup }: {
 export default function WaPage() {
   const [data, setData] = useState<DataWa | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pilih, setPilih] = useState<string | null>(null);
+  // Dua medan, bukan satu string: angka ATP punya sasaran kliknya sendiri, dan
+  // yang membedakannya dari klik kartu HANYA fokusnya.
+  const [pilih, setPilih] = useState<{ area: string; fokus?: 'atp' } | null>(null);
   const [unduh, setUnduh] = useState<'idle' | 'proses' | 'gagal'>('idle');
 
   const kunci = useMemo(() => (typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('k') ?? ''), []);
@@ -207,7 +330,7 @@ export default function WaPage() {
   }
   if (!data) return <div className="wa-pesan"><div className="text-[13px] text-label">Memuat…</div></div>;
 
-  const areaTerpilih = data.areas.find((a) => a.area === pilih) ?? null;
+  const areaTerpilih = data.areas.find((a) => a.area === pilih?.area) ?? null;
 
   if (bare) {
     // `data-siap` adalah tanda bagi bot: tunggu selector ini, bukan timer.
@@ -222,10 +345,13 @@ export default function WaPage() {
   return (
     <div className="wa-root" data-siap="1">
       <div className="wa-canvas">
-        <Poster data={data} onPilihArea={setPilih} />
+        <Poster data={data} onPilihArea={(area, fokus) => setPilih({ area, fokus })} />
       </div>
       <div className="wa-bar">
-        <span className="text-[12px] text-label">Klik kartu area untuk rincian · gambar {KANVAS.w}×{KANVAS.h}</span>
+        <span className="text-[12px] text-label">
+          Klik kartu area untuk rincian, atau <b>angka ATP</b> untuk melihat SKU mana yang dihitung
+          dan mana yang tidak · gambar {KANVAS.w}×{KANVAS.h}
+        </span>
         <button className="btn btn-sm btn-primary" onClick={unduhJpg} disabled={unduh === 'proses'}>
           {unduh === 'proses' ? 'Menyiapkan…' : unduh === 'gagal' ? 'Gagal — coba lagi' : 'Unduh JPG'}
         </button>
@@ -235,6 +361,7 @@ export default function WaPage() {
           a={areaTerpilih}
           disp={data.doiDisplay ?? 'BOTH'}
           tampil={kunciTampil(data.areas.map((x) => x.byStatus))}
+          fokus={pilih?.fokus}
           onTutup={() => setPilih(null)}
         />
       ) : null}

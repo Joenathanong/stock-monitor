@@ -705,6 +705,148 @@ export function teksKeluarPembagi(
   return [...per.entries()].map(([sebab, ar]) => `${ar.join(',')} — ${sebab}`).join(' ; ');
 }
 
+/**
+ * RINCIAN ATP satu cabang — siapa yang masuk pembagi, siapa yang tidak, dan kenapa.
+ *
+ * Permintaan user 12 Okt 2026: "buat agar angka atp di klik dapat menampilkan
+ * detail list ... sehingga angka atp transparan."
+ *
+ * ATURAN PALING PENTING DI FUNGSI INI: urutan pemeriksaannya WAJIB sama dengan
+ * `hitungAtp`. Kalau berbeda, rincian akan menjelaskan angka yang BUKAN angka di
+ * layar — dan itu lebih buruk daripada tidak ada rincian sama sekali, karena
+ * orang akan memercayainya. `rincian-atp.test.ts` membandingkan jumlah tiap
+ * kelompok di sini dengan pencacah `hitungAtp` atas data yang sama, jadi dua
+ * urutan yang menyimpang akan gagal di tes, bukan di kepala pembaca.
+ */
+export type KelompokRincian =
+  | 'SIAP'
+  | 'BELUM_SIAP'
+  | 'TIDAK_DISEBAR'
+  | 'BELUM_DIPUTUS'
+  | 'PHASE_OUT'
+  | 'CLEARANCE'
+  | 'GIMMICK'
+  | 'KOMPONEN'
+  | 'TIDAK_AKTIF'
+  | 'BUKAN_KATEGORI_SKU';
+
+export const LABEL_KELOMPOK: Record<KelompokRincian, string> = {
+  SIAP: 'Dihitung & siap',
+  BELUM_SIAP: 'Dihitung, stok kurang',
+  TIDAK_DISEBAR: 'Sengaja tidak disebar',
+  BELUM_DIPUTUS: 'Belum diputuskan',
+  PHASE_OUT: 'Phase out',
+  CLEARANCE: 'Clearance (CS-)',
+  GIMMICK: 'Gimmick',
+  KOMPONEN: 'Komponen bundling tidak dihitung',
+  TIDAK_AKTIF: 'Nonaktif di OCS',
+  BUKAN_KATEGORI_SKU: 'Di luar kategori ATP',
+};
+
+/** Kelompok yang IKUT pembagi ATP. Sisanya keluar. */
+export const MASUK_PEMBAGI: ReadonlySet<KelompokRincian> = new Set<KelompokRincian>(['SIAP', 'BELUM_SIAP']);
+
+export type BarisRincian = {
+  sku: string;
+  name: string;
+  qty: number;
+  /** Keterangan tambahan — mis. komponen mana yang memblokir. '' kalau tidak ada. */
+  ket: string;
+};
+
+export type GrupRincian = {
+  kunci: KelompokRincian;
+  label: string;
+  n: number;
+  masukPembagi: boolean;
+  /** Dipotong `batas` baris; `n` tetap jumlah sebenarnya. */
+  sku: BarisRincian[];
+  /** Berapa baris yang tidak ikut dikirim. */
+  lebih: number;
+};
+
+export type RincianArea = {
+  areaId: string;
+  ambang: number;
+  dihitung: number;
+  siap: number;
+  persen: number | null;
+  grup: GrupRincian[];
+};
+
+export function rincianAtp(
+  rows: BarisStokAtp[],
+  areaId: string,
+  sebaran: Sebaran,
+  ambang: number = AMBANG_ATP_BAWAAN,
+  blokir: Map<string, AlasanBlokir[]> = new Map(),
+  opsi?: OpsiGolongan,
+  /** Maksimum baris per kelompok yang dikirim. Jumlahnya tetap utuh. */
+  batas = 300,
+): RincianArea {
+  const per = new Map<KelompokRincian, BarisRincian[]>();
+  const cacah = new Map<KelompokRincian, number>();
+  const taruh = (k: KelompokRincian, b: BarisRincian) => {
+    cacah.set(k, (cacah.get(k) ?? 0) + 1);
+    const arr = per.get(k) ?? [];
+    if (arr.length < batas) arr.push(b);
+    per.set(k, arr);
+  };
+
+  const setelan = opsi?.setelan.get(areaId) ?? null;
+  for (const r of rows) {
+    if (r.areaId !== areaId) continue;
+    const b: BarisRincian = {
+      sku: r.sku, name: String(r.name ?? ''), qty: Number(r.availableQty ?? 0), ket: '',
+    };
+
+    // --- urutan DISAMAKAN dengan hitungAtp, baris per baris ---
+    const k = kelayakan(r, 'AKTIF');
+    if (!k.layak) { taruh(k.sebab!, b); continue; }
+
+    const kunci = kunciSebaran(r.sku, r.areaId);
+    const golongan = opsi && setelan ? golonganDikecualikan(r.sku, opsi.bahan, setelan) : null;
+    if (golongan) {
+      taruh(golongan, { ...b, ket: 'golongan ini tidak dihitung ke ATP cabang ini' });
+      continue;
+    }
+
+    const putusan = sebaran.get(kunci);
+    if (putusan === undefined) { taruh('BELUM_DIPUTUS', b); continue; }
+    if (putusan === false) { taruh('TIDAK_DISEBAR', b); continue; }
+
+    const alasan = blokir.get(kunci) ?? [];
+    if (alasan.length) {
+      const ket = alasan.map((x) => `${x.sku} (${x.sebab === 'TIDAK_DISEBAR' ? 'tidak disebar' : LABEL_GOLONGAN[x.sebab].toLowerCase()})`).join(', ');
+      taruh('KOMPONEN', { ...b, ket });
+      continue;
+    }
+
+    taruh(Number(r.availableQty) > ambang ? 'SIAP' : 'BELUM_SIAP', b);
+  }
+
+  const urut: KelompokRincian[] = [
+    'SIAP', 'BELUM_SIAP', 'TIDAK_DISEBAR', 'BELUM_DIPUTUS',
+    'PHASE_OUT', 'CLEARANCE', 'GIMMICK', 'KOMPONEN',
+    'TIDAK_AKTIF', 'BUKAN_KATEGORI_SKU',
+  ];
+  const grup: GrupRincian[] = urut
+    .map((kunci) => {
+      const n = cacah.get(kunci) ?? 0;
+      const sku = (per.get(kunci) ?? []).slice().sort((a, b) => a.sku.localeCompare(b.sku));
+      return { kunci, label: LABEL_KELOMPOK[kunci], n, masukPembagi: MASUK_PEMBAGI.has(kunci), sku, lebih: n - sku.length };
+    })
+    .filter((g) => g.n > 0);
+
+  const siap = cacah.get('SIAP') ?? 0;
+  const dihitung = siap + (cacah.get('BELUM_SIAP') ?? 0);
+  return {
+    areaId, ambang, dihitung, siap,
+    persen: dihitung > 0 ? (siap / dihitung) * 100 : null,
+    grup,
+  };
+}
+
 /** Satu SKU yang belum punya keputusan sebaran sama sekali. */
 export type SkuBelumDiset = {
   sku: string;

@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Poster } from './poster';
 import type { AreaWa, DataWa } from './types';
 import { persenTeks as persenAtp, type RincianArea, type GrupRincian } from '@/lib/atp';
@@ -31,6 +31,30 @@ const fmt = (n: number) => n.toLocaleString('id-ID');
  */
 function RincianAtp({ area, ambang, autoBuka }: { area: string; ambang: number; autoBuka: boolean }) {
   const [buka, setBuka] = useState(autoBuka);
+  const kotak = useRef<HTMLDivElement>(null);
+
+  /*
+    DIGULIRKAN KE TAMPILAN. Tanpa ini fiturnya ADA tapi tidak terlihat.
+    Diukur di produksi 12 Okt 2026, beberapa menit setelah terbit: kartu ini
+    duduk 770px dari atas isi dialog yang tingginya 647px, dan dialognya selalu
+    terbuka di scrollTop 0. Jadi orang yang menekan angka ATP melihat "Sebaran
+    status" dan menyimpulkan tombolnya tidak berfungsi — persis yang user
+    laporkan ("kenapa menu untuk klik atp muncul listnya belum ada?").
+
+    Yang digeser HANYA isi dialog, bukan halaman: `scrollIntoView` ikut
+    menggulirkan jendela di belakangnya, dan poster di belakang dialog akan
+    ikut melompat.
+  */
+  useEffect(() => {
+    if (!autoBuka) return;
+    const t = setTimeout(() => {
+      const el = kotak.current;
+      const box = el?.closest('.wa-sheet-body');
+      if (!el || !box) return;
+      box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
+    }, 0);
+    return () => clearTimeout(t);
+  }, [autoBuka]);
   const [data, setData] = useState<RincianArea | null>(null);
   const [galat, setGalat] = useState<string | null>(null);
   const [sibuk, setSibuk] = useState(false);
@@ -59,7 +83,7 @@ function RincianAtp({ area, ambang, autoBuka }: { area: string; ambang: number; 
   const keluar = data ? data.grup.filter((g) => !g.masukPembagi) : [];
 
   return (
-    <div className="card card-pad">
+    <div className="card card-pad" ref={kotak}>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="card-title">Rincian ATP</div>
         <button className="btn btn-sm" onClick={() => setBuka((v) => !v)}>

@@ -210,6 +210,17 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
     // Hijau kalau targetnya terpenuhi, merah kalau tidak — dan arah "terpenuhi"
     // berlawanan di dua ukuran ini: DOI di BAWAH target itu baik, ATP di ATAS
     // target itu baik. Lihat `nilaiDoi`/`nilaiAtp`.
+    /*
+      Jarak baris target dari garis dasar angka besar: 17 -> 21 (permintaan user
+      12 Okt 2026, "turunkan sedikit target, saat ini terlalu mepet").
+
+      Sebabnya pembesaran teks tadi: pada ukuran 16 puncak huruf target naik ke
+      ±5px di bawah garis dasar angka 38px, sementara ekor angka itu turun ±9px
+      — jadi keduanya saling masuk ke ruang yang sama. Di 21 puncaknya turun ke
+      ±9px dan ekor target berhenti di ±25px, masih di dalam pita 26px, jadi
+      tinggi kartu TIDAK berubah dan grid kotak di bawahnya tidak tergeser.
+    */
+    const Y_TARGET = 21;
     const nD = nilaiDoi(nilaiUtama, a.ambang);
     // Target ATP CABANG INI, bukan satu angka untuk semua — sejalan dengan
     // ambang DOI yang juga per cabang.
@@ -253,7 +264,7 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
       // lihat wa-target.test.ts, yang mengukur sampai 10 area.
       bagian.push(
         <Teks
-          key="tgt" x={x + pad} y={cy + 17} size={UKURAN_TARGET} weight={700}
+          key="tgt" x={x + pad} y={cy + Y_TARGET} size={UKURAN_TARGET} weight={700}
           fill={nD ? warnaTarget(nD.baik) : WARNA.tintaLabel}
         >
           {potongTeks(tDoi, ruangTarget(isi, kanan), UKURAN_TARGET)}
@@ -264,7 +275,7 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
     if (kanan) {
       bagian.push(
         <Teks
-          key="atp2" x={x + w - pad} y={cy + 17} size={UKURAN_TARGET} weight={700} anchor="end"
+          key="atp2" x={x + w - pad} y={cy + Y_TARGET} size={UKURAN_TARGET} weight={700} anchor="end"
           // Diwarnai HANYA kalau isinya murni target ATP. Di mode dua opsi
           // teksnya memuat persen DAN target dalam satu baris; mewarnai merah
           // seluruhnya akan menyatakan persennya juga "salah", padahal yang

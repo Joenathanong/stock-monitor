@@ -231,6 +231,19 @@ model Area {
   leadTimeDays Int?
   /// Target ketersediaan (ATP) cabang ini, dalam persen. Di bawah ini = merah di poster.
   atpTarget Int?
+  /// Golongan SKU yang TIDAK dihitung ke ATP cabang ini. null = ikut baris GABUNGAN.
+  ///
+  /// Dipisah per cabang atas permintaan user 12 Okt 2026 ("ada settingnya di tiap
+  /// area kota"), sejalan dengan ambang DOI: aturan sebuah cabang ditulis di baris
+  /// cabang itu sendiri, tidak ada lagi angka global yang menimpanya diam-diam.
+  ///
+  /// Ketiganya juga MERAMBAT ke bundling yang memuat komponen bergolongan itu.
+  /// Perambatannya diturunkan saat hitung dan tidak pernah ditulis ke `atp_share`
+  /// — jadi begitu sebuah SKU keluar dari daftar phase out, bundling-nya hidup
+  /// kembali sendiri tanpa ada yang perlu mengingat membatalkan centang.
+  atpKecualiPhaseOut  Boolean?
+  atpKecualiClearance Boolean?
+  atpKecualiGimmick   Boolean?
   /// Tanggal mulai operasional - menggantikan pengaturan `sales_area_start`.
   startDate DateTime? @db.Date
   note      String?   @db.VarChar(300)

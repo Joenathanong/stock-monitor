@@ -1,6 +1,6 @@
 import { writeWorkbook, type Lembar } from '@/lib/xlsx';
 import { muatAtp } from '@/lib/atp-store';
-import { persenTeks, AMBANG_ATP_BAWAAN, type SebabTolak } from '@/lib/atp';
+import { persenTeks, AMBANG_ATP_BAWAAN, GOLONGAN_ATP, LABEL_GOLONGAN, type SebabTolak } from '@/lib/atp';
 import { toDateKeyUtc } from '@/lib/dates';
 
 export const dynamic = 'force-dynamic';
@@ -78,6 +78,10 @@ export async function GET(req: Request) {
         'Bundling yang salah satu komponennya TIDAK disebar ke area itu juga keluar dari '
           + 'pembagi, walau centangnya "Ya" — lihat kolom terakhir. Centangnya tidak diubah; '
           + 'begitu komponennya disebar lagi, bundling-nya ikut kembali sendiri.',
+        'Phase Out, Clearance (kode CS-) dan Gimmick keluar dari pembagi di cabang yang '
+          + 'mengaktifkan aturannya (Pengaturan -> Cabang / Area) — begitu juga bundling yang '
+          + 'memuatnya sebagai komponen. Kolom "ATP % termasuk semua" adalah angka yang sama '
+          + 'kalau ketiganya ikut dihitung; selisihnya adalah yang ditahan aturan itu.',
       ],
       columns: [
         { header: 'Area', key: 'area', width: 16 },
@@ -86,6 +90,9 @@ export async function GET(req: Request) {
         { header: 'Pembagi (dibagikan & layak)', key: 'dihitung', width: 27 },
         { header: 'Tidak disebar', key: 'takDisebar', width: 15 },
         { header: '— di antaranya karena komponen bundling', key: 'takDisebarTurunan', width: 38 },
+        { header: 'Tak dihitung — golongan (SKU)', key: 'golSku', width: 29 },
+        { header: 'Tak dihitung — golongan (bundling)', key: 'golBdl', width: 33 },
+        { header: 'ATP % termasuk semua', key: 'persenTermasuk', width: 21 },
         { header: 'Belum diputuskan', key: 'belum', width: 18 },
         { header: 'Nonaktif di OCS', key: 'nonaktif', width: 16 },
         { header: 'Bukan kategori Sku', key: 'bukanSku', width: 19 },
@@ -99,6 +106,9 @@ export async function GET(req: Request) {
           dihitung: h.dihitung,
           takDisebar: h.takDisebar,
           takDisebarTurunan: h.takDisebarTurunan,
+          golSku: GOLONGAN_ATP.reduce((t, g) => t + (h.takDihitungGolongan?.[g] ?? 0), 0),
+          golBdl: GOLONGAN_ATP.reduce((t, g) => t + (h.takDisebarGolongan?.[g] ?? 0), 0),
+          persenTermasuk: persenTeks(h.persenTermasuk),
           belum: h.belumDiputus,
           nonaktif: h.ditolak.TIDAK_AKTIF,
           bukanSku: h.ditolak.BUKAN_KATEGORI_SKU,
@@ -109,7 +119,9 @@ export async function GET(req: Request) {
           persen: persenTeks(data.keseluruhan.persen),
           siap: data.keseluruhan.siap,
           dihitung: data.keseluruhan.dihitung,
-          takDisebar: '', takDisebarTurunan: '', belum: '', nonaktif: '', bukanSku: '', kotor: '',
+          takDisebar: '', takDisebarTurunan: '',
+          golSku: '', golBdl: '', persenTermasuk: persenTeks(data.keseluruhan.persenTermasuk),
+          belum: '', nonaktif: '', bukanSku: '', kotor: '',
         },
       ],
     },
@@ -131,6 +143,7 @@ export async function GET(req: Request) {
         { header: 'SKU', key: 'sku', width: 34 },
         { header: 'Turunan', key: 'turunan', width: 9 },
         { header: 'Phase out', key: 'phaseout', width: 16 },
+        { header: 'Tak dihitung ATP', key: 'golongan', width: 18 },
         { header: 'Stok total', key: 'stok', width: 11 },
         // Kolom "Stok ..." hanya untuk DIBACA — importer melewatinya, jadi
         // mengubahnya di Excel tidak mengubah apa pun. Ada supaya sebaran bisa
@@ -151,6 +164,7 @@ export async function GET(req: Request) {
             : s.phaseOut.lewatHari !== null && s.phaseOut.lewatHari > 0
               ? `LEWAT ${s.phaseOut.lewatHari} hari (${s.phaseOut.dispositionLabel})`
               : s.phaseOut.dispositionLabel + (s.phaseOut.targetOutDate ? ` s/d ${s.phaseOut.targetOutDate}` : ''),
+          golongan: s.golongan ? LABEL_GOLONGAN[s.golongan] : '',
           name: s.name,
           kat: s.kategori,
           brand: s.brand || '(tanpa brand)',

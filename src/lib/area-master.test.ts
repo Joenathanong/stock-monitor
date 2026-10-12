@@ -8,7 +8,9 @@ import {
 const area = (o: Partial<BarisArea> = {}): BarisArea => ({
   code: 'GJSB', name: 'Surabaya', isActive: true, sortOrder: 10,
   doiCritical: null, doiMin: null, doiMax: null,
-  leadTimeDays: null, atpTarget: null, startDate: null, note: null, ...o,
+  leadTimeDays: null, atpTarget: null,
+  atpKecualiPhaseOut: null, atpKecualiClearance: null, atpKecualiGimmick: null,
+  startDate: null, note: null, ...o,
 });
 
 test('peta kode dibangun dari tabel, bukan dari konstanta', () => {
@@ -257,7 +259,12 @@ test('kolomTersimpan memuat SETIAP kolom baris, tanpa kecuali', () => {
   const lengkap: BarisArea = {
     code: 'GBJD', name: 'Pusat', isActive: true, sortOrder: 10,
     doiCritical: 4, doiMin: 6, doiMax: 7,
-    leadTimeDays: 1, atpTarget: 95, startDate: '2026-06-01', note: 'catatan',
+    leadTimeDays: 1, atpTarget: 95,
+    // Ditulis TEGAS, bukan null: tes ini membandingkan daftar kolom yang
+    // tersimpan dengan daftar kolom yang ada, jadi nilai yang kebetulan null
+    // tidak boleh menyembunyikan kolom yang hilang.
+    atpKecualiPhaseOut: true, atpKecualiClearance: false, atpKecualiGimmick: true,
+    startDate: '2026-06-01', note: 'catatan',
   };
   const tersimpan = kolomTersimpan(lengkap);
   const diharapkan = Object.keys(lengkap).filter((k) => k !== 'code').sort();

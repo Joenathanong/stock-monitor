@@ -32,6 +32,16 @@ export async function GET() {
   }));
 }
 
+/**
+ * Saklar tiga keadaan: null = ikut baris GABUNGAN, true/false = ditentukan cabang.
+ *
+ * Tidak memakai `Boolean(v)` langsung karena itu mengubah "belum diatur"
+ * (undefined) menjadi `false` — artinya cabang yang tidak menyentuh kolom ini
+ * akan diam-diam BERHENTI mewarisi aturan GABUNGAN.
+ */
+const tribool = (v: unknown): boolean | null =>
+  (v === null || v === undefined || v === '' ? null : Boolean(v));
+
 const angka = (v: unknown): number | null => {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
@@ -56,6 +66,9 @@ export async function PUT(req: Request) {
     doiMax: angka(b.doiMax),
     leadTimeDays: angka(b.leadTimeDays),
     atpTarget: angka(b.atpTarget),
+    atpKecualiPhaseOut: tribool(b.atpKecualiPhaseOut),
+    atpKecualiClearance: tribool(b.atpKecualiClearance),
+    atpKecualiGimmick: tribool(b.atpKecualiGimmick),
     startDate: b.startDate ? String(b.startDate).slice(0, 10) : null,
     note: b.note ? String(b.note).slice(0, 300) : null,
   };

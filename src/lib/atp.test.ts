@@ -4,12 +4,26 @@ import {
   AMBANG_ATP_BAWAAN, PRIORITAS_BRAND, brandMenang, adalahBundle, skuKotor,
   kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan, persenTeks,
   petaBrand, skuBelumDiset, susunTurunan, bundlingTerblokir, bundlingBertingkat, lingkupBorongan,
-  type BarisStokAtp, type Sebaran, type PetaBundle,
+  type BarisStokAtp, type Sebaran, type PetaBundle, type HasilArea,
 } from './atp';
 
 const baris = (o: Partial<BarisStokAtp> = {}): BarisStokAtp => ({
   sku: 'ACNE-CLEANSER', areaId: 'Medan', availableQty: 100,
   isActive: true, category: 'Sku', sapCode: '1201010101', ...o,
+});
+
+/**
+ * HasilArea untuk menguji penjumlahan. Pakai pabrik, bukan objek literal:
+ * setiap kolom baru di HasilArea dulu memaksa tiga literal di berkas ini
+ * diperbaiki satu per satu, dan satu yang terlewat berarti tesnya berhenti
+ * mengecek apa pun selain bentuk tipe.
+ */
+const hasilArea = (o: Partial<HasilArea> & { areaId: string }): HasilArea => ({
+  dihitung: 0, siap: 0, persen: null, takDisebar: 0, takDisebarTurunan: 0, belumDiputus: 0,
+  takDihitungGolongan: { PHASE_OUT: 0, CLEARANCE: 0, GIMMICK: 0 },
+  takDisebarGolongan: { PHASE_OUT: 0, CLEARANCE: 0, GIMMICK: 0 },
+  dihitungTermasuk: 0, siapTermasuk: 0, persenTermasuk: null,
+  ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0 }, perKategori: {}, kotor: 0, ...o,
 });
 
 const sebaran = (pasangan: [string, string, boolean][]): Sebaran =>
@@ -203,10 +217,8 @@ test('ATP keseluruhan dijumlahkan, BUKAN dirata-rata dari persen per area', () =
   // Cabang besar 300 SKU 90%, cabang kecil 2 SKU 0%.
   // Rata-rata persen = 45% (menyesatkan). Jumlah = 270/302 = 89,4%.
   const hasil = [
-    { areaId: 'Besar', dihitung: 300, siap: 270, persen: 90, takDisebar: 0, takDisebarTurunan: 0, belumDiputus: 0,
-      ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0 }, perKategori: {}, kotor: 0 },
-    { areaId: 'Kecil', dihitung: 2, siap: 0, persen: 0, takDisebar: 0, takDisebarTurunan: 0, belumDiputus: 0,
-      ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0 }, perKategori: {}, kotor: 0 },
+    hasilArea({ areaId: 'Besar', dihitung: 300, siap: 270, persen: 90 }),
+    hasilArea({ areaId: 'Kecil', dihitung: 2, siap: 0, persen: 0 }),
   ];
   const t = atpKeseluruhan(hasil);
   assert.equal(t.dihitung, 302);
@@ -218,9 +230,8 @@ test('ATP keseluruhan dijumlahkan, BUKAN dirata-rata dari persen per area', () =
 test('cabang berpembagi 0 tidak bisa jadi "terlemah"', () => {
   // Kalau ikut, cabang baru yang belum diisi akan selalu jadi "cabang terlemah"
   // dan menutupi cabang yang benar-benar bermasalah.
-  const kosong = { areaId: 'Bali', dihitung: 0, siap: 0, persen: null, takDisebar: 0, takDisebarTurunan: 0,
-    belumDiputus: 10, ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0 }, perKategori: {}, kotor: 0 };
-  const isi = { ...kosong, areaId: 'Medan', dihitung: 10, siap: 7, persen: 70, belumDiputus: 0 };
+  const kosong = hasilArea({ areaId: 'Bali', belumDiputus: 10 });
+  const isi = hasilArea({ areaId: 'Medan', dihitung: 10, siap: 7, persen: 70 });
   assert.equal(atpKeseluruhan([kosong, isi]).terlemah?.areaId, 'Medan');
   assert.equal(atpKeseluruhan([kosong]).terlemah, null);
 });
@@ -481,7 +492,10 @@ test('komponen "Tidak" di sebuah cabang memblokir bundling DI CABANG ITU SAJA', 
     sebaran([['KOMP-A', 'Makassar', false]]),
     ['Makassar', 'Medan'],
   );
-  assert.deepEqual(b.get(kunciSebaran('BDL-X', 'Makassar')), ['KOMP-A']);
+  // Sejak 12 Okt 2026 sebabnya ikut dilaporkan, bukan hanya nama komponennya:
+  // ada DUA sebab yang bisa memblokir (keputusan sebaran vs golongan), dan
+  // angka pendamping ATP bergantung pada bisa-tidaknya keduanya dibedakan.
+  assert.deepEqual(b.get(kunciSebaran('BDL-X', 'Makassar')), [{ sku: 'KOMP-A', sebab: 'TIDAK_DISEBAR' }]);
   assert.equal(b.has(kunciSebaran('BDL-X', 'Medan')), false, 'Medan tidak ikut terblokir');
 });
 
@@ -509,7 +523,10 @@ test('SEMUA komponen yang memblokir disebut, bukan yang pertama saja', () => {
     sebaran([['A', 'Pusat', false], ['C', 'Pusat', false], ['B', 'Pusat', true]]),
     ['Pusat'],
   );
-  assert.deepEqual(b.get(kunciSebaran('BDL-X', 'Pusat')), ['A', 'C']);
+  assert.deepEqual(b.get(kunciSebaran('BDL-X', 'Pusat')), [
+    { sku: 'A', sebab: 'TIDAK_DISEBAR' },
+    { sku: 'C', sebab: 'TIDAK_DISEBAR' },
+  ]);
 });
 
 test('hitungAtp: bundling terblokir KELUAR dari pembagi, dan dihitung terpisah', () => {

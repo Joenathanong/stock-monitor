@@ -139,6 +139,108 @@ export const skuKotor = (sku: string) => {
  * Bundle TIDAK lagi ditolak. `adalahBundle()` tetap ada dan tetap dipakai —
  * sekarang untuk menentukan brand dari kodenya, bukan untuk membuang barisnya.
  */
+/**
+ * Golongan SKU yang boleh DIKELUARKAN dari ATP, per cabang.
+ *
+ * KEPUTUSAN USER 12 Okt 2026: "kode dengan status Phase Out, Clearance Sale
+ * (awal kode sku CS-), dan gimmick. Turunannya (komponen bundling) tidak perlu
+ * dihitung." Ketiganya satu aturan, dan aturan itu MERAMBAT ke bundling yang
+ * memuat komponennya.
+ *
+ * KENAPA PERLU JADI ATURAN, padahal hasilnya hampir sama dengan sekarang.
+ * Diukur 12 Okt 2026 di data produksi: ketiga golongan ini memang sudah nyaris
+ * seluruhnya keluar dari pembagi — Phase Out 323 dari 323 sel, Clearance 130
+ * dari 130 — tapi yang mengeluarkannya adalah 617 CENTANG MANUAL, bukan aturan.
+ * Artinya satu SKU baru yang masuk daftar phase out besok tidak mengecualikan
+ * dirinya, dan yang lebih berbahaya: kalau centangnya dibiarkan "Belum", SKU-nya
+ * sendiri aman (Belum memang keluar dari pembagi) tapi BUNDLING-nya tetap masuk
+ * pembagi — karena hanya "Tidak" yang tegas yang merambat. Jadi kebocorannya
+ * muncul di sisi bundling, tanpa ada satu pun angka di layar yang berubah
+ * mencurigakan. Gimmick membuktikan lubang itu nyata: 66 sel masih "Ya" dan 13
+ * "Belum" saat aturan ini dibuat.
+ *
+ * Dampaknya ke angka kecil (+1 sampai +2,6 poin per cabang) — nilainya memang
+ * bukan di angkanya, tapi di hilangnya 617 centang sebagai penopang.
+ */
+export type GolonganAtp = 'PHASE_OUT' | 'CLEARANCE' | 'GIMMICK';
+
+export const GOLONGAN_ATP: readonly GolonganAtp[] = ['PHASE_OUT', 'CLEARANCE', 'GIMMICK'] as const;
+
+export const LABEL_GOLONGAN: Record<GolonganAtp, string> = {
+  PHASE_OUT: 'Phase out',
+  CLEARANCE: 'Clearance (CS-)',
+  GIMMICK: 'Gimmick',
+};
+
+/**
+ * Clearance sale — prefiks `CS-` DI MANA PUN ia muncul, bukan hanya di awal.
+ *
+ * Toleransinya sengaja persis sama dengan `adalahBundle`: SKU di OCS kotor dan
+ * bisa berawalan `"- "` atau `"90 "` (contoh nyata: `"- BDL-HANASUI-…"`,
+ * `"90 FYNE-BRIGHT-BARRIER-MOIST"`). Memeriksa `startsWith('CS-')` saja — cara
+ * DOI melakukannya di SQL `sku NOT LIKE 'CS-%'` — akan melewatkan bentuk kotor
+ * itu tanpa ada yang tahu.
+ */
+export const adalahClearance = (sku: string) => /(^|[^A-Za-z0-9])CS-/i.test(String(sku ?? ''));
+
+/** Golongan mana yang dikecualikan di sebuah cabang. */
+export type SetelanKecuali = { phaseOut: boolean; clearance: boolean; gimmick: boolean };
+
+/** Bawaan: ketiganya dikecualikan — keadaan yang user minta 12 Okt 2026. */
+export const KECUALI_BAWAAN: SetelanKecuali = { phaseOut: true, clearance: true, gimmick: true };
+
+/** Tidak ada yang dikecualikan — dipakai untuk menghitung angka pendamping. */
+export const KECUALI_KOSONG: SetelanKecuali = { phaseOut: false, clearance: false, gimmick: false };
+
+/**
+ * Bahan penentu golongan. `phaseOut` dicocokkan di luar modul ini (lewat
+ * `pencocokPhaseOut`, aturan yang sama dengan mesin DOI), `kategori` dari OCS.
+ */
+export type BahanGolongan = {
+  phaseOut: ReadonlySet<string>;
+  kategori: ReadonlyMap<string, string>;
+};
+
+/** Golongan sebuah SKU, TANPA melihat setelan cabang — untuk ditampilkan. */
+export function golonganSku(sku: string, bahan: BahanGolongan): GolonganAtp | null {
+  const s = String(sku ?? '');
+  if (bahan.phaseOut.has(s)) return 'PHASE_OUT';
+  if (adalahClearance(s)) return 'CLEARANCE';
+  if (bahan.kategori.get(s) === 'Gimmick') return 'GIMMICK';
+  return null;
+}
+
+/**
+ * Golongan yang membuat SKU ini KELUAR dari ATP sebuah cabang. null = ikut dihitung.
+ *
+ * Diperiksa per setelan, bukan "tentukan golongan dulu lalu lihat saklarnya":
+ * sebuah SKU bisa sekaligus phase out DAN berkode `CS-`. Kalau Phase Out
+ * dimatikan di cabang itu sementara Clearance menyala, ia tetap harus keluar —
+ * lewat Clearance. Mengklasifikasi lebih dulu akan membuatnya ikut dihitung,
+ * dan itu salah.
+ */
+export function golonganDikecualikan(
+  sku: string,
+  bahan: BahanGolongan,
+  setelan: SetelanKecuali,
+): GolonganAtp | null {
+  const s = String(sku ?? '');
+  if (setelan.phaseOut && bahan.phaseOut.has(s)) return 'PHASE_OUT';
+  if (setelan.clearance && adalahClearance(s)) return 'CLEARANCE';
+  if (setelan.gimmick && bahan.kategori.get(s) === 'Gimmick') return 'GIMMICK';
+  return null;
+}
+
+/** Setelan golongan per area + bahannya. Tidak diisi = aturan golongan tidak berlaku. */
+export type OpsiGolongan = {
+  bahan: BahanGolongan;
+  /** areaId -> setelan. Area yang tidak ada di peta dianggap tanpa pengecualian. */
+  setelan: ReadonlyMap<string, SetelanKecuali>;
+};
+
+const kosongGolongan = (): Record<GolonganAtp, number> =>
+  ({ PHASE_OUT: 0, CLEARANCE: 0, GIMMICK: 0 });
+
 export function kelayakan(r: BarisStokAtp, saring: SaringAktif = 'AKTIF'): Kelayakan {
   const kotor = skuKotor(r.sku);
   const cocokAktif = saring === 'SEMUA' || (saring === 'AKTIF' ? r.isActive : !r.isActive);
@@ -184,22 +286,45 @@ export const kunciSebaran = (sku: string, areaId: string) => `${areaId}\u0000${s
  *     komponen yang ternyata bundling juga. `bundlingBertingkat()` di bawah
  *     menjaga anggapan itu — kalau suatu hari muncul, ia terlihat.
  */
+export type SebabBlokir = 'TIDAK_DISEBAR' | GolonganAtp;
+
+/** Satu komponen yang memblokir, DENGAN sebabnya — sebab inilah yang dilaporkan. */
+export type AlasanBlokir = { sku: string; sebab: SebabBlokir };
+
 export function bundlingTerblokir(
   peta: PetaBundle,
   sebaran: Sebaran,
   areas: string[],
-): Map<string, string[]> {
-  const out = new Map<string, string[]>();
+  /** Tidak diisi = hanya aturan sebaran yang berlaku (perilaku sebelum 12 Okt 2026). */
+  opsi?: OpsiGolongan,
+): Map<string, AlasanBlokir[]> {
+  const out = new Map<string, AlasanBlokir[]>();
   for (const [bundleSku, komposisi] of peta) {
     for (const a of areas) {
-      const mati = komposisi
-        .filter((k) => sebaran.get(kunciSebaran(k.itemSku, a)) === false)
-        .map((k) => k.itemSku);
-      if (mati.length) out.set(kunciSebaran(bundleSku, a), mati);
+      const setelan = opsi?.setelan.get(a) ?? null;
+      const alasan: AlasanBlokir[] = [];
+      for (const k of komposisi) {
+        // GOLONGAN DIPERIKSA LEBIH DULU, dan itu bukan sekadar urutan.
+        //
+        // 617 sel sudah dicentang "Tidak" justru KARENA golongannya. Kalau
+        // sebaran diperiksa dulu, seluruhnya terlapor sebagai 'TIDAK_DISEBAR'
+        // dan sebab sebenarnya hilang — padahal sebab itulah yang menentukan
+        // apakah selnya kembali masuk pembagi pada angka pendamping.
+        const g = opsi && setelan ? golonganDikecualikan(k.itemSku, opsi.bahan, setelan) : null;
+        if (g) { alasan.push({ sku: k.itemSku, sebab: g }); continue; }
+        if (sebaran.get(kunciSebaran(k.itemSku, a)) === false) {
+          alasan.push({ sku: k.itemSku, sebab: 'TIDAK_DISEBAR' });
+        }
+      }
+      if (alasan.length) out.set(kunciSebaran(bundleSku, a), alasan);
     }
   }
   return out;
 }
+
+/** true = seluruh sebab blokir adalah golongan, tidak satu pun keputusan manusia. */
+export const blokirMurniGolongan = (alasan: AlasanBlokir[]): boolean =>
+  alasan.length > 0 && alasan.every((x) => x.sebab !== 'TIDAK_DISEBAR');
 
 /**
  * Komponen yang ternyata bundling juga — penelusuran berlapis BELUM didukung.
@@ -234,6 +359,31 @@ export type HasilArea = {
    * "26 SKU saya set Tidak" tidak pernah terbaca sebagai "38".
    */
   takDisebarTurunan: number;
+  /**
+   * Keluar pembagi karena GOLONGANNYA dikecualikan di cabang ini — baris SKU-nya
+   * sendiri, bukan bundling. Barisnya tetap tampil di tabel (keputusan user 12
+   * Okt 2026), hanya tidak ikut persen.
+   */
+  takDihitungGolongan: Record<GolonganAtp, number>;
+  /** Bundling yang keluar karena memuat komponen bergolongan itu. */
+  takDisebarGolongan: Record<GolonganAtp, number>;
+  /**
+   * Pembagi & pembilang kalau ketiga golongan itu IKUT dihitung.
+   *
+   * Ada supaya pengecualian tidak bisa jadi tempat sembunyi: selisihnya 8-11
+   * poin (diukur 12 Okt 2026), terlalu besar untuk tidak kelihatan. Angka ini
+   * menjawab pertanyaan yang berbeda dari ATP utama — "pesanan yang masuk hari
+   * ini bisa dipenuhi atau tidak", selama barangnya masih ada stok.
+   *
+   * Sel yang ditahan keputusan manusia yang BUKAN karena golongan tetap keluar
+   * dari angka ini. Yang tidak bisa dibedakan: SKU phase out yang dicentang
+   * "Tidak" karena alasan lain — ia ikut kembali di sini. Jumlahnya tidak
+   * diketahui dan memang tidak bisa diketahui dari data, karena centangnya tidak
+   * menyimpan alasan.
+   */
+  dihitungTermasuk: number;
+  siapTermasuk: number;
+  persenTermasuk: number | null;
   /** Layak ATP tapi belum ada keputusannya — keluar dari pembagi. */
   belumDiputus: number;
   /** Tidak layak ATP, dirinci sebabnya. */
@@ -262,7 +412,9 @@ export function hitungAtp(
   ambang: number = AMBANG_ATP_BAWAAN,
   saring: SaringAktif = 'AKTIF',
   /** Dari `bundlingTerblokir()`. Kosong = aturan turunan tidak berlaku. */
-  blokir: Map<string, string[]> = new Map(),
+  blokir: Map<string, AlasanBlokir[]> = new Map(),
+  /** Setelan golongan per cabang. Tidak diisi = tidak ada golongan yang dikecualikan. */
+  opsi?: OpsiGolongan,
 ): HasilArea[] {
   const per = new Map<string, HasilArea>();
   const ambil = (areaId: string): HasilArea => {
@@ -270,6 +422,8 @@ export function hitungAtp(
     if (!h) {
       h = {
         areaId, dihitung: 0, siap: 0, persen: null, takDisebar: 0, takDisebarTurunan: 0, belumDiputus: 0,
+        takDihitungGolongan: kosongGolongan(), takDisebarGolongan: kosongGolongan(),
+        dihitungTermasuk: 0, siapTermasuk: 0, persenTermasuk: null,
         ditolak: { TIDAK_AKTIF: 0, BUKAN_KATEGORI_SKU: 0 },
         perKategori: Object.fromEntries(KATEGORI_ATP.map((k) => [k, { dihitung: 0, siap: 0 }])),
         kotor: 0,
@@ -283,20 +437,54 @@ export function hitungAtp(
     const h = ambil(r.areaId);
     const k = kelayakan(r, saring);
     if (k.kotor) h.kotor++;
+    // Tidak layak = di luar KEDUA angka. Nonaktif dan di luar kategori memang
+    // tidak bisa dijanjikan ke siapa pun, apa pun setelan golongannya.
     if (!k.layak) { h.ditolak[k.sebab!]++; continue; }
 
     const kunci = kunciSebaran(r.sku, r.areaId);
     const putusan = sebaran.get(kunci);
+    const alasan = blokir.get(kunci) ?? [];
+    const setelan = opsi?.setelan.get(r.areaId) ?? null;
+    const golongan = opsi && setelan ? golonganDikecualikan(r.sku, opsi.bahan, setelan) : null;
+    const siap = Number(r.availableQty) > ambang;
+
+    // --- angka pendamping: dunia TANPA aturan golongan ---
+    //
+    // Yang tetap menahan sebuah sel di sini hanyalah keputusan manusia yang
+    // tidak bisa dikaitkan ke golongan: belum diputuskan, atau diblokir
+    // komponen yang memang sengaja tidak disebar. Sel yang keluar KARENA
+    // golongan — baik SKU-nya sendiri maupun komponennya — kembali masuk,
+    // termasuk kalau centangnya "Tidak", karena 617 centang itu dibuat
+    // sebagai ganti aturan yang belum ada.
+    const ditahanManusia = alasan.length > 0 && !blokirMurniGolongan(alasan);
+    if (putusan !== undefined && (golongan !== null || putusan === true) && !ditahanManusia) {
+      h.dihitungTermasuk++;
+      if (siap) h.siapTermasuk++;
+    }
+
+    // --- angka utama ---
+    // Golongan diperiksa SEBELUM centang (keputusan user 12 Okt 2026: "sebab
+    // kategori menang"). Itu yang membuat pencacah `takDisebar` kembali berarti
+    // "sengaja tidak disebar" dan bisa diaudit — sebelumnya ±separuhnya adalah
+    // SKU phase out yang menyamar sebagai keputusan sebaran.
+    if (golongan) { h.takDihitungGolongan[golongan]++; continue; }
     if (putusan === undefined) { h.belumDiputus++; continue; }
     if (putusan === false) { h.takDisebar++; continue; }
 
-    // Bundling yang komponennya tidak disebar. Diperiksa HANYA saat
-    // putusannya "Ya": kalau "Tidak" ia sudah keluar di atas, dan kalau
-    // "Belum" ia memang masih menunggu orang — memindahkannya ke takDisebar
-    // akan menghapusnya dari pengingat "belum diatur" tanpa ada yang memutuskan.
-    if (blokir.has(kunci)) { h.takDisebar++; h.takDisebarTurunan++; continue; }
+    // Bundling yang komponennya tidak dihitung. Diperiksa HANYA saat putusannya
+    // "Ya": kalau "Tidak" ia sudah keluar di atas, dan kalau "Belum" ia memang
+    // masih menunggu orang — memindahkannya akan menghapusnya dari pengingat
+    // "belum diatur" tanpa ada yang memutuskan.
+    if (alasan.length) {
+      if (blokirMurniGolongan(alasan)) {
+        const g = alasan.find((x) => x.sebab !== 'TIDAK_DISEBAR')!.sebab as GolonganAtp;
+        h.takDisebarGolongan[g]++;
+      } else {
+        h.takDisebar++; h.takDisebarTurunan++;
+      }
+      continue;
+    }
 
-    const siap = Number(r.availableQty) > ambang;
     h.dihitung++;
     if (siap) h.siap++;
 
@@ -310,6 +498,7 @@ export function hitungAtp(
 
   for (const h of per.values()) {
     h.persen = h.dihitung > 0 ? (h.siap / h.dihitung) * 100 : null;
+    h.persenTermasuk = h.dihitungTermasuk > 0 ? (h.siapTermasuk / h.dihitungTermasuk) * 100 : null;
   }
   return [...per.values()].sort((a, b) => a.areaId.localeCompare(b.areaId));
 }
@@ -481,10 +670,24 @@ export function skuBelumDiset(
   rows: BarisStokAtp[],
   sebaran: Sebaran,
   saring: SaringAktif = 'AKTIF',
+  /**
+   * Setelan golongan — SKU yang sudah dikecualikan aturan TIDAK perlu diputuskan.
+   *
+   * Tanpa ini daftar pengingat tidak akan pernah bisa kosong: 13 sel gimmick
+   * yang berstatus "Belum" saat aturan ini dibuat tidak lagi menunggu keputusan
+   * siapa pun, tapi tetap akan terpampang sebagai pekerjaan yang belum selesai —
+   * dan pengingat yang tidak bisa dikosongkan adalah pengingat yang diabaikan.
+   *
+   * Disaring per AREA, bukan per SKU: setelannya per cabang, jadi satu SKU bisa
+   * dikecualikan di Makassar dan tetap perlu diputuskan di Pusat.
+   */
+  opsi?: OpsiGolongan,
 ): SkuBelumDiset[] {
   const per = new Map<string, SkuBelumDiset & { adaPutusan: boolean }>();
   for (const r of rows) {
     if (!kelayakan(r, saring).layak) continue;   // nonaktif / di luar kategori tidak perlu diputuskan
+    const setelanG = opsi?.setelan.get(r.areaId) ?? null;
+    if (opsi && setelanG && golonganDikecualikan(r.sku, opsi.bahan, setelanG)) continue;
     let e = per.get(r.sku);
     if (!e) {
       e = { sku: r.sku, name: String(r.name ?? ''), kategori: String(r.category ?? ''), areas: [], firstSeenAt: '', adaPutusan: false };
@@ -505,14 +708,21 @@ export function skuBelumDiset(
 
 export function atpKeseluruhan(hasil: HasilArea[]): {
   dihitung: number; siap: number; persen: number | null; terlemah: HasilArea | null;
+  dihitungTermasuk: number; siapTermasuk: number; persenTermasuk: number | null;
 } {
   const dihitung = hasil.reduce((t, h) => t + h.dihitung, 0);
   const siap = hasil.reduce((t, h) => t + h.siap, 0);
+  const dihitungTermasuk = hasil.reduce((t, h) => t + h.dihitungTermasuk, 0);
+  const siapTermasuk = hasil.reduce((t, h) => t + h.siapTermasuk, 0);
   const berisi = hasil.filter((h) => h.persen !== null);
   const terlemah = berisi.length
     ? berisi.reduce((m, h) => (h.persen! < m.persen! ? h : m))
     : null;
-  return { dihitung, siap, persen: dihitung > 0 ? (siap / dihitung) * 100 : null, terlemah };
+  return {
+    dihitung, siap, persen: dihitung > 0 ? (siap / dihitung) * 100 : null, terlemah,
+    dihitungTermasuk, siapTermasuk,
+    persenTermasuk: dihitungTermasuk > 0 ? (siapTermasuk / dihitungTermasuk) * 100 : null,
+  };
 }
 
 /** "71,0%" — satu desimal, koma, sesuai lokal yang dipakai seluruh aplikasi. */

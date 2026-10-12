@@ -8,6 +8,9 @@ type BarisArea = {
   code: string; name: string; isActive: boolean; sortOrder: number;
   doiCritical: number | null; doiMin: number | null; doiMax: number | null;
   leadTimeDays: number | null; atpTarget: number | null;
+  atpKecualiPhaseOut: boolean | null;
+  atpKecualiClearance: boolean | null;
+  atpKecualiGimmick: boolean | null;
   startDate: string | null; note: string | null;
 };
 type Resp = { ok: boolean; areas: BarisArea[]; belumTerdaftar: string[] };
@@ -15,8 +18,65 @@ type Resp = { ok: boolean; areas: BarisArea[]; belumTerdaftar: string[] };
 const kosong: BarisArea = {
   code: '', name: '', isActive: true, sortOrder: 100,
   doiCritical: null, doiMin: null, doiMax: null,
-  leadTimeDays: null, atpTarget: null, startDate: null, note: null,
+  leadTimeDays: null, atpTarget: null,
+  // null = ikut baris GABUNGAN. Cabang baru TIDAK diberi nilai tegas supaya ia
+  // otomatis mengikuti aturan yang berlaku, bukan membeku pada keadaan hari ini.
+  atpKecualiPhaseOut: null, atpKecualiClearance: null, atpKecualiGimmick: null,
+  startDate: null, note: null,
 };
+
+/** Tiga golongan yang boleh dikeluarkan dari ATP, per cabang. */
+const KOLOM_KECUALI = [
+  { key: 'atpKecualiPhaseOut', label: 'PO', nama: 'Phase Out' },
+  { key: 'atpKecualiClearance', label: 'CS', nama: 'Clearance (kode CS-)' },
+  { key: 'atpKecualiGimmick', label: 'GM', nama: 'Gimmick' },
+] as const;
+
+/**
+ * Saklar pengecualian ATP — tiga keadaan, bukan dua.
+ *
+ * Kotak yang tidak dicentang ARTINYA BEDA dari kotak yang belum pernah
+ * disentuh: yang pertama keputusan cabang ini, yang kedua berarti "ikut
+ * GABUNGAN". Kalau keduanya digambar sama, mengisi satu kolom akan diam-diam
+ * memutus warisan dua kolom lain dan tidak ada yang bisa melihatnya dari layar.
+ * Jadi nilai warisan digambar redup, dan ada tombol mengembalikannya.
+ */
+function KecualiAtp({ r, gab, ubah }: {
+  r: BarisArea; gab: BarisArea | null; ubah: (patch: Partial<BarisArea>) => void;
+}) {
+  const adaTegas = KOLOM_KECUALI.some((k) => r[k.key] !== null);
+  return (
+    <div className="whitespace-nowrap">
+      {KOLOM_KECUALI.map((k) => {
+        const tegas = r[k.key];
+        // GABUNGAN tidak mewarisi dari siapa pun; bawaannya "dikecualikan".
+        const warisan = (gab ? gab[k.key] : null) ?? true;
+        const nilai = tegas ?? warisan;
+        return (
+          <label
+            key={k.key}
+            className="check mr-2 inline-flex"
+            style={tegas === null ? { opacity: 0.55 } : undefined}
+            title={`${k.nama} tidak dihitung ke ATP cabang ini — berlaku juga untuk bundling yang memuatnya.`
+              + (tegas === null ? ' (mengikuti baris GABUNGAN)' : '')}
+          >
+            <input type="checkbox" checked={nilai} onChange={(e) => ubah({ [k.key]: e.target.checked })} />
+            {' '}{k.label}
+          </label>
+        );
+      })}
+      {adaTegas && !isGabungan(r) ? (
+        <button
+          className="tag-x"
+          title="Kembalikan ketiganya mengikuti baris GABUNGAN"
+          onClick={() => ubah({ atpKecualiPhaseOut: null, atpKecualiClearance: null, atpKecualiGimmick: null })}
+        >
+          ↺
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 /** Baris ambang laporan gabungan — bukan cabang, jadi diperlakukan berbeda. */
 const isGabungan = (r: BarisArea) => r.code === KODE_GABUNGAN;
@@ -164,6 +224,7 @@ export default function AreaMaster() {
             <th className="num" title="DOI <= angka ini -> AMAN; di atasnya OVERSTOCK">Aman ≤<br /><span className="text-label">(hari)</span></th>
             <th className="num" title="Berapa lama barang sampai setelah PO ditekan. Dipakai saran qty PO; SKU yang punya lead time sendiri menang.">Lead time<br /><span className="text-label">(hari)</span></th>
             <th className="num" title="Ketersediaan di bawah angka ini ditandai merah di poster /wa">Target ATP<br /><span className="text-label">(%)</span></th>
+            <th className="py-1 text-left" title="Golongan yang TIDAK dihitung ke ATP cabang ini — dan bundling yang memuatnya ikut tidak dihitung. PO = Phase Out, CS = Clearance (kode CS-), GM = Gimmick. Redup = mengikuti baris GABUNGAN.">Tak dihitung<br /><span className="text-label">ke ATP</span></th>
             <th className="num">Mulai</th>
             <th className="py-1 text-left">Pita</th>
             <th className="py-1 text-left">Catatan</th>
@@ -184,6 +245,7 @@ export default function AreaMaster() {
                 <td><input className="input w-16 num" type="number" value={r.doiMax ?? ''} placeholder="wajib" onChange={(e) => ubah(i, { doiMax: num(e.target.value) })} /></td>
                 <td><input className="input w-16 num" type="number" value={r.leadTimeDays ?? ''} placeholder="—" onChange={(e) => ubah(i, { leadTimeDays: num(e.target.value) })} /></td>
                 <td><input className="input w-16 num" type="number" value={r.atpTarget ?? ''} placeholder="—" onChange={(e) => ubah(i, { atpTarget: num(e.target.value) })} /></td>
+                <td><KecualiAtp r={r} gab={rows.find(isGabungan) ?? null} ubah={(patch) => ubah(i, patch)} /></td>
                 <td className="whitespace-nowrap"><Pita r={r} /><Peringatan r={r} /></td>
                 <td><input className="input w-36" type="date" value={r.startDate ?? ''} onChange={(e) => ubah(i, { startDate: e.target.value || null })} /></td>
                 <td><input className="input w-40" value={r.note ?? ''} onChange={(e) => ubah(i, { note: e.target.value || null })} /></td>
@@ -196,7 +258,7 @@ export default function AreaMaster() {
                 </td>
               </tr>
             ))}
-            {!rows.length ? <tr><td colSpan={13}><Empty>Belum ada area — klik &quot;Isi dari data yang ada&quot;.</Empty></td></tr> : null}
+            {!rows.length ? <tr><td colSpan={14}><Empty>Belum ada area — klik &quot;Isi dari data yang ada&quot;.</Empty></td></tr> : null}
           </tbody>
         </table>
       </div>
@@ -245,6 +307,17 @@ export default function AreaMaster() {
             cadangan untuk SKU yang tidak punya angkanya sendiri di Master SKU. Kalau lead time
             lebih lama daripada <b>Kritis ≤</b>, barisnya diberi peringatan: SKU baru ditandai
             kritis ketika kehabisan stok sudah tidak bisa dihindari.
+          </div>
+          <div className="mt-1">
+            <b>Tak dihitung ke ATP</b> mengeluarkan tiga golongan dari pembagi ATP cabang itu:
+            <b> PO</b> phase out, <b>CS</b> clearance (kode <span className="mono">CS-</span>), dan
+            <b> GM</b> gimmick — <b>beserta bundling yang memuatnya sebagai komponen</b>. Barisnya
+            tetap tampil di halaman ATP dengan sebabnya, hanya tidak ikut persen. Perambatannya
+            diturunkan saat hitung dan tidak pernah ditulis sebagai centang, jadi begitu sebuah SKU
+            keluar dari daftar phase out, bundling-nya ikut dihitung lagi dengan sendirinya. Sampai
+            12 Okt 2026 hal ini dikerjakan dengan 617 centang &quot;Tidak disebar&quot; satu per
+            satu — yang berarti satu SKU baru yang luput dicentang akan masuk pembagi tanpa ada yang
+            tahu.
           </div>
           <div className="mt-1">
             Laporan <b>GABUNGAN</b> punya barisnya sendiri di tabel ini (kode{' '}

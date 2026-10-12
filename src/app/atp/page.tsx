@@ -1,7 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { Alert, Kpi, RefreshButton, postForm, postJson, useApi, fmt } from '@/components/ui';
-import { lingkupBorongan } from '@/lib/atp';
+import { lingkupBorongan, LABEL_GOLONGAN, type GolonganAtp, type AlasanBlokir } from '@/lib/atp';
 import { DataGrid, type Column } from '@/components/DataGrid';
 
 type Putusan = boolean | null;
@@ -11,8 +11,14 @@ type SelArea = {
   availableQty: number;
   siap: boolean;
   tolak: 'TIDAK_AKTIF' | 'BUKAN_KATEGORI_SKU' | null;
-  /** Komponen bundling yang tidak disebar ke cabang ini — bundling keluar dari pembagi. */
-  blokir: string[];
+  /**
+   * Komponen bundling yang membuat bundling ini keluar dari pembagi, DENGAN
+   * sebabnya: sengaja tidak disebar, atau golongannya (Phase Out / Clearance /
+   * Gimmick) tidak dihitung di cabang ini.
+   */
+  blokir: AlasanBlokir[];
+  /** Golongan yang mengeluarkan BARIS INI SENDIRI dari pembagi di cabang ini. */
+  dikecualikan: GolonganAtp | null;
   note: string;
 };
 /** Keadaan satu komponen bundling di satu cabang. */
@@ -44,6 +50,8 @@ type BarisSku = {
   sku: string; name: string; brand: string; brandManual: boolean;
   kategori: string;
   phaseOut: PhaseOutSku | null;
+  /** Golongan SKU ini tanpa melihat setelan cabang — untuk kolom & filter. */
+  golongan: GolonganAtp | null;
   /** Total available seluruh cabang — kolom "Stok total" yang bisa diurutkan. */
   stokTotal: number;
   /** Turunan bundling — tampilan saja; komposisinya milik OCS. */
@@ -59,10 +67,20 @@ type HasilArea = {
   ditolak: Record<string, number>; kotor: number;
   /** Bagian dari takDisebar yang keluar karena komponen bundling-nya tidak disebar. */
   takDisebarTurunan: number;
+  /** Baris SKU sendiri yang keluar karena golongannya tidak dihitung di cabang ini. */
+  takDihitungGolongan: Record<GolonganAtp, number>;
+  /** Bundling yang keluar karena memuat komponen bergolongan itu. */
+  takDisebarGolongan: Record<GolonganAtp, number>;
+  dihitungTermasuk: number; siapTermasuk: number; persenTermasuk: number | null;
 };
 type Resp = {
   ok: boolean; areas: string[]; sku: BarisSku[]; hasil: HasilArea[];
-  keseluruhan: { dihitung: number; siap: number; persen: number | null; terlemah: HasilArea | null };
+  keseluruhan: {
+    dihitung: number; siap: number; persen: number | null; terlemah: HasilArea | null;
+    dihitungTermasuk: number; siapTermasuk: number; persenTermasuk: number | null;
+  };
+  /** Angka mana yang dipajang — dari Pengaturan, bukan dipilih layar. */
+  atpDisplay?: 'UTAMA' | 'TERMASUK' | 'KEDUANYA';
   ambang: number; siap: boolean; tanpaBrand: string[]; pesan: string;
   saring: Saring;
   cacah: { aktif: number; nonaktif: number; semua: number };
@@ -534,21 +552,34 @@ export default function AtpPage() {
         // labelnya jadi "Tidak" akan membuat orang mengira keputusannya sudah
         // diubah, lalu mengklik untuk mengembalikan sesuatu yang tidak pernah
         // berubah.
-        const diblokir = v === true && sel.blokir.length > 0;
+        // DUA sebab berbeda bisa mengeluarkan sel ini dari pembagi, dan keduanya
+        // harus bisa dibedakan dari layar: golongan SKU-nya SENDIRI (Phase Out /
+        // Clearance / Gimmick, diatur per cabang), atau komponen bundling-nya.
+        // Digabung jadi satu tanda, orang akan mencari komponen yang tidak ada.
+        const golKeluar = sel.dikecualikan;
+        const diblokir = !golKeluar && v === true && sel.blokir.length > 0;
+        const keluar = !!golKeluar || diblokir;
         const warna = v === null ? '' : v ? 'chip-ok' : 'chip-bad';
+        const sebabBlokir = (x: AlasanBlokir) =>
+          `${x.sku} — ${x.sebab === 'TIDAK_DISEBAR' ? 'tidak disebar' : LABEL_GOLONGAN[x.sebab]}`;
         return (
           <span className="flex items-center gap-1">
             <button
-              className={`chip ${diblokir ? 'chip-bad' : warna} ${berubah ? 'ring-1 ring-offset-1' : ''}`}
-              style={diblokir ? { textDecoration: 'line-through' } : undefined}
+              className={`chip ${keluar ? 'chip-bad' : warna} ${berubah ? 'ring-1 ring-offset-1' : ''}`}
+              style={keluar ? { textDecoration: 'line-through' } : undefined}
               title={
                 `${r.sku} di ${a}\n`
                 + `Available: ${fmt(sel.availableQty)} pcs — ${sel.siap ? `siap (lebih dari ${ambang})` : `belum siap (${ambang} atau kurang)`}\n`
                 + (sel.tolak ? `TIDAK layak ATP: ${SEBAB[sel.tolak]}\n` : '')
+                + (golKeluar
+                  ? `TIDAK ikut pembagi: ${LABEL_GOLONGAN[golKeluar]} tidak dihitung ke ATP ${a}.\n`
+                    + 'Diatur per cabang di Pengaturan → Cabang / Area, kolom "Tak dihitung ke ATP".\n'
+                    + 'Centang Anda TIDAK diubah; begitu aturannya dilepas, baris ini ikut dihitung lagi.\n'
+                  : '')
                 + (diblokir
-                  ? `TIDAK ikut pembagi: ${sel.blokir.length} komponen bundling tidak disebar ke ${a} —\n`
-                    + `  ${sel.blokir.slice(0, 6).join('\n  ')}${sel.blokir.length > 6 ? `\n  … ${sel.blokir.length - 6} lagi` : ''}\n`
-                    + 'Centang Anda TIDAK diubah. Sebar lagi komponennya, bundling ini ikut kembali sendiri.\n'
+                  ? `TIDAK ikut pembagi: ${sel.blokir.length} komponen bundling tidak dihitung di ${a} —\n`
+                    + `  ${sel.blokir.slice(0, 6).map(sebabBlokir).join('\n  ')}${sel.blokir.length > 6 ? `\n  … ${sel.blokir.length - 6} lagi` : ''}\n`
+                    + 'Centang Anda TIDAK diubah. Begitu sebabnya hilang, bundling ini ikut kembali sendiri.\n'
                   : '')
                 + 'Klik untuk ganti: Belum → Ya → Tidak → Belum'
               }
@@ -556,7 +587,10 @@ export default function AtpPage() {
             >
               {label}
             </button>
-            {diblokir ? <span className="text-[11px] text-critical" title="Komponennya tidak disebar">⛔</span> : null}
+            {golKeluar ? (
+              <span className="text-[11px] text-critical" title={`${LABEL_GOLONGAN[golKeluar]} — tidak dihitung ke ATP ${a}`}>⊘</span>
+            ) : null}
+            {diblokir ? <span className="text-[11px] text-critical" title="Komponen bundling-nya tidak dihitung">⛔</span> : null}
             <span className={`text-[11px] ${sel.siap ? 'text-label' : 'text-muted'}`}>{fmt(sel.availableQty)}</span>
           </span>
         );
@@ -643,6 +677,26 @@ export default function AtpPage() {
       type: 'number', align: 'right', mono: true, width: 104,
       title: 'Jumlah available seluruh cabang yang barisnya tampil. Bisa diurutkan & difilter (mis. "< 5").',
       render: (r) => <span className="mono">{fmt(r.stokTotal)}</span>,
+    },
+    {
+      /*
+        Golongan yang membuat sebuah SKU tidak dihitung ke ATP — satu kolom,
+        bisa difilter, supaya "kenapa angkanya begitu" bisa dijawab dari tabel
+        dan bukan hanya dari tooltip per sel.
+
+        Isinya golongan SKU-nya, TANPA melihat setelan cabang: setelannya per
+        cabang, jadi satu kolom tidak bisa mewakili lima cabang sekaligus.
+        Apakah ia benar-benar keluar di sebuah cabang ditandai ⊘ di sel cabang
+        itu.
+      */
+      key: 'golongan', label: 'Tak dihitung ATP', width: 140,
+      get: (r) => (r.golongan ? LABEL_GOLONGAN[r.golongan] : ''),
+      title: 'Golongan yang dikeluarkan dari ATP: Phase Out, Clearance (kode CS-), Gimmick. '
+        + 'Bundling yang memuatnya sebagai komponen juga ikut keluar. '
+        + 'Golongan mana yang berlaku diatur PER CABANG di Pengaturan → Cabang / Area.',
+      render: (r) => (r.golongan
+        ? <span className="chip chip-bad" title={`${LABEL_GOLONGAN[r.golongan]} — dikeluarkan dari ATP di cabang yang mengaktifkan aturannya`}>{LABEL_GOLONGAN[r.golongan]}</span>
+        : <span className="empty">—</span>),
     },
     {
       /*
@@ -733,6 +787,17 @@ export default function AtpPage() {
 
   const k = data?.keseluruhan;
   const belumTotal = (data?.hasil ?? []).reduce((t, h) => t + h.belumDiputus, 0);
+  // Mana yang DIPAJANG — dari Pengaturan, bukan dipilih di layar. Perhitungannya
+  // tidak berubah: keduanya selalu ada di `hasil`, ini cuma memilih tampilan.
+  const mode = data?.atpDisplay ?? 'KEDUANYA';
+  const GOL: GolonganAtp[] = ['PHASE_OUT', 'CLEARANCE', 'GIMMICK'];
+  const rekapGol = GOL
+    .map((g) => ({
+      g,
+      sku: (data?.hasil ?? []).reduce((t, h) => t + (h.takDihitungGolongan?.[g] ?? 0), 0),
+      bdl: (data?.hasil ?? []).reduce((t, h) => t + (h.takDisebarGolongan?.[g] ?? 0), 0),
+    }))
+    .filter((x) => x.sku + x.bdl > 0);
 
   return (
     <div className="space-y-4">
@@ -839,6 +904,23 @@ export default function AtpPage() {
         </Alert>
       ) : null}
 
+      {rekapGol.length ? (
+        <Alert tone="info">
+          <b>
+            {fmt(rekapGol.reduce((t, x) => t + x.sku, 0))} baris SKU
+            {' '}dan {fmt(rekapGol.reduce((t, x) => t + x.bdl, 0))} bundling
+          </b>{' '}
+          tidak dihitung ke ATP karena golongannya:{' '}
+          {rekapGol.map((x) => `${LABEL_GOLONGAN[x.g]} ${fmt(x.sku)} SKU${x.bdl ? ` + ${fmt(x.bdl)} bundling` : ''}`).join(' · ')}.
+          {' '}Diatur <b>per cabang</b> di Pengaturan → Cabang / Area.
+          {k?.persenTermasuk !== null && k?.persenTermasuk !== undefined ? (
+            <> Kalau semuanya ikut dihitung, ATP keseluruhan jadi <b>{persenTeks(k.persenTermasuk)}</b>{' '}
+              (sekarang {persenTeks(k.persen)}) — selisih itulah yang ditahan aturan ini, dan sengaja
+              ditulis di sini supaya pengecualiannya tidak jadi tempat sembunyi.</>
+          ) : null}
+        </Alert>
+      ) : null}
+
       {(() => {
         // Aturan turunan (keputusan user 9 Okt 2026) harus TERLIHAT, bukan cuma
         // ada di tooltip: ia memindahkan bundling keluar dari pembagi, dan
@@ -894,8 +976,16 @@ export default function AtpPage() {
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi label="ATP keseluruhan" value={persenTeks(k?.persen)}
-          hint={k ? `${fmt(k.siap)} siap dari ${fmt(k.dihitung)} yang disebar` : ''} />
+        {mode === 'TERMASUK' ? (
+          <Kpi label="ATP termasuk semua" value={persenTeks(k?.persenTermasuk)}
+            hint={k ? `${fmt(k.siapTermasuk)} siap dari ${fmt(k.dihitungTermasuk)} — Phase Out / CS / Gimmick IKUT` : ''} />
+        ) : (
+          <Kpi label="ATP keseluruhan" value={persenTeks(k?.persen)}
+            hint={k
+              ? `${fmt(k.siap)} siap dari ${fmt(k.dihitung)} yang disebar`
+                + (mode === 'KEDUANYA' ? ` · termasuk semua ${persenTeks(k.persenTermasuk)}` : '')
+              : ''} />
+        )}
         <Kpi label="Cabang terlemah" value={k?.terlemah?.areaId ?? '—'}
           hint={k?.terlemah ? persenTeks(k.terlemah.persen) : 'belum ada pembagi'} />
         <Kpi label="Belum diputuskan" value={fmt(belumTotal)} unit="keputusan"
@@ -922,6 +1012,26 @@ export default function AtpPage() {
               <div className="text-[11px] text-muted">
                 {fmt(h.takDisebar)} tidak disebar · {fmt(h.belumDiputus)} belum diputuskan
               </div>
+              {(() => {
+                const sku = GOL.reduce((t, g) => t + (h.takDihitungGolongan?.[g] ?? 0), 0);
+                const bdl = GOL.reduce((t, g) => t + (h.takDisebarGolongan?.[g] ?? 0), 0);
+                if (!sku && !bdl) return null;
+                return (
+                  <div
+                    className="text-[11px] text-muted"
+                    title={GOL.filter((g) => (h.takDihitungGolongan?.[g] ?? 0) + (h.takDisebarGolongan?.[g] ?? 0) > 0)
+                      .map((g) => `${LABEL_GOLONGAN[g]}: ${fmt(h.takDihitungGolongan?.[g] ?? 0)} SKU + ${fmt(h.takDisebarGolongan?.[g] ?? 0)} bundling`)
+                      .join('\n')}
+                  >
+                    ⊘ {fmt(sku)} SKU + {fmt(bdl)} bundling tak dihitung
+                  </div>
+                );
+              })()}
+              {mode !== 'UTAMA' && h.persenTermasuk !== null ? (
+                <div className="text-[11px] text-label" title="Kalau Phase Out / Clearance / Gimmick ikut dihitung">
+                  termasuk semua: <span className="font-mono">{persenTeks(h.persenTermasuk)}</span>
+                </div>
+              ) : null}
             </div>
           ))}
         </div>

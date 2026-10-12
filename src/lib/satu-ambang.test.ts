@@ -35,7 +35,9 @@ import { setelanArea, ambangDoi, type BarisArea } from './area-master';
 const baris = (o: Partial<BarisArea> = {}): BarisArea => ({
   code: 'X', name: 'X', isActive: true, sortOrder: 10,
   doiCritical: null, doiMin: null, doiMax: null,
-  leadTimeDays: null, atpTarget: null, startDate: null, note: null, ...o,
+  leadTimeDays: null, atpTarget: null,
+  atpKecualiPhaseOut: null, atpKecualiClearance: null, atpKecualiGimmick: null,
+  startDate: null, note: null, ...o,
 });
 
 const PUSAT = baris({ code: 'GBJD', name: 'Pusat', doiCritical: 4, doiMin: 5, doiMax: 7, leadTimeDays: 7, atpTarget: 95 });

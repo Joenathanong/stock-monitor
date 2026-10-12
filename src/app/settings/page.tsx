@@ -83,6 +83,11 @@ const groupsFor = (v: Record<string, string>, areas: AreaRow[] = []): { title: s
         { v: 'OPSI1', l: `Opsi 1 saja — ${win1} ex campaign` },
         { v: 'OPSI2', l: `Opsi 2 saja — ${win2}` },
       ] },
+      { key: 'atp_display', label: 'Angka ATP yang ditampilkan', type: 'select', options: [
+        { v: 'UTAMA', l: 'ATP utama — di luar Phase Out / Clearance / Gimmick' },
+        { v: 'TERMASUK', l: 'Termasuk semuanya — selama stoknya masih ada' },
+        { v: 'KEDUANYA', l: 'Keduanya, utama besar + pendamping kecil' },
+      ], hint: 'Hanya memilih mana yang dipajang; keduanya selalu dihitung dari baris yang sama. Golongan mana yang dikecualikan diatur PER CABANG di tabel Cabang / Area.' },
     ],
   },
   {

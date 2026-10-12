@@ -3,6 +3,7 @@ import { fail, json, safe } from '@/lib/http';
 import { sessionFromRequest, canWrite } from '@/lib/auth';
 import { muatAtp, simpanSebaran, simpanBrandManual, rekamAtpHarian, type SatuPutusan } from '@/lib/atp-store';
 import { AMBANG_ATP_BAWAAN, type SaringAktif } from '@/lib/atp';
+import { getSettings } from '@/lib/compute';
 
 export const dynamic = 'force-dynamic';
 // Vercel Hobby membunuh satu fungsi di detik ke-60. Menulis angka lebih besar
@@ -37,11 +38,17 @@ function ambangDariUrl(u: URL): number {
 export async function GET(req: Request) {
   const u = new URL(req.url);
   const ambang = ambangDariUrl(u);
-  const hasil = await muatAtp(ambang, saringDariUrl(u));
+  const [hasil, setelan] = await Promise.all([
+    muatAtp(ambang, saringDariUrl(u)),
+    getSettings(),
+  ]);
 
   return json(safe({
     ok: true,
     ...hasil,
+    // Mana yang DIPAJANG — tidak mengubah perhitungan. Dikirim dari server
+    // supaya layar dan export tidak bisa memilih angka yang berbeda.
+    atpDisplay: setelan.atpDisplay,
     pesan: !hasil.siap
       ? 'Tabel atp_share belum ada — jalankan `npm run db:push` dulu.'
       : hasil.keseluruhan.dihitung === 0

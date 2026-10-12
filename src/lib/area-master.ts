@@ -13,6 +13,7 @@
  * kebetulan juga bernama "GBJD". Itu dunia lain: lihat `supplierWhs`.
  */
 import { AREA_GABUNGAN, KODE_GABUNGAN } from './areas';
+import { KECUALI_BAWAAN, type SetelanKecuali } from './atp';
 
 export type BarisArea = {
   code: string;
@@ -31,6 +32,15 @@ export type BarisArea = {
   leadTimeDays: number | null;
   /** Target ketersediaan (ATP) cabang ini, persen. null = belum diisi. */
   atpTarget: number | null;
+  /**
+   * Golongan yang TIDAK dihitung ke ATP cabang ini. null = ikut baris GABUNGAN.
+   *
+   * Per cabang atas permintaan user 12 Okt 2026. Ketiganya juga merambat ke
+   * bundling yang memuat komponen bergolongan itu — lihat `golonganDikecualikan`.
+   */
+  atpKecualiPhaseOut: boolean | null;
+  atpKecualiClearance: boolean | null;
+  atpKecualiGimmick: boolean | null;
   /** "YYYY-MM-DD" atau null. */
   startDate: string | null;
   note: string | null;
@@ -192,6 +202,8 @@ export type SetelanArea = {
   leadTimeDays: number | null;
   /** Target ketersediaan (ATP) cabang, persen. */
   atpTarget: number | null;
+  /** Golongan yang tidak dihitung ke ATP cabang ini. */
+  kecualiAtp: SetelanKecuali;
 };
 
 /**
@@ -216,6 +228,14 @@ export function setelanArea(rows: BarisArea[], area: string | null | undefined):
     ambang: ambangDoi(baris) ?? ambangDoi(gab),
     leadTimeDays: baris?.leadTimeDays ?? gab?.leadTimeDays ?? null,
     atpTarget: baris?.atpTarget ?? gab?.atpTarget ?? null,
+    // Diwarisi PER KOLOM, bukan per objek: cabang yang hanya mengatur satu dari
+    // ketiganya tetap mengikuti GABUNGAN untuk dua sisanya. Kalau diwarisi per
+    // objek, mengisi satu kolom akan diam-diam mematikan dua aturan lain.
+    kecualiAtp: {
+      phaseOut: baris?.atpKecualiPhaseOut ?? gab?.atpKecualiPhaseOut ?? KECUALI_BAWAAN.phaseOut,
+      clearance: baris?.atpKecualiClearance ?? gab?.atpKecualiClearance ?? KECUALI_BAWAAN.clearance,
+      gimmick: baris?.atpKecualiGimmick ?? gab?.atpKecualiGimmick ?? KECUALI_BAWAAN.gimmick,
+    },
   };
 }
 

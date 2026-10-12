@@ -43,6 +43,7 @@ export const DEFAULT_SETTINGS = {
 
   // --- Tampilan ---
   doi_display: 'BOTH',          // opsi DOI yang ditampilkan di layar: OPSI1 | OPSI2 | BOTH
+  atp_display: 'KEDUANYA',      // angka ATP yang ditampilkan: UTAMA | TERMASUK | KEDUANYA
 
   // --- ABC ---
   abc_a_pct: 70,                // kumulatif ≤ 70% → A
@@ -124,6 +125,14 @@ export type DoiSettings = {
   excludePhaseOut: boolean;
   /** Opsi DOI yang ditampilkan (tidak mengubah perhitungan, hanya tampilan). */
   doiDisplay: 'OPSI1' | 'OPSI2' | 'BOTH';
+  /**
+   * Angka ATP yang ditampilkan. Tidak mengubah perhitungan — keduanya selalu
+   * dihitung dari baris yang sama, ini hanya memilih mana yang dipajang.
+   *
+   * UTAMA    = di luar Phase Out / Clearance / Gimmick (dan bundling yang memuatnya)
+   * TERMASUK = semuanya ikut, selama barangnya masih bisa dijanjikan
+   */
+  atpDisplay: 'UTAMA' | 'TERMASUK' | 'KEDUANYA';
   /** Nilai rupiah stok ditampilkan atau tidak. */
   priceEnabled: boolean;
   /** Angka mana yang diambil dari array SalePrice OCS. */
@@ -200,6 +209,10 @@ export function toDoiSettings(raw: SettingsMap = {}): DoiSettings {
     abcBPct: num(raw, 'abc_b_pct'),
     excludePhaseOut: bool(raw, 'exclude_phase_out'),
     doiDisplay: disp === 'OPSI1' || disp === 'OPSI2' ? disp : 'BOTH',
+    atpDisplay: (() => {
+      const v = str(raw, 'atp_display').toUpperCase();
+      return v === 'UTAMA' || v === 'TERMASUK' ? v : 'KEDUANYA';
+    })(),
     priceEnabled: bool(raw, 'price_enabled'),
     priceSource: (() => {
       const v = str(raw, 'price_source').toUpperCase();

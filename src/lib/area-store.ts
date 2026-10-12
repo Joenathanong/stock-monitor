@@ -28,6 +28,9 @@ const bersih = (r: {
   // tertinggal tidak memutus build.
   doiCritical?: number | null; doiMin: number | null; doiMax: number | null;
   leadTimeDays?: number | null; atpTarget?: number | null;
+  atpKecualiPhaseOut?: boolean | null;
+  atpKecualiClearance?: boolean | null;
+  atpKecualiGimmick?: boolean | null;
   startDate: Date | null; note: string | null;
 }): BarisArea => ({
   code: r.code,
@@ -39,6 +42,13 @@ const bersih = (r: {
   doiMax: r.doiMax,
   leadTimeDays: r.leadTimeDays ?? null,
   atpTarget: r.atpTarget ?? null,
+  // `?? null` berarti "ikut baris GABUNGAN", dan itu nilai yang BENAR untuk dua
+  // keadaan sekaligus: kolomnya memang belum diisi, atau Prisma Client-nya
+  // di-generate sebelum kolom ini ada. Jadi `prisma generate` yang tertinggal
+  // tidak memutus build DAN tidak mengubah arti datanya.
+  atpKecualiPhaseOut: r.atpKecualiPhaseOut ?? null,
+  atpKecualiClearance: r.atpKecualiClearance ?? null,
+  atpKecualiGimmick: r.atpKecualiGimmick ?? null,
   startDate: r.startDate ? toDateKeyUtc(r.startDate) : null,
   note: r.note,
 });

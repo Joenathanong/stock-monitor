@@ -16,10 +16,48 @@ import { toDateKeyUtc, todayKey, diffDays } from './dates';
 import { pencocokPhaseOut, DISPOSITION_LABEL, type Disposition } from './phase-out';
 import {
   AMBANG_ATP_BAWAAN, kelayakan, kunciSebaran, hitungAtp, atpKeseluruhan, skuBelumDiset,
-  susunTurunan, bundlingTerblokir,
+  susunTurunan, bundlingTerblokir, golonganSku, golonganDikecualikan,
   type BarisStokAtp, type Sebaran, type HasilArea, type SebabTolak, type SaringAktif,
   type SkuBelumDiset, type PetaBundle, type RingkasTurunan,
+  type OpsiGolongan, type SetelanKecuali, type GolonganAtp, type AlasanBlokir,
 } from './atp';
+import { muatArea } from './area-store';
+import { setelanArea } from './area-master';
+
+/**
+ * Bahan + setelan golongan untuk SELURUH area, dibaca SEKALI.
+ *
+ * Satu fungsi, dipakai `muatAtp` (halaman) DAN `persenAtpPerArea` (poster /wa
+ * dan dashboard). Kalau masing-masing menyusun setelannya sendiri, suatu saat
+ * keduanya akan berbeda dan dua angka bernama "ATP" akan berselisih tanpa ada
+ * yang terlihat gagal — persis kesalahan yang user temukan 8 Okt 2026
+ * (Available 69,6% vs ATP 69,8%).
+ */
+async function muatOpsiGolongan(
+  rows: BarisStokAtp[],
+  phaseOut: ReadonlyMap<string, unknown>,
+): Promise<OpsiGolongan> {
+  const areaRows = await muatArea();
+  const kategori = new Map<string, string>();
+  for (const r of rows) {
+    // Baris yang kategorinya kosong tidak boleh menimpa baris yang terisi:
+    // satu SKU punya satu baris per area dan tidak semuanya mengisi kolomnya.
+    if (!kategori.get(r.sku) && r.category) kategori.set(r.sku, String(r.category));
+  }
+  const setelan = new Map<string, SetelanKecuali>();
+  for (const a of new Set(rows.map((r) => r.areaId).filter(Boolean))) {
+    setelan.set(a, setelanArea(areaRows, a).kecualiAtp);
+  }
+  return { bahan: { phaseOut: new Set(phaseOut.keys()), kategori }, setelan };
+}
+
+/** Golongan yang mengecualikan SKU ini di satu area. null = ikut dihitung di sana. */
+const golonganDikecualikanDi = (
+  sku: string, areaId: string, opsi: OpsiGolongan,
+): GolonganAtp | null => {
+  const setelan = opsi.setelan.get(areaId);
+  return setelan ? golonganDikecualikan(sku, opsi.bahan, setelan) : null;
+};
 
 /** Benar kalau tabel ATP-nya belum dibuat (db:push belum dijalankan). */
 function tabelBelumAda(e: unknown): boolean {
@@ -361,6 +399,12 @@ export type MuatAtp = {
      */
     phaseOut: PhaseOutSku | null;
     /**
+     * Golongan SKU ini (Phase Out / Clearance / Gimmick) TANPA melihat setelan
+     * cabang — untuk chip di tabel. Apakah ia benar-benar dikecualikan di suatu
+     * cabang ada di `area[...].dikecualikan`, karena setelannya per cabang.
+     */
+    golongan: GolonganAtp | null;
+    /**
      * Turunan bundling — HANYA untuk ditampilkan (permintaan user 9 Okt 2026).
      * `n: 0` berarti bukan bundle, atau komposisinya belum ditarik dari OCS.
      */
@@ -381,7 +425,12 @@ export type MuatAtp = {
        * "tiba-tiba tidak dihitung" tanpa alasan adalah bentuk kesalahan yang
        * paling sulit dipercaya saat ketahuan.
        */
-      blokir: string[];
+      blokir: AlasanBlokir[];
+      /**
+       * Golongan yang membuat baris ini sendiri keluar dari pembagi di cabang
+       * ini. null = golongannya tidak dikecualikan di sini (atau bukan golongan).
+       */
+      dikecualikan: GolonganAtp | null;
       note: string;
     }>;
   }[];
@@ -455,9 +504,13 @@ export async function muatAtp(
   // DIUKUR.
   // Bundling yang komponennya sengaja tidak disebar — keputusan user 9 Okt
   // 2026 (opsi A). DITURUNKAN di sini, TIDAK PERNAH ditulis ke atp_share.
-  const blokir = bundlingTerblokir(bundle.peta, sebaran, areas);
+  // Sejak 12 Okt 2026 aturannya DUA lapis dan keduanya diturunkan di sini:
+  // komponen yang sengaja tidak disebar, DAN komponen yang golongannya
+  // (Phase Out / Clearance / Gimmick) dikecualikan di cabang itu.
+  const opsi = await muatOpsiGolongan(rows, phaseOut);
+  const blokir = bundlingTerblokir(bundle.peta, sebaran, areas, opsi);
 
-  const hasil = hitungAtp(rows, sebaran, ambang, 'AKTIF', blokir);
+  const hasil = hitungAtp(rows, sebaran, ambang, 'AKTIF', blokir, opsi);
   const keseluruhan = atpKeseluruhan(hasil);
 
   // Baris tabel mengikuti saringan tampilan. Satu SKU bisa aktif di satu area
@@ -475,6 +528,7 @@ export async function muatAtp(
         sku: r.sku, name: r.name, brand: r.brand, brandManual: r.brandManual,
         kategori: String(r.category ?? ''), stokTotal: 0,
         phaseOut: phaseOut.get(r.sku) ?? null,
+        golongan: golonganSku(r.sku, opsi.bahan),
         turunan: susunTurunan(r.sku, bundle.peta, stokPerSku, areas),
         area: {}, lain: {},
       };
@@ -493,6 +547,7 @@ export async function muatAtp(
       siap: r.availableQty > ambang,
       tolak: k.layak ? null : k.sebab!,
       blokir: blokir.get(kunciSebaran(r.sku, r.areaId)) ?? [],
+      dikecualikan: golonganDikecualikanDi(r.sku, r.areaId, opsi),
       note: catatan.get(kunciSebaran(r.sku, r.areaId))?.note ?? '',
     };
     b.stokTotal += r.availableQty;
@@ -527,7 +582,9 @@ export async function muatAtp(
     // 'AKTIF' ditulis tegas: yang perlu diputuskan hanya yang benar-benar bisa
     // dijanjikan. Memakai `saring` akan membuat pengingatnya berubah isi tiap
     // kali filter tampilan digeser.
-    baru: skuBelumDiset(rows, sebaran, 'AKTIF'),
+    // Golongan yang dikecualikan TIDAK perlu diputuskan — kalau ikut, daftar
+    // pengingat ini tidak akan pernah bisa kosong.
+    baru: skuBelumDiset(rows, sebaran, 'AKTIF', opsi),
   };
 }
 
@@ -639,16 +696,21 @@ export async function persenAtpPerArea(
   const [rows, { sebaran, siap }, bundle] = await Promise.all([
     muatStokAtp(), muatSebaran(), muatKomposisiBundle(),
   ]);
+  // Phase out ikut dibaca di sini juga — bukan hanya di halaman. Poster /wa dan
+  // Dashboard memakai fungsi ini, dan aturan yang berbeda antar jalur adalah
+  // cara dua angka bernama sama jadi berselisih.
+  const phaseOut = await muatPhaseOut(rows);
   // Aturan turunan HARUS ikut di sini juga. Poster dan halaman ATP membaca
   // tabel yang sama; kalau salah satunya menerapkan aturan dan yang lain
   // tidak, dua angka bernama sama akan berbeda — persis kesalahan yang
   // ditemukan user 8 Okt 2026 (Available 69,6% vs ATP 69,8%).
   const areas = [...new Set(rows.map((r) => r.areaId))].filter(Boolean).sort((a, b) => a.localeCompare(b));
-  const blokir = bundlingTerblokir(bundle.peta, sebaran, areas);
+  const opsi = await muatOpsiGolongan(rows, phaseOut);
+  const blokir = bundlingTerblokir(bundle.peta, sebaran, areas, opsi);
   // 'AKTIF' ditulis tegas, bukan dibiarkan bawaan: poster memuat angka yang
   // dibaca orang lain tanpa konteks, jadi aturannya tidak boleh ikut berubah
   // kalau bawaan `kelayakan()` suatu saat diganti.
-  const hasil = hitungAtp(rows, sebaran, ambang, 'AKTIF', blokir);
+  const hasil = hitungAtp(rows, sebaran, ambang, 'AKTIF', blokir, opsi);
 
   // Diturunkan dari `hasil` — BUKAN dihitung ulang. Menghitungnya sendiri di
   // sini persis cara dua angka yang mestinya sama jadi berbeda.

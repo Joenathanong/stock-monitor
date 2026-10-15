@@ -4,7 +4,6 @@ import {
   teksTarget, teksTargetAtp, ruangTarget, pilihKanan, nilaiDoi, nilaiAtp, warnaTarget, UKURAN_TARGET,
   potongTeks, lebarTeksKira, lebarKartu, KARTU, JEDA_LABEL, WARNA,
 } from './wa-poster';
-import { pitaDoi } from './area-master';
 
 /**
  * Penjaga: TARGET DOI & TARGET ATP DI POSTER /wa.
@@ -35,7 +34,7 @@ const isiUntuk = (n: number) => lebarKartu(n) - 2 * KARTU.pad;
  * Kandidat teks sisi kanan dalam kasus TERBURUK: mode dua opsi DOI, persen dan
  * target sama-sama tiga digit. Diurut persis seperti di poster.tsx.
  */
-const KANDIDAT_KANAN = ['ATP 100,0% · Target 100% (-)', 'ATP 100,0% / 100%', 'ATP 100,0%'];
+const KANDIDAT_KANAN = ['ATP 100,0% · Target ≥100%', 'ATP 100,0% / 100%', 'ATP 100,0%'];
 
 // ---------------------------------------------------------------------------
 // Arah penilaian: DOI dan ATP BERLAWANAN
@@ -59,9 +58,7 @@ test('DOI tipis TIDAK lagi dimerahkan di baris target', () => {
   // di kepala kartu dan pita Kritis/Low tepat di bawahnya. Baris target
   // menjawab pertanyaan lain: "apakah kita di dalam plafon persediaan?".
   const pusat = { kritis: 4, min: 6, max: 7 };
-  const tipis = nilaiDoi(2, pusat)!;
-  assert.equal(tipis.baik, true, 'DOI 2 hari tetap "di dalam plafon"');
-  assert.equal(tipis.tanda, ' (-)', 'tapi tandanya tetap menyatakan posisinya di bawah target');
+  assert.equal(nilaiDoi(2, pusat)!.baik, true, 'DOI 2 hari tetap "di dalam plafon"');
 });
 
 test('ATP arahnya KEBALIKAN: di atas atau tepat target = hijau', () => {
@@ -70,30 +67,38 @@ test('ATP arahnya KEBALIKAN: di atas atau tepat target = hijau', () => {
   assert.equal(nilaiAtp(72, 90)!.baik, false);
 });
 
-test('tanda selalu POSISI, warna selalu BAIK — dua kanal terpisah', () => {
-  // Inilah yang membuat dua ukuran berlawanan bisa duduk bersebelahan di satu
-  // kartu tanpa membingungkan. Kalau tanda ikut memikul "baik/buruk", simbol
-  // yang sama akan berarti hal berbeda di dua angka yang bertetangga.
+test('dua ukuran berlawanan arah tetap bisa duduk bersebelahan', () => {
+  // DULU dijaga oleh dua kanal: `tanda` menyatakan POSISI ('(+)' / '(-)') dan
+  // warna menyatakan BAIK. Penandanya dihapus 15 Okt 2026 — arah sekarang
+  // dibawa SIMBOL DI DALAM TARGETNYA ("Target ≤7h" vs "Target ≥95%"), yang
+  // menyatakannya tanpa bergantung pada aktualnya.
+  //
+  // Yang masih harus dijaga sama: satu angka di bawah targetnya BAIK di DOI
+  // dan BURUK di ATP. Kalau warnanya suatu saat ikut dihitung di satu tempat
+  // bersama, dua kartu bersebelahan akan memakai warna yang sama untuk dua
+  // arti yang berlawanan.
   const pusat = { kritis: 4, min: 6, max: 7 };
   const doiBawah = nilaiDoi(5, pusat)!;
   const atpBawah = nilaiAtp(72, 90)!;
-  assert.equal(doiBawah.tanda, atpBawah.tanda, 'sama-sama di bawah target -> tanda sama');
-  assert.notEqual(doiBawah.baik, atpBawah.baik, 'tapi artinya berlawanan');
+  assert.notEqual(doiBawah.baik, atpBawah.baik, 'sama-sama di bawah target, artinya berlawanan');
   assert.equal(warnaTarget(doiBawah.baik), WARNA.amanFg, 'DOI di bawah target = hijau');
   assert.equal(warnaTarget(atpBawah.baik), WARNA.kritisFg, 'ATP di bawah target = merah');
+  // Dan simbol arahnya memang dua yang berbeda, bukan satu untuk keduanya.
+  assert.match(teksTarget(pusat.max), /\u2264/);
+  assert.match(teksTargetAtp(90), /\u2265/);
 });
 
-test('tepat di target tidak memakai tanda sama sekali', () => {
-  assert.equal(nilaiDoi(7, { kritis: 4, min: 6, max: 7 })!.tanda, '');
-  assert.equal(nilaiAtp(90, 90)!.tanda, '');
-});
-
-test('tanda memakai ASCII, bukan simbol yang bisa jadi tofu', () => {
+test('teks target hanya memakai ASCII + dua simbol arah yang dikunci', () => {
   // Poster diserialkan jadi SVG lalu dirender ke JPG oleh bot. Glyph di luar
   // Latin dasar bergantung pada font yang kebetulan ada di mesin perender, dan
   // yang hilang jadi kotak kosong di gambar yang SUDAH terkirim ke grup.
-  for (const t of [nilaiDoi(9, { kritis: 4, min: 6, max: 7 })!.tanda, nilaiDoi(2, { kritis: 4, min: 6, max: 7 })!.tanda]) {
-    assert.match(t, /^[\x20-\x7E]*$/, `tanda "${t}" memuat karakter non-ASCII`);
+  //
+  // DUA pengecualian, dan hanya dua: U+2264 dan U+2265. Keduanya ada di
+  // Arial, Liberation Sans dan DejaVu Sans — seluruh tumpukan font poster
+  // (lihat FONT di wa-poster.ts) — dan sudah dibuktikan tergambar, bukan
+  // diasumsikan. Simbol ketiga TIDAK boleh lewat tanpa pembuktian yang sama.
+  for (const t of [teksTarget(7), teksTarget(999), teksTargetAtp(90), teksTargetAtp(100)]) {
+    assert.match(t, /^[\x20-\x7E\u2264\u2265]*$/, `teks "${t}" memuat karakter di luar daftar`);
   }
 });
 
@@ -107,17 +112,20 @@ test('tanpa angka atau tanpa target, nilainya null — bukan "baik"', () => {
   assert.equal(nilaiAtp(72, 0), null, '0 = belum diatur, bukan "semua lulus"');
 });
 
-test('ejaan target memakai ambang apa adanya, plus tandanya', () => {
-  const pusat = { kritis: 4, min: 6, max: 7 };
+test('ejaan target memakai ambang apa adanya, dengan simbol arahnya', () => {
   // Satuan "h", bukan "hari": dipendekkan 12 Okt 2026 untuk membeli ruang bagi
   // ukuran teks 16. Ejaannya dikunci di sini karena ia yang menentukan lebar,
   // dan lebar itu yang menentukan apakah dua teks di baris ini bertumpuk.
-  assert.equal(teksTarget(7), 'Target 7h');
-  assert.equal(teksTarget(7, nilaiDoi(9, pusat)), 'Target 7h (+)');
-  assert.equal(teksTarget(7, nilaiDoi(5, pusat)), 'Target 7h (-)');
-  assert.equal(teksTargetAtp(90), 'Target 90%');
-  assert.equal(teksTargetAtp(90, nilaiAtp(72, 90)), 'Target 90% (-)');
-  assert.equal(teksTargetAtp(90, nilaiAtp(95, 90)), 'Target 90% (+)');
+  //
+  // SIMBOL ARAH, bukan penanda '(+)'/'(-)' (permintaan user 15 Okt 2026).
+  // Targetnya sendiri yang menyatakan arah, jadi teksnya TIDAK lagi berubah
+  // mengikuti aktualnya — dan itu yang membayar ruangnya: pada ukuran 16,
+  // "Target ≤45h (+)" + "Target ≥95% (-)" butuh 277px di kartu 5 cabang yang
+  // isinya 262px. Tanpa penanda: 205px, dan 6 cabang (211px) ikut muat.
+  assert.equal(teksTarget(7), 'Target \u22647h');
+  assert.equal(teksTarget(45), 'Target \u226445h');
+  assert.equal(teksTargetAtp(95), 'Target \u226595%');
+  assert.equal(teksTargetAtp(90.4), 'Target \u226590%', 'persen dibulatkan');
 });
 
 test('tanpa ambang/target tidak menulis "Target — hari"', () => {
@@ -140,17 +148,15 @@ test('di 5 cabang, target DOI TIDAK pernah terpotong', () => {
   // sejak ukuran teks 16, bentuk pendek itulah yang menjaga target DOI tidak
   // terpotong saat ambangnya tiga digit. Menguji hanya bentuk panjang berarti
   // menguji poster yang tidak pernah digambar.
-  for (const kandidat of [[], ['Target 90% (-)', 'Tgt 90% (-)'], KANDIDAT_KANAN]) {
+  for (const kandidat of [[], [teksTargetAtp(90), teksTargetAtp(90).replace(/^Target /, 'Tgt ')], KANDIDAT_KANAN]) {
     for (const max of [7, 20, 21, 35, 45, 99, 365, 999]) {
-      for (const arah of ['', ' (+)', ' (-)'] as const) {
-        const teks = teksTarget(max, { tanda: arah, baik: true });
-        const kanan = pilihKanan(kandidat, isi, teks, SIZE);
-        const ruang = ruangTarget(isi, kanan, SIZE);
-        assert.equal(
-          potongTeks(teks, ruang, SIZE), teks,
-          `"${teks}" terpotong di 5 cabang (ruang ${ruang.toFixed(1)}px, kanan "${kanan}")`,
-        );
-      }
+      const teks = teksTarget(max);
+      const kanan = pilihKanan(kandidat, isi, teks, SIZE);
+      const ruang = ruangTarget(isi, kanan, SIZE);
+      assert.equal(
+        potongTeks(teks, ruang, SIZE), teks,
+        `"${teks}" terpotong di 5 cabang (ruang ${ruang.toFixed(1)}px, kanan "${kanan}")`,
+      );
     }
   }
 });
@@ -160,7 +166,7 @@ test('bentuk kanan MENGALAH lebih dulu, bukan target DOI yang dipotong', () => {
   // Jadi yang pertama berkorban adalah kelengkapan teks kanan ("· Target 90%"
   // jadi "/ 90%"), bukan angka hari di kiri yang kalau terpotong jadi salah.
   const isi = isiUntuk(5);
-  const kiri = teksTarget(999, { tanda: ' (+)', baik: false });
+  const kiri = teksTarget(999);
   const kanan = pilihKanan(KANDIDAT_KANAN, isi, kiri, SIZE);
   assert.notEqual(kanan, KANDIDAT_KANAN[0], 'bentuk terpanjang mestinya tidak muat di sini');
   assert.equal(potongTeks(kiri, ruangTarget(isi, kanan, SIZE), SIZE), kiri);
@@ -172,9 +178,9 @@ test('kartu terlalu sempit: sisi kanan DIHILANGKAN, bukan dua teks terpotong', (
   // menyisakan 22px — cukup untuk "T…" dan tidak lebih, dan jumlah keduanya
   // justru melebihi lebar kartu.
   const isi = isiUntuk(9);
-  assert.equal(pilihKanan(KANDIDAT_KANAN, isi, teksTarget(7, null), SIZE), '', 'terlalu sempit untuk keduanya');
+  assert.equal(pilihKanan(KANDIDAT_KANAN, isi, teksTarget(7), SIZE), '', 'terlalu sempit untuk keduanya');
   // Di 5 cabang masih muat, jadi penghilangan ini tidak kebablasan.
-  assert.notEqual(pilihKanan(KANDIDAT_KANAN, isiUntuk(5), teksTarget(7, null), SIZE), '');
+  assert.notEqual(pilihKanan(KANDIDAT_KANAN, isiUntuk(5), teksTarget(7), SIZE), '');
 });
 
 test('target DOI dan teks kanan tidak pernah bertumpuk, sampai 10 cabang', () => {
@@ -185,8 +191,8 @@ test('target DOI dan teks kanan tidak pernah bertumpuk, sampai 10 cabang', () =>
   for (let n = 5; n <= 10; n++) {
     const isi = isiUntuk(n);
     for (const max of [7, 45, 999]) {
-      for (const kandidat of [['Target 90% (-)'], KANDIDAT_KANAN]) {
-        const kiriPenuh = teksTarget(max, { tanda: ' (+)', baik: false });
+      for (const kandidat of [[teksTargetAtp(90)], KANDIDAT_KANAN]) {
+        const kiriPenuh = teksTarget(max);
         const kanan = pilihKanan(kandidat, isi, kiriPenuh, SIZE);
         const digambar = potongTeks(kiriPenuh, ruangTarget(isi, kanan, SIZE), SIZE);
         const wKiri = lebarTeksKira(digambar, SIZE);

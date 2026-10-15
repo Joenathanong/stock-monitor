@@ -9,6 +9,7 @@ import {
   rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, TINGGI_SPARK, lebarTeksKira, potongTeks, JEDA_LABEL, labelPitaPisah, tataLabelStatus, tampil1, tampil2,
   KARTU, tinggiKartuTersedia, ukuranAtpMuat, UKURAN_DOI,
   teksTarget, teksTargetAtp, ruangTarget, pilihKanan, nilaiDoi, nilaiAtp, warnaTarget, UKURAN_TARGET,
+  ukuranStripMuat, STRIP_INSET,
 } from '@/lib/wa-poster';
 // Dipakai dari atp.ts, TIDAK ditulis ulang di sini: angka di poster dan angka di
 // halaman /atp harus sama ejaannya ("71,0%"), dan dua fungsi dengan satu tugas
@@ -235,24 +236,24 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
     // terpanjang tidak muat berdampingan dengan target DOI di kartu 294px.
     // "72,0% / 90%" adalah bentuk aktual/target yang sudah dipakai poster ini
     // di kotak "Available >5 pcs" (1.158 / 1.663), jadi bukan notasi baru.
-    const tTargetAtp = teksTargetAtp(atpTarget, nA);
+    const tTargetAtp = teksTargetAtp(atpTarget);
     const pAtp = a.atp ? persenAtp(a.atp.persen) : '—';
-    const tDoi = a.ambang ? teksTarget(a.ambang.max, nD) : '';
+    const tDoi = a.ambang ? teksTarget(a.ambang.max) : '';
     const kandidatKanan = !tTargetAtp
       ? (keduanya ? [`ATP ${pAtp}`] : [])
       : keduanya
         ? [`ATP ${pAtp} · ${tTargetAtp}`, `ATP ${pAtp} / ${Math.round(atpTarget as number)}%`, `ATP ${pAtp}`]
         // DUA bentuk, bukan satu — ditambahkan 12 Okt 2026 bersama ukuran teks 16.
         //
-        // Pada ukuran itu, kartu 5 cabang (262px) pas untuk "Target 45h (+)" +
-        // "Target 95% (-)" (258px) tapi TIDAK kalau ambangnya tiga digit:
-        // "Target 999h (+)" menyisakan 120px sementara bentuk panjangnya 125px.
-        // Tanpa bentuk kedua, yang dipotong adalah target DOI di kiri — dan
-        // "Target 99…" membalik artinya, persis jenis kerusakan yang dijaga
-        // `wa-target.test.ts`.
+        // Sejak penanda '(+)'/'(-)' dihapus (15 Okt 2026, digantikan simbol
+        // ≤/≥ di dalam targetnya) baris ini jauh lebih longgar: di kartu 5
+        // cabang "Target ≤999h" + "Target ≥95%" butuh 205px dari 262px. Bentuk
+        // pendeknya TETAP ada sebagai cadangan untuk kartu yang lebih sempit —
+        // 7 cabang ke atas — karena yang dipotong kalau ia hilang adalah target
+        // DOI di kiri, dan "Target ≤99…" membalik artinya.
         //
-        // Yang dipendekkan KATA-nya, bukan angka atau tandanya: "Tgt 95% (-)"
-        // masih menyebut berapa targetnya dan masih membawa penanda arah untuk
+        // Yang dipendekkan KATA-nya, bukan angkanya maupun simbolnya:
+        // "Tgt ≥95%" masih menyebut berapa targetnya dan ke arah mana, untuk
         // yang tidak bisa membedakan warnanya.
         : [tTargetAtp, tTargetAtp.replace(/^Target /, 'Tgt ')];
     const kanan = pilihKanan(kandidatKanan, isi, tDoi);
@@ -533,11 +534,29 @@ export function Poster({ data, onPilihArea }: Props) {
         return n ? warnaTarget(n.baik) : undefined;
       })(),
     },
+    // TARGETNYA sendiri, satu kolom di sebelah angkanya (permintaan user
+    // 15 Okt 2026: "berikan 1 kolom lagi ... dengan angka target, total
+    // keseluruhannya dengan target berapa").
+    //
+    // Sebelum ini target keseluruhan cuma muncul sebagai WARNA pada kolom "ATP
+    // keseluruhan" — merah berarti "di bawah target" tanpa pernah menyebut
+    // targetnya berapa, dan warna sendirian bukan keterangan.
+    //
+    // Angkanya dari baris GABUNGAN di Pengaturan, bukan rata-rata target
+    // cabang: ia memang target SELURUH perusahaan, dan ia pula yang sudah
+    // dipakai mewarnai kolom di sebelahnya. Dua kolom bertetangga ini harus
+    // dinilai dengan angka yang sama, kalau tidak warnanya jadi membantah
+    // targetnya sendiri.
+    //
+    // "≥" sama seperti di kartu: target ATP adalah batas BAWAH.
+    { l: 'Target ATP', v: data.atpTarget ? `\u2265${Math.round(data.atpTarget)}%` : '—' },
   ] as { l: string; v: string; tone?: string }[];
   const rw = (KANVAS.w - 2 * M) / ringkas.length;
-  // Angka strip mengecil saat kolomnya bertambah. Tanpa ini "105 rb pcs" di 26px
-  // (±156px) tidak muat di kolom 170px saat kedua opsi DOI ikut tampil.
-  const rFs = ringkas.length <= 7 ? 26 : ringkas.length === 8 ? 22 : 20;
+  // Angka strip mengecil saat kolomnya bertambah — DIUKUR dari teks yang
+  // benar-benar akan digambar, lihat `ukuranStripMuat`. Tangga per jumlah kolom
+  // yang dipakai sebelumnya tidak melihat panjang teksnya, dan itu yang membuat
+  // kolom ke-10 melubernya 3px tanpa ada yang gagal.
+  const rFs = ukuranStripMuat(ringkas.map((r) => r.v), rw - STRIP_INSET);
 
   return (
     <svg
@@ -566,8 +585,8 @@ export function Poster({ data, onPilihArea }: Props) {
       {ringkas.map((r, i) => (
         <g key={r.l}>
           {i > 0 ? <line x1={M + i * rw} y1={116} x2={M + i * rw} y2={172} stroke={WARNA.garisHalus} /> : null}
-          <Teks x={M + i * rw + 20} y={126} size={11} weight={600} fill={WARNA.tintaLabel}>{r.l.toUpperCase()}</Teks>
-          <Teks x={M + i * rw + 20} y={162} size={rFs} weight={700} fill={r.tone ?? WARNA.tinta} mono>{r.v}</Teks>
+          <Teks x={M + i * rw + STRIP_INSET} y={126} size={11} weight={600} fill={WARNA.tintaLabel}>{r.l.toUpperCase()}</Teks>
+          <Teks x={M + i * rw + STRIP_INSET} y={162} size={rFs} weight={700} fill={r.tone ?? WARNA.tinta} mono>{r.v}</Teks>
         </g>
       ))}
 

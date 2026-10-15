@@ -505,30 +505,33 @@ export function doiPlusSit(
 export const JEDA_LABEL = 8;
 
 /**
- * Penilaian sebuah angka terhadap targetnya — DUA KANAL YANG TERPISAH.
+ * Penilaian sebuah angka terhadap targetnya.
  *
- * `tanda` menyatakan POSISI (di atas / di bawah target), `baik` menyatakan
- * APAKAH ITU BAGUS. Dipisah karena dua ukuran di kartu ini berlawanan arah:
+ * Dua ukuran di kartu ini berlawanan arah:
  *
- *   DOI — target adalah batas ATAS. Makin kecil makin bagus (uang tidak
- *         mengendap), jadi di bawah target = baik.
- *   ATP — target adalah batas BAWAH. Makin besar makin bagus (makin banyak SKU
- *         bisa dijanjikan), jadi di atas target = baik.
+ *   DOI — target adalah batas ATAS (<=). Makin kecil makin bagus, uang tidak
+ *         mengendap.
+ *   ATP — target adalah batas BAWAH (>=). Makin besar makin bagus, makin banyak
+ *         SKU bisa dijanjikan.
  *
- * Kalau keduanya dipadatkan jadi satu nilai, tanda yang sama akan berarti hal
- * berbeda di dua angka yang bersebelahan di kartu yang sama — dan pembaca
- * poster tidak punya cara menebak yang mana. Dipisah begini, tiap kanal cuma
- * punya satu arti: tanda selalu posisi, warna selalu baik-atau-buruk.
+ * PENANDA '(+)' / '(-)' DICABUT 15 Okt 2026, saat user meminta simbol
+ * lebih-dari-sama-dengan di target ATP. Dulu penanda itu yang memberi tahu arah
+ * ("72,0%" terhadap "Target 95%" tidak menyatakan sendiri mana yang diinginkan);
+ * sekarang simbolnya ada DI DALAM targetnya — "Target >=95%" menyatakan arahnya
+ * tanpa bantuan, dan pembaca bisa membandingkannya langsung dengan angka besar
+ * tepat di atasnya.
+ *
+ * Itu juga yang membayar ruangnya: di kartu 5 cabang (262px) baris ini memuat
+ * DUA teks, dan pada ukuran 16 "Target <=45h (+)" + "Target >=95% (-)" butuh
+ * 277px — lewat. Tanpa penanda: 205px, muat dengan kelonggaran, dan 6 cabang
+ * pun ikut muat (211px) yang sebelumnya tidak.
+ *
+ * Warna tetap kanal kedua: hijau kalau targetnya terpenuhi, merah kalau tidak.
  */
 export type NilaiTarget = {
-  /** '(+)' di atas target, '(-)' di bawah, '' tepat di target. */
-  tanda: string;
-  /** Apakah posisi itu memenuhi targetnya. */
+  /** Apakah angkanya memenuhi targetnya. Satu-satunya kanal yang tersisa. */
   baik: boolean;
 };
-
-const tandaDari = (nilai: number, target: number): string =>
-  (nilai > target ? ' (+)' : nilai < target ? ' (-)' : '');
 
 /**
  * DOI aktual terhadap batas AMAN cabang.
@@ -549,7 +552,7 @@ export function nilaiDoi(
   ambang: AmbangDoi | null | undefined,
 ): NilaiTarget | null {
   if (doi === null || doi === undefined || !Number.isFinite(doi) || !ambang) return null;
-  return { tanda: tandaDari(doi, ambang.max), baik: doi <= ambang.max };
+  return { baik: doi <= ambang.max };
 }
 
 /**
@@ -564,7 +567,7 @@ export function nilaiAtp(
 ): NilaiTarget | null {
   if (persen === null || persen === undefined || !Number.isFinite(persen)) return null;
   if (target === null || target === undefined || !(Number(target) > 0)) return null;
-  return { tanda: tandaDari(persen, Number(target)), baik: persen >= Number(target) };
+  return { baik: persen >= Number(target) };
 }
 
 /**
@@ -607,17 +610,23 @@ export const UKURAN_TARGET = 16;
  * menulis "Target - hari", yang terbaca seperti ada nilai yang hilang padahal
  * area itu memang memakai ambang global.
  */
-export function teksTarget(max: number | null | undefined, n: NilaiTarget | null = null): string {
+export function teksTarget(max: number | null | undefined): string {
   if (max === null || max === undefined || !Number.isFinite(max)) return '';
   // "h", bukan "hari" — menghemat ±30px, dan itulah yang membuat ukuran 16 muat
   // berdampingan dengan target ATP di kartu 5 cabang. Lihat `UKURAN_TARGET`.
-  return `Target ${max}h${n ? n.tanda : ''}`;
+  //
+  // "<=" karena target DOI adalah PLAFON: terpenuhi kalau aktualnya di bawah.
+  // Pasangannya ">=" di target ATP; dua simbol itu yang membuat dua angka
+  // berlawanan arah di kartu yang sama tidak bisa tertukar artinya.
+  return `Target \u2264${max}h`;
 }
 
 /** Teks target ATP. Persen bulat: targetnya memang diisi bulat di Pengaturan. */
-export function teksTargetAtp(target: number | null | undefined, n: NilaiTarget | null = null): string {
+export function teksTargetAtp(target: number | null | undefined): string {
   if (target === null || target === undefined || !Number.isFinite(target)) return '';
-  return `Target ${Math.round(target)}%${n ? n.tanda : ''}`;
+  // ">=" — permintaan user 15 Okt 2026. Target ATP adalah batas BAWAH, dan
+  // tanpa simbolnya "Target 95%" tidak menyatakan apa pun soal arah.
+  return `Target \u2265${Math.round(target)}%`;
 }
 
 /**
@@ -666,6 +675,37 @@ export function pilihKanan(
   // bentuk teks yang tidak pernah digambar.
   if (sisaTerpendek < lebarTeksKira('Target 7h', size)) return '';
   return kandidat[kandidat.length - 1];
+}
+
+/**
+ * Jarak teks strip ringkasan atas dari tepi kolomnya.
+ *
+ * Dipakai poster DAN `ukuranStripMuat`: inilah yang membuat lebar yang diukur
+ * sama dengan lebar yang benar-benar tersedia. Dulu angka 20 ditulis langsung
+ * di poster.tsx dan tesnya mengukur seluruh lebar kolom, jadi tesnya meluluskan
+ * teks yang sebenarnya menabrak garis pemisah di sebelahnya.
+ */
+export const STRIP_INSET = 20;
+
+/**
+ * Ukuran angka strip ringkasan atas: terbesar yang masih muat di kolomnya.
+ *
+ * DIUKUR, bukan ditebak per jumlah kolom. Dulu tangganya dipatok
+ * (`<=7 ? 26 : ===8 ? 22 : 20`), dan itu rusak dua kali dengan cara yang sama:
+ * tangga itu menghitung KOLOM, padahal yang menentukan adalah PANJANG TEKS.
+ * Saat kolom ke-10 ("Target ATP", permintaan user 15 Okt 2026) ditambahkan,
+ * "56.115/hari" pada ukuran 20 butuh 136px dari 134px yang tersisa — lewat 3px,
+ * dan di mode dua opsi DOI (11 kolom) lewat 17px.
+ *
+ * Teksnya mono (angka), jadi diukur mono. Batas bawah 14 supaya kalaupun
+ * kolomnya terlalu banyak, angkanya mengecil sampai batas yang masih terbaca di
+ * JPG grup WhatsApp dan BUKAN terpotong diam-diam.
+ */
+export function ukuranStripMuat(nilai: string[], isi: number, maks = 26, min = 14): number {
+  for (let s = maks; s > min; s--) {
+    if (nilai.every((t) => lebarTeksKira(t, s, true) <= isi)) return s;
+  }
+  return min;
 }
 
 export function ruangTarget(isi: number, kanan: string, size = UKURAN_TARGET): number {

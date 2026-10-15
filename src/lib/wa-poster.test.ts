@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { pitaDoi } from './area-master';
-import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2, KANVAS, KARTU, tinggiKartuTersedia, BIAYA_BLOK, labelPitaPisah, tataLabelStatus, ukuranAtpMuat, lebarDoiBesar, doiPlusSit, UKURAN_DOI, UKURAN_ATP, TINGGI_SPARK } from './wa-poster';
+import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2, KANVAS, KARTU, tinggiKartuTersedia, BIAYA_BLOK, labelPitaPisah, tataLabelStatus, ukuranAtpMuat, ukuranStripMuat, STRIP_INSET, lebarDoiBesar, doiPlusSit, UKURAN_DOI, UKURAN_ATP, TINGGI_SPARK } from './wa-poster';
 
 test('rupiah diringkas per satuan', () => {
   assert.equal(rupiahRingkas(52_431_882_100), 'Rp 52,4 M');
@@ -316,15 +316,52 @@ test('nama area dan lencana kritis muat di kepala kartu', () => {
   }
 });
 
-test('strip ringkasan atas: label terpanjang muat di kolomnya', () => {
-  // 9 kolom saat kedua opsi DOI tampil; label 12px, angka rFs 20px.
-  const kolom = (1600 - 2 * 32) / 9;
-  for (const l of ['SKU dihitung', 'Dalam perjalanan', 'Nilai + Nilai SIT', 'Kritis + Low', 'DOI Opsi 1', 'ADS']) {
-    assert.ok(lebarTeksKira(l, 12) <= kolom, `label "${l}" tidak muat di kolom ${kolom.toFixed(0)}px`);
+test('strip ringkasan atas: label DAN angka muat di kolomnya, sampai 11 kolom', () => {
+  // 9 kolom = keadaan satu opsi DOI sebelum 15 Okt; 10 = setelah kolom
+  // "Target ATP" ditambahkan; 11 = mode dua opsi DOI dengan kolom itu.
+  //
+  // DIUKUR MONO untuk angkanya, karena itulah yang digambar poster
+  // (`mono` pada <Teks>). Versi lama tes ini mengukur 0,56 sementara poster
+  // menggambar 0,62, dan mengukur SELURUH lebar kolom padahal teksnya mulai
+  // 20px dari tepi — dua kelonggaran palsu yang menutupi luberan nyata.
+  const NILAI = [
+    'Rp 52,4 M', 'Rp 120 M', '56.115/hari', '156.115/hari', '1,1 jt pcs',
+    '105 rb pcs', '20,4 hari', '157 SKU', '99,9%', '\u2265100%', '—',
+  ];
+  const LABEL = [
+    'SKU DIHITUNG', 'DALAM PERJALANAN', 'NILAI + NILAI SIT', 'KRITIS + LOW',
+    'DOI OPSI 1', 'ADS', 'ATP KESELURUHAN', 'TARGET ATP',
+  ];
+  for (const n of [9, 10, 11]) {
+    const isi = (KANVAS.w - 2 * 32) / n - STRIP_INSET;
+    // Label ukurannya TETAP 11px: ia yang menyebut angkanya mengukur apa, jadi
+    // ia tidak boleh mengecil mengikuti kolom. Karena itu ia harus muat apa
+    // adanya — kalau tidak, kolomnya yang terlalu banyak, bukan teksnya.
+    for (const l of LABEL) {
+      assert.ok(lebarTeksKira(l, 11) <= isi, `${n} kolom: label "${l}" tidak muat di ${isi.toFixed(0)}px`);
+    }
+    // Angkanya mengecil, tapi ada batasnya: di bawah 15px angka di JPG grup
+    // WhatsApp mulai tidak terbaca di layar ponsel.
+    const fs = ukuranStripMuat(NILAI, isi);
+    assert.ok(fs >= 15, `${n} kolom: angka harus mengecil sampai ${fs}px — terlalu banyak kolom`);
+    for (const v of NILAI) {
+      assert.ok(
+        lebarTeksKira(v, fs, true) <= isi,
+        `${n} kolom: angka "${v}" (${lebarTeksKira(v, fs, true).toFixed(0)}px @${fs}) tidak muat di ${isi.toFixed(0)}px`,
+      );
+    }
   }
-  for (const v of ['Rp 52,4 M', '56.115/hari', '1,1 jt pcs', '20,4 hari', '157 SKU']) {
-    assert.ok(lebarTeksKira(v, 20) <= kolom, `angka "${v}" tidak muat di kolom ${kolom.toFixed(0)}px`);
-  }
+});
+
+test('ukuranStripMuat memilih yang TERBESAR yang muat, bukan yang pertama aman', () => {
+  // Kalau ia mengembalikan ukuran minimum setiap kali, semua tes lebar di atas
+  // tetap lulus sementara posternya menggambar angka 14px di kolom lapang.
+  const kolom9 = (KANVAS.w - 2 * 32) / 9 - STRIP_INSET;
+  const kolom11 = (KANVAS.w - 2 * 32) / 11 - STRIP_INSET;
+  const nilai = ['56.115/hari', '1,1 jt pcs'];
+  assert.ok(ukuranStripMuat(nilai, kolom9) > ukuranStripMuat(nilai, kolom11), 'kolom lebih lapang = angka lebih besar');
+  assert.equal(ukuranStripMuat(['9%'], 1000), 26, 'kolom lapang memakai ukuran maksimum');
+  assert.equal(ukuranStripMuat(['angka yang keterlaluan panjang'], 10), 14, 'mentok di batas bawah');
 });
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Poster } from './poster';
 import type { AreaWa, DataWa } from './types';
 import { persenTeks as persenAtp, type RincianArea, type GrupRincian } from '@/lib/atp';
-import { KANVAS, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
+import { KANVAS, tinggiKanvas, WARNA, adsTeks, angkaRingkas, hari, labelDoi, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tampil1, tampil2, type DoiDisplay } from '@/lib/wa-poster';
 
 /**
  * Halaman poster WhatsApp.
@@ -312,8 +312,16 @@ export default function WaPage() {
    * waktu. Bot yang memakai angka lama akan MEMOTONG kaki poster tanpa galat
    * apa pun — gambarnya terkirim, cuma kurang, dan tidak ada yang memeriksanya.
    *
-   * Saat ini `KANVAS` = 1600×1032. Di telegram-wa-bridge angka itu ada di
-   * `DOI_IMAGE_HEIGHT` (atau perintah `/doitinggi`), BUKAN di repo ini.
+   * Sejak 15 Okt 2026 TINGGINYA TIDAK TETAP: mulai cabang ke-6 kartu turun ke
+   * baris kedua dan kanvas memanjang (5 cabang 1032, 6–10 cabang 1800). Jadi
+   * menambah cabang MENGUBAH ukuran gambar — dan bot yang memakai tinggi tetap
+   * akan memotongnya diam-diam.
+   *
+   * Karena itu mode ini menulis ukurannya di DOM: `data-lebar` dan
+   * `data-tinggi` pada elemen yang sama dengan `data-siap`. Bot sebaiknya
+   * membaca keduanya (atau memakai `fullPage`) daripada memegang
+   * `DOI_IMAGE_HEIGHT` di telegram-wa-bridge, yang harus diubah manual setiap
+   * kali cabang bertambah.
    */
   const bare = useMemo(() => (typeof window === 'undefined' ? false : new URLSearchParams(window.location.search).get('bare') === '1'), []);
 
@@ -349,13 +357,19 @@ export default function WaPage() {
     const img = new Image();
     img.onload = () => {
       const c = document.createElement('canvas');
-      c.width = KANVAS.w; c.height = KANVAS.h;
+      // Tinggi dari POSTERNYA SENDIRI (viewBox), bukan konstanta: sejak grid
+      // multi-baris, tingginya bergantung pada jumlah cabang. Konstanta di sini
+      // akan memotong baris kedua pada JPG yang diunduh — tanpa galat apa pun.
+      const vb = (svg as unknown as SVGSVGElement).viewBox?.baseVal;
+      const wPx = vb?.width || KANVAS.w;
+      const hPx = vb?.height || KANVAS.h;
+      c.width = wPx; c.height = hPx;
       const ctx = c.getContext('2d');
       if (!ctx) { setUnduh('gagal'); return; }
       // JPG tidak mengenal transparan — tanpa alas ini bagian kosong jadi hitam.
       ctx.fillStyle = WARNA.kanvas;
       ctx.fillRect(0, 0, c.width, c.height);
-      ctx.drawImage(img, 0, 0, KANVAS.w, KANVAS.h);
+      ctx.drawImage(img, 0, 0, wPx, hPx);
       c.toBlob((b) => {
         if (!b) { setUnduh('gagal'); return; }
         const a = document.createElement('a');
@@ -387,12 +401,19 @@ export default function WaPage() {
   if (!data) return <div className="wa-pesan"><div className="text-[13px] text-label">Memuat…</div></div>;
 
   const areaTerpilih = data.areas.find((a) => a.area === pilih?.area) ?? null;
+  // Tinggi poster IKUT jumlah cabang: sejak cabang ke-6 kartu turun ke baris
+  // kedua dan kanvasnya memanjang. Dihitung dari fungsi yang sama dengan yang
+  // menggambar, jangan pernah ditulis mati di sini — lihat `tinggiKanvas`.
+  const tinggiGambar = tinggiKanvas(data.areas.length);
 
   if (bare) {
     // `data-siap` adalah tanda bagi bot: tunggu selector ini, bukan timer.
     // networkidle saja tidak cukup — datanya diambil setelah halaman siap.
     return (
-      <div className="wa-root is-bare" data-siap="1">
+      // `data-tinggi` supaya bot bisa MEMBACA tinggi yang sebenarnya, bukan
+      // menebaknya dari setelan yang mungkin sudah basi. Lihat catatan di
+      // `?bare=1` di atas.
+      <div className="wa-root is-bare" data-siap="1" data-lebar={KANVAS.w} data-tinggi={tinggiGambar}>
         <div className="wa-canvas"><Poster data={data} /></div>
       </div>
     );
@@ -406,7 +427,7 @@ export default function WaPage() {
       <div className="wa-bar">
         <span className="text-[12px] text-label">
           Klik kartu area untuk rincian, atau <b>angka ATP</b> untuk melihat SKU mana yang dihitung
-          dan mana yang tidak · gambar {KANVAS.w}×{KANVAS.h}
+          dan mana yang tidak · gambar {KANVAS.w}×{tinggiGambar}
         </span>
         <button className="btn btn-sm btn-primary" onClick={unduhJpg} disabled={unduh === 'proses'}>
           {unduh === 'proses' ? 'Menyiapkan…' : unduh === 'gagal' ? 'Gagal — coba lagi' : 'Unduh JPG'}

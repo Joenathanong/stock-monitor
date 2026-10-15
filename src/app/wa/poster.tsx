@@ -7,7 +7,7 @@
 import {
   FONT, FONT_MONO, KANVAS, WARNA, adsTeks, angkaRingkas, deretTren, hari, jalurSpark, labelDoi, lebarKartu,
   rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, TINGGI_SPARK, lebarTeksKira, potongTeks, JEDA_LABEL, labelPitaPisah, tataLabelStatus, tampil1, tampil2,
-  KARTU, tinggiKartuTersedia, ukuranAtpMuat, UKURAN_DOI,
+  KARTU, tinggiKartuTersedia, ukuranAtpMuat, UKURAN_DOI, tataGrid, tinggiKanvas, posisiKartu,
   teksTarget, teksTargetAtp, ruangTarget, pilihKanan, nilaiDoi, nilaiAtp, warnaTarget, UKURAN_TARGET,
   ukuranStripMuat, STRIP, lebarStrip, IKON, jalurArea,
 } from '@/lib/wa-poster';
@@ -587,9 +587,14 @@ function KartuStrip({ r, x, y, w, fs }: { r: KartuRingkas; x: number; y: number;
 
 export function Poster({ data, onPilihArea }: Props) {
   const area = data.areas;
-  const w = lebarKartu(area.length || 1, KANVAS.w, M, JARAK);
-  const kartuY = KARTU.y;
+  // GRID, bukan satu baris memanjang (15 Okt 2026, menyongsong Bali, Palembang
+  // dan Banjarmasin). Sejak cabang ke-6 kartu TURUN ke baris baru alih-alih
+  // menyempit — lihat `MAKS_KOLOM` untuk kenapa 5 adalah batasnya.
+  const grid = tataGrid(area.length || 1);
+  const w = lebarKartu(grid.kolom || 1, KANVAS.w, M, JARAK);
   const kartuH = tinggiKartuTersedia();
+  // Kanvas MENGIKUTI jumlah baris; 5 area atau kurang tetap 1032 seperti dulu.
+  const kanvasH = tinggiKanvas(area.length, kartuH);
   const t = data.total;
 
   const disp = data.doiDisplay ?? 'BOTH';
@@ -692,9 +697,9 @@ export function Poster({ data, onPilihArea }: Props) {
     <svg
       id="wa-poster"
       xmlns="http://www.w3.org/2000/svg"
-      viewBox={`0 0 ${KANVAS.w} ${KANVAS.h}`}
+      viewBox={`0 0 ${KANVAS.w} ${kanvasH}`}
       width={KANVAS.w}
-      height={KANVAS.h}
+      height={kanvasH}
       style={{ display: 'block', width: '100%', height: 'auto' }}
     >
       {/*
@@ -711,7 +716,7 @@ export function Poster({ data, onPilihArea }: Props) {
           </linearGradient>
         ))}
       </defs>
-      <rect width={KANVAS.w} height={KANVAS.h} fill={WARNA.kanvas} />
+      <rect width={KANVAS.w} height={kanvasH} fill={WARNA.kanvas} />
 
       {/* kepala */}
       <rect x={M} y={24} width={5} height={30} rx={2.5} fill={WARNA.primary} />
@@ -734,8 +739,8 @@ export function Poster({ data, onPilihArea }: Props) {
         <KartuArea
           key={a.area}
           a={a}
-          x={M + i * (w + JARAK)}
-          y={kartuY}
+          x={posisiKartu(i, grid.kolom, w, kartuH, M, JARAK).x}
+          y={posisiKartu(i, grid.kolom, w, kartuH, M, JARAK).y}
           w={w}
           h={kartuH}
           blok={data.blok}
@@ -749,10 +754,10 @@ export function Poster({ data, onPilihArea }: Props) {
       ))}
 
       {/* kaki */}
-      <Teks x={M} y={KANVAS.h - 22} size={12} fill={WARNA.tintaLabel}>
+      <Teks x={M} y={kanvasH - 22} size={12} fill={WARNA.tintaLabel}>
         Barang dalam perjalanan menambah kolom SIT dan “DOI + transit”, tapi tidak menambah Total stok maupun DOI total.
       </Teks>
-      <Teks x={KANVAS.w - M} y={KANVAS.h - 22} size={12} fill={WARNA.tintaLabel} anchor="end">
+      <Teks x={KANVAS.w - M} y={kanvasH - 22} size={12} fill={WARNA.tintaLabel} anchor="end">
         {`Sumber: OCS · dihitung ${data.computedAt ? new Date(data.computedAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}`}
       </Teks>
     </svg>

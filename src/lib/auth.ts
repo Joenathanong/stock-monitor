@@ -41,8 +41,8 @@ async function hmac(message: string): Promise<Uint8Array> {
 }
 
 // ---------- sesi ----------
-export async function signSession(p: Omit<SessionPayload, 'exp'>): Promise<string> {
-  const payload: SessionPayload = { ...p, exp: Date.now() + SESSION_DAYS * 86_400_000 };
+export async function signSession(p: Omit<SessionPayload, 'exp'>, days = SESSION_DAYS): Promise<string> {
+  const payload: SessionPayload = { ...p, exp: Date.now() + days * 86_400_000 };
   const body = b64url(enc.encode(JSON.stringify(payload)));
   const sig = b64url(await hmac(body));
   return `${body}.${sig}`;

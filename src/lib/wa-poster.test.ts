@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { pitaDoi } from './area-master';
-import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2, KANVAS, KARTU, tinggiKartuTersedia, BIAYA_BLOK, labelPitaPisah, tataLabelStatus, ukuranAtpMuat, ukuranStripMuat, STRIP, lebarStrip, jalurArea, teksTarget, teksTargetAtp, lebarDoiBesar, doiPlusSit, UKURAN_DOI, UKURAN_ATP, TINGGI_SPARK } from './wa-poster';
+import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2, KANVAS, KARTU, tinggiKartuTersedia, BIAYA_BLOK, labelPitaPisah, tataLabelStatus, ukuranAtpMuat, ukuranStripMuat, STRIP, lebarStrip, jalurArea, tataGrid, tinggiKanvas, posisiKartu, MAKS_KOLOM, teksTarget, teksTargetAtp, lebarDoiBesar, doiPlusSit, UKURAN_DOI, UKURAN_ATP, TINGGI_SPARK } from './wa-poster';
 
 test('rupiah diringkas per satuan', () => {
   assert.equal(rupiahRingkas(52_431_882_100), 'Rp 52,4 M');
@@ -422,6 +422,91 @@ test('isian gradasi DIBATALKAN kalau deretnya terputus', () => {
   const sendirian = jalurSpark([1, null, 5, 6], 100, 40);
   assert.equal((jalurArea(sendirian.d, 40).match(/Z/g) ?? []).length, 1);
   assert.equal(jalurArea('', 40), '', 'tanpa jalur tidak ada isian');
+});
+
+// ---------------------------------------------------------------------------
+// GRID kartu area (15 Okt 2026) — menyongsong Bali, Palembang, Banjarmasin.
+// ---------------------------------------------------------------------------
+
+test('kartu TIDAK PERNAH lebih dari 5 sebaris, berapa pun cabangnya', () => {
+  // INILAH tes yang dulu tidak ada. Mockup 8 cabang satu baris (14 Okt) rusak
+  // — angka DOI dan ATP bertumpuk, nama cabang terpotong — dan tidak satu pun
+  // tes menangkapnya, karena semua tes lebar waktu itu mengasumsikan satu
+  // baris. Sekarang jumlah cabang berapa pun tidak bisa menyempitkan kartu
+  // melewati batas yang sudah diukur.
+  for (let n = 1; n <= 20; n++) {
+    const { baris, kolom } = tataGrid(n);
+    assert.ok(kolom <= MAKS_KOLOM, `${n} cabang → ${kolom} kolom, melewati batas ${MAKS_KOLOM}`);
+    assert.ok(baris * kolom >= n, `${n} cabang tidak muat di ${baris}x${kolom}`);
+    // Tidak ada baris kosong: grid 3x4 untuk 8 cabang akan menyisakan satu
+    // baris kosong di kaki poster.
+    assert.ok((baris - 1) * kolom < n, `${n} cabang di ${baris}x${kolom} menyisakan baris kosong`);
+  }
+});
+
+test('kolomnya DIRATAKAN, bukan "lima dulu baru sisanya"', () => {
+  // 8 cabang jadi 4+4, bukan 5+3. Baris kedua yang jauh lebih pendek terbaca
+  // seperti kelompok yang berbeda, padahal urutannya cuma abjad.
+  assert.deepEqual(tataGrid(5), { baris: 1, kolom: 5 });
+  assert.deepEqual(tataGrid(6), { baris: 2, kolom: 3 });
+  assert.deepEqual(tataGrid(8), { baris: 2, kolom: 4 });
+  assert.deepEqual(tataGrid(10), { baris: 2, kolom: 5 });
+  assert.deepEqual(tataGrid(11), { baris: 3, kolom: 4 });
+  // 7 cabang: 4+3. Barisnya memang tidak rata — tapi 4 adalah pembagian
+  // terkecil yang mungkin untuk 2 baris, dan kartu yang kosong di ujung lebih
+  // baik daripada baris ketiga berisi satu kartu.
+  assert.deepEqual(tataGrid(7), { baris: 2, kolom: 4 });
+});
+
+test('5 cabang atau kurang: tata letaknya PERSIS seperti sebelumnya', () => {
+  // Jaring pengaman untuk keadaan hari ini. Grid tidak boleh menggeser apa pun
+  // selama cabangnya masih lima.
+  for (let n = 1; n <= 5; n++) {
+    assert.equal(tataGrid(n).baris, 1);
+    assert.equal(tataGrid(n).kolom, n);
+    assert.equal(tinggiKanvas(n), 1032, `${n} cabang mestinya tetap 1032px`);
+    assert.equal(posisiKartu(n - 1, n, lebarKartu(n), tinggiKartuTersedia()).y, KARTU.y);
+  }
+});
+
+test('kanvas memanjang mengikuti baris, dan kartu terakhir tidak melewati kakinya', () => {
+  // Tinggi kartu TETAP; kanvas yang mengikuti. Kebalikannya — kanvas tetap,
+  // kartu dibagi dua — berarti isi kartu yang dipotong, dan SVG memotong tanpa
+  // mengeluh sama sekali.
+  const kartuH = tinggiKartuTersedia();
+  for (const n of [1, 5, 6, 8, 10, 11]) {
+    const { baris, kolom } = tataGrid(n);
+    const H = tinggiKanvas(n, kartuH);
+    const terakhir = posisiKartu(n - 1, kolom, lebarKartu(kolom), kartuH);
+    assert.equal(
+      terakhir.y + kartuH + KARTU.bawah, H,
+      `${n} cabang: kartu terakhir berakhir di ${terakhir.y + kartuH}, kanvas ${H}`,
+    );
+    assert.equal(H, KARTU.y + baris * kartuH + (baris - 1) * 20 + KARTU.bawah);
+  }
+});
+
+test('kartu di baris mana pun tidak melewati margin kanan', () => {
+  const kartuH = tinggiKartuTersedia();
+  for (const n of [5, 6, 7, 8, 10, 12]) {
+    const { kolom } = tataGrid(n);
+    const w = lebarKartu(kolom);
+    for (let i = 0; i < n; i++) {
+      const { x } = posisiKartu(i, kolom, w, kartuH);
+      assert.ok(x + w <= KANVAS.w - 32 + 0.001, `${n} cabang, kartu ke-${i + 1} berakhir di ${(x + w).toFixed(1)}`);
+    }
+  }
+});
+
+test('lebar kartu pada grid TIDAK PERNAH lebih sempit daripada 5 kolom', () => {
+  // Konsekuensi yang sebenarnya dicari dari seluruh grid ini: seluruh tes lebar
+  // di berkas lain (target DOI + ATP berdampingan, nama cabang + lencana,
+  // label sebaran) diukur pada kartu 5 kolom. Selama ini dijaga, tes-tes itu
+  // tetap berlaku untuk jumlah cabang berapa pun.
+  const dasar = lebarKartu(MAKS_KOLOM);
+  for (let n = 1; n <= 20; n++) {
+    assert.ok(lebarKartu(tataGrid(n).kolom) >= dasar - 0.001, `${n} cabang lebih sempit dari 5 kolom`);
+  }
 });
 
 // ---------------------------------------------------------------------------

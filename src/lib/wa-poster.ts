@@ -56,6 +56,65 @@ export const KARTU = { y: 228, bawah: 56, pad: 16 } as const;
 export const tinggiKartuTersedia = (kanvas: { h: number } = KANVAS) =>
   kanvas.h - KARTU.y - KARTU.bawah;
 
+/**
+ * Kartu area TIDAK PERNAH lebih dari 5 per baris.
+ *
+ * Batas ini diukur, bukan selera. Baris target di kartu memuat DUA teks
+ * berdampingan ("Target \u2264 45h" + "Target \u2265 95%") yang pada ukuran 16 butuh
+ * ±205px; isi kartu 5 kolom 262px, 6 kolom 211px, dan 8 kolom cuma 146px — di
+ * situ angka DOI dan ATP mulai bertumpuk dan nama cabang terpotong.
+ *
+ * KEJADIAN NYATA: mockup 8 cabang dalam satu baris (14 Okt 2026) rusak persis
+ * begitu, dan TIDAK ADA satu tes pun yang menangkapnya — semua tes lebar waktu
+ * itu mengasumsikan satu baris. Sejak cabang ke-6, kartu TURUN KE BARIS BARU,
+ * bukan menyempit. Lebar kartu jadi tidak pernah di bawah lebar 5 kolom, apa
+ * pun jumlah cabangnya, dan itulah yang dijaga `tataGrid` beserta tesnya.
+ */
+export const MAKS_KOLOM = 5;
+
+/** Jarak vertikal antar baris kartu. */
+export const JARAK_BARIS = 20;
+
+/**
+ * Berapa baris dan berapa kolom untuk sejumlah area.
+ *
+ * Kolomnya DIRATAKAN, bukan "5 dulu baru sisanya": 8 cabang jadi 4+4, bukan
+ * 5+3. Baris kedua yang jauh lebih pendek terbaca seperti kelompok yang
+ * berbeda, padahal urutannya cuma abjad.
+ */
+export function tataGrid(n: number, maks = MAKS_KOLOM): { baris: number; kolom: number } {
+  if (n <= 0) return { baris: 0, kolom: 0 };
+  const baris = Math.ceil(n / maks);
+  return { baris, kolom: Math.ceil(n / baris) };
+}
+
+/**
+ * Tinggi kanvas untuk sejumlah area — TINGGI KARTU TETAP, kanvas yang mengikuti.
+ *
+ * Kebalikan dari sebelumnya, saat kanvas dipatok 1032 dan tinggi kartu
+ * diturunkan darinya. Dengan grid, memaksakan kanvas tetap berarti kartu baris
+ * kedua harus setengah tinggi — isinya yang dipotong, bukan posternya yang
+ * memanjang. Gambar yang lebih panjang tidak merugikan pembaca WhatsApp:
+ * lebarnya tetap 1600 dan ia hanya menggulir lebih jauh.
+ *
+ * 5 area atau kurang menghasilkan 1032 persis seperti sebelumnya.
+ */
+export function tinggiKanvas(nArea: number, kartuH = tinggiKartuTersedia()): number {
+  const { baris } = tataGrid(nArea);
+  const n = Math.max(1, baris);
+  return KARTU.y + n * kartuH + (n - 1) * JARAK_BARIS + KARTU.bawah;
+}
+
+/** Posisi kiri-atas kartu ke-`i` pada grid. */
+export function posisiKartu(
+  i: number, kolom: number, w: number, kartuH: number, m = 32, jarak = 16,
+): { x: number; y: number } {
+  return {
+    x: m + (i % kolom) * (w + jarak),
+    y: KARTU.y + Math.floor(i / kolom) * (kartuH + JARAK_BARIS),
+  };
+}
+
 export const FONT = "Arial, Helvetica, 'Liberation Sans', sans-serif";
 export const FONT_MONO = "'DejaVu Sans Mono', Menlo, Consolas, monospace";
 

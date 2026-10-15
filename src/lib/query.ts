@@ -372,6 +372,16 @@ export async function summaryHistory(days = 90, area?: string | null) {
       doi2: p.summary.total.doi2,
       stock: p.summary.total.stock,
       critical: p.summary.byStatus.CRITICAL + p.summary.byStatus.LOW,
+      // Lima medan di bawah ditambahkan 15 Okt 2026 untuk sparkline di strip
+      // kepala poster /wa. Semuanya SUDAH ada di payload harian sejak awal —
+      // yang kurang cuma pembacaannya di sini, jadi sparkline itu membaca
+      // sejarah yang benar-benar terekam, bukan sejarah yang dikarang ulang
+      // dari angka hari ini.
+      sku: p.summary.totalSku,
+      ads1: p.summary.total.ads1,
+      ads2: p.summary.total.ads2,
+      transit: p.summary.total.transit,
+      value: p.summary.total.value,
     };
   });
 }

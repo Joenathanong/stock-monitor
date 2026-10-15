@@ -693,6 +693,41 @@ export async function trenAtp(hari = 30, areaId?: string | null): Promise<TitikT
 }
 
 /**
+ * Tren ATP KESELURUHAN — dijumlahkan lintas area per tanggal.
+ *
+ * `atp_daily` menyimpan satu baris per (tanggal, area); tidak ada baris
+ * GABUNGAN. Jadi persen keseluruhan hari lalu HARUS dijumlahkan di sini:
+ * sum(siap) / sum(dihitung), bukan rata-rata persen antar area — cabang 2 SKU
+ * dan cabang 1.600 SKU tidak boleh berbobot sama. Aturannya sama persis dengan
+ * `atpKeseluruhan()` yang dipakai angka hari ini, supaya ujung sparkline dan
+ * angka besar di sebelahnya tidak pernah berselisih.
+ */
+export async function trenAtpKeseluruhan(hari = 30): Promise<TitikTrenAtp[]> {
+  try {
+    const batas = new Date();
+    batas.setUTCDate(batas.getUTCDate() - Math.max(1, hari) - 5);
+    const rows = await prisma.atpDaily.findMany({
+      where: { snapshotDate: { gte: batas } },
+      orderBy: { snapshotDate: 'asc' },
+    });
+    const per = new Map<string, { siap: number; dihitung: number }>();
+    for (const r of rows) {
+      const k = toDateKeyUtc(r.snapshotDate);
+      const a = per.get(k) ?? { siap: 0, dihitung: 0 };
+      a.siap += r.siap;
+      a.dihitung += r.dihitung;
+      per.set(k, a);
+    }
+    return [...per.entries()]
+      .map(([date, a]) => ({ date, siap: a.siap, dihitung: a.dihitung, persen: a.dihitung > 0 ? (a.siap / a.dihitung) * 100 : null }))
+      .slice(-Math.max(1, hari));
+  } catch (e) {
+    if (tabelBelumAda(e)) return [];
+    throw e;
+  }
+}
+
+/**
  * Persen ATP per area untuk poster WA — ringan, tanpa daftar SKU.
  *
  * Poster hanya memuat PERSENNYA (keputusan user 8 Okt 2026: checklist-nya tidak

@@ -34,7 +34,7 @@ const isiUntuk = (n: number) => lebarKartu(n) - 2 * KARTU.pad;
  * Kandidat teks sisi kanan dalam kasus TERBURUK: mode dua opsi DOI, persen dan
  * target sama-sama tiga digit. Diurut persis seperti di poster.tsx.
  */
-const KANDIDAT_KANAN = ['ATP 100,0% · Target ≥100%', 'ATP 100,0% / 100%', 'ATP 100,0%'];
+const KANDIDAT_KANAN = ['ATP 100,0% · Target ≥ 100%', 'ATP 100,0% / 100%', 'ATP 100,0%'];
 
 // ---------------------------------------------------------------------------
 // Arah penilaian: DOI dan ATP BERLAWANAN
@@ -122,10 +122,10 @@ test('ejaan target memakai ambang apa adanya, dengan simbol arahnya', () => {
   // mengikuti aktualnya — dan itu yang membayar ruangnya: pada ukuran 16,
   // "Target ≤45h (+)" + "Target ≥95% (-)" butuh 277px di kartu 5 cabang yang
   // isinya 262px. Tanpa penanda: 205px, dan 6 cabang (211px) ikut muat.
-  assert.equal(teksTarget(7), 'Target \u22647h');
-  assert.equal(teksTarget(45), 'Target \u226445h');
-  assert.equal(teksTargetAtp(95), 'Target \u226595%');
-  assert.equal(teksTargetAtp(90.4), 'Target \u226590%', 'persen dibulatkan');
+  assert.equal(teksTarget(7), 'Target \u2264 7h');
+  assert.equal(teksTarget(45), 'Target \u2264 45h');
+  assert.equal(teksTargetAtp(95), 'Target \u2265 95%');
+  assert.equal(teksTargetAtp(90.4), 'Target \u2265 90%', 'persen dibulatkan');
 });
 
 test('tanpa ambang/target tidak menulis "Target — hari"', () => {

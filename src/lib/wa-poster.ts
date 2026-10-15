@@ -42,7 +42,7 @@ export const WARNA = {
  * tanpa ada yang dikorbankan. Angkanya diuji, bukan dikira: lihat
  * wa-poster.test.ts.
  */
-export const KANVAS = { w: 1600, h: 1000 } as const;
+export const KANVAS = { w: 1600, h: 1032 } as const;
 
 /**
  * Posisi & sisa ruang kartu area. SATU sumber, dipakai poster DAN tesnya.
@@ -52,7 +52,7 @@ export const KANVAS = { w: 1600, h: 1000 } as const;
  * yang sudah tidak dipakai siapa pun, dan luberan yang mestinya ketahuan jadi
  * lolos. Sekarang tesnya memanggil fungsi ini.
  */
-export const KARTU = { y: 216, bawah: 56, pad: 16 } as const;
+export const KARTU = { y: 228, bawah: 56, pad: 16 } as const;
 export const tinggiKartuTersedia = (kanvas: { h: number } = KANVAS) =>
   kanvas.h - KARTU.y - KARTU.bawah;
 
@@ -222,11 +222,26 @@ export function jalurSpark(
   w: number,
   h: number,
   pad = 2,
-): { d: string; min: number; max: number; titikAkhir: { x: number; y: number } | null } {
+  /**
+   * Nilai TAMBAHAN yang ikut menentukan skala meski tidak digambar sebagai
+   * titik — dipakai target di strip kepala (15 Okt 2026).
+   *
+   * Tanpa ini, target yang berada di luar rentang 30 hari tergambar di luar
+   * kotaknya. Dan itu justru kasus yang paling perlu terlihat: DOI 30 hari di
+   * 16–22 hari dengan target 14 berarti targetnya TIDAK PERNAH tersentuh —
+   * garisnya harus kelihatan di bawah kurva, bukan hilang di tepi.
+   */
+  extra?: number,
+): {
+  d: string; min: number; max: number; titikAkhir: { x: number; y: number } | null;
+  /** Posisi y sebuah nilai pada skala yang sama — untuk garis target. */
+  yDari: (v: number) => number;
+} {
   const ada = nilai.filter((v): v is number => v !== null && Number.isFinite(v));
-  if (ada.length < 2) return { d: '', min: 0, max: 0, titikAkhir: null };
-  const min = Math.min(...ada);
-  const max = Math.max(...ada);
+  if (ada.length < 2) return { d: '', min: 0, max: 0, titikAkhir: null, yDari: () => 0 };
+  const skala = extra !== undefined && Number.isFinite(extra) ? [...ada, extra] : ada;
+  const min = Math.min(...skala);
+  const max = Math.max(...skala);
   const rentang = max - min || 1;
   const n = nilai.length;
   const x = (i: number) => (n === 1 ? 0 : (i / (n - 1)) * w);
@@ -242,7 +257,12 @@ export function jalurSpark(
     baru = false;
     akhir = { x: px, y: py };
   });
-  return { d: d.trim(), min, max, titikAkhir: akhir };
+  // `min`/`max` yang DIKEMBALIKAN tetap milik datanya saja, bukan skalanya:
+  // label "terendah/tertinggi" di bawah grafik menyebut data, dan target yang
+  // ikut diskalakan tidak boleh menyelinap ke dalam angka itu.
+  const minData = Math.min(...ada);
+  const maxData = Math.max(...ada);
+  return { d: d.trim(), min: minData, max: maxData, titikAkhir: akhir, yDari: y };
 }
 
 export type DoiDisplay = 'OPSI1' | 'OPSI2' | 'BOTH';
@@ -342,6 +362,15 @@ export const BIAYA_BLOK = {
   pitchPilihan: [20, 18, 16, 14, 13] as const,
   /** Garis pemisah antara 4 pita DOI dan 6 keterangan. */
   pemisah: 10,
+  /**
+   * Sumbu waktu "30 hari" di kaki kartu — SATU untuk kedua tren.
+   *
+   * Dua tren di kartu yang sama memakai rentang tanggal yang sama persis, jadi
+   * menyebutnya dua kali hanya memakan tinggi. 20px ini dibayar kanvas yang
+   * naik 1000 → 1032 pada 15 Okt 2026, bukan diambil dari jarak baris status:
+   * jarak itu justru yang sengaja dibeli saat kanvas naik 900 → 1000.
+   */
+  sumbu: 20,
 } as const;
 
 export type BlokPoster = {
@@ -375,6 +404,8 @@ export function tinggiKartu(opsi: {
   if (b.status) t += BIAYA_BLOK.statusTetap + BIAYA_BLOK.pemisah + nBaris * pitch;
   if (b.tren) t += BIAYA_BLOK.tren;
   if (b.trenAtp) t += BIAYA_BLOK.trenAtp;
+  // Sumbu waktu dibayar SEKALI, bukan per tren: keduanya memakai rentang yang sama.
+  if (b.tren || b.trenAtp) t += BIAYA_BLOK.sumbu;
   if (b.po && (opsi.kritisMaks ?? 0) > 0) t += BIAYA_BLOK.poTetap + (opsi.kritisMaks ?? 0) * BIAYA_BLOK.poPerBaris;
   return t;
 }
@@ -618,7 +649,11 @@ export function teksTarget(max: number | null | undefined): string {
   // "<=" karena target DOI adalah PLAFON: terpenuhi kalau aktualnya di bawah.
   // Pasangannya ">=" di target ATP; dua simbol itu yang membuat dua angka
   // berlawanan arah di kartu yang sama tidak bisa tertukar artinya.
-  return `Target \u2264${max}h`;
+  //
+  // SPASI setelah simbol (permintaan user 15 Okt 2026). "Target \u22647h" membuat
+  // simbol dan angka menempel jadi satu gumpalan; dengan spasi, simbolnya
+  // terbaca sebagai operator — "paling banyak 7 hari" — bukan bagian angkanya.
+  return `Target \u2264 ${max}h`;
 }
 
 /** Teks target ATP. Persen bulat: targetnya memang diisi bulat di Pengaturan. */
@@ -626,7 +661,7 @@ export function teksTargetAtp(target: number | null | undefined): string {
   if (target === null || target === undefined || !Number.isFinite(target)) return '';
   // ">=" — permintaan user 15 Okt 2026. Target ATP adalah batas BAWAH, dan
   // tanpa simbolnya "Target 95%" tidak menyatakan apa pun soal arah.
-  return `Target \u2265${Math.round(target)}%`;
+  return `Target \u2265 ${Math.round(target)}%`;
 }
 
 /**
@@ -677,15 +712,72 @@ export function pilihKanan(
   return kandidat[kandidat.length - 1];
 }
 
+
 /**
- * Jarak teks strip ringkasan atas dari tepi kolomnya.
+ * Strip kepala sebagai KARTU TERPISAH, bukan satu kotak panjang bergaris
+ * pemisah (permintaan user 15 Okt 2026, varian "B + garis").
  *
- * Dipakai poster DAN `ukuranStripMuat`: inilah yang membuat lebar yang diukur
- * sama dengan lebar yang benar-benar tersedia. Dulu angka 20 ditulis langsung
- * di poster.tsx dan tesnya mengukur seluruh lebar kolom, jadi tesnya meluluskan
- * teks yang sebenarnya menabrak garis pemisah di sebelahnya.
+ * Tingginya 96 → 106: 10px itu dibayar kanvas (1000 → 1032), bukan diambil
+ * dari kartu area. Kartu area justru IKUT naik 20px — lihat `BIAYA_BLOK.sumbu`.
  */
-export const STRIP_INSET = 20;
+export const STRIP = { y: 96, h: 106, pad: 12, jarak: 10 } as const;
+
+/** Lebar satu kartu strip untuk sejumlah kolom, termasuk jeda antar kartu. */
+export const lebarStrip = (n: number, kanvas = KANVAS.w, m = 32, jarak = STRIP.jarak): number =>
+  (kanvas - 2 * m - jarak * Math.max(0, n - 1)) / Math.max(1, n);
+
+/**
+ * Ikon garis 16x16 untuk kartu strip — PATH, bukan font ikon.
+ *
+ * Poster ini diserialkan jadi SVG lalu digambar jadi JPG oleh bot. Font ikon
+ * apa pun (Material, Font Awesome) tidak ada di mesin perender, jadi yang
+ * tergambar akan jadi kotak kosong. Path tidak bergantung pada apa pun yang
+ * terpasang di mesin itu.
+ *
+ * Ikonnya sengaja CUMA PENANDA, bukan pembawa arti: setiap kartu tetap menulis
+ * labelnya penuh. Jadi ikon yang salah tafsir tidak membuat angkanya salah
+ * baca, dan pembaca yang mengabaikannya tidak kehilangan apa pun.
+ */
+export const IKON: Record<string, string> = {
+  kalender: 'M2 4h12v10H2z M2 7h12 M5 2v3 M11 2v3',
+  jam: 'M8 2a6 6 0 100 12A6 6 0 008 2z M8 5v3.3l2.2 1.3',
+  batang: 'M2 14V9 M6 14V5 M10 14V7 M14 14V3',
+  kotak: 'M8 2l6 3v6l-6 3-6-3V5z M2 5l6 3 6-3 M8 8v7',
+  truk: 'M1 4h9v7H1z M10 7h3l2 2v2h-5z M4.5 13a1.3 1.3 0 100-2.6 1.3 1.3 0 000 2.6 M12 13a1.3 1.3 0 100-2.6 1.3 1.3 0 000 2.6',
+  dompet: 'M2 5h12v8H2z M2 5a1.5 1.5 0 011.5-1.5H12 M11 9h2',
+  koin: 'M6 10A4 4 0 106 2a4 4 0 000 8z M10 5.2A4 4 0 1110 14',
+  siaga: 'M8 2l6 11H2z M8 6.5v3 M8 11.2v.6',
+  centang: 'M8 1.5A6.5 6.5 0 108 14.5 6.5 6.5 0 008 1.5z M5 8.2l2 2L11 6',
+};
+
+/**
+ * Jalur AREA di bawah garis sparkline, untuk isian bergradasi.
+ *
+ * Tiap POTONGAN yang bersambung diisi SENDIRI-SENDIRI, bukan satu isian dari
+ * ujung ke ujung. Pada deret berlubang (hari yang potretnya tidak ada), isian
+ * tunggal akan menjembatani lubangnya — menggambar luas untuk hari yang
+ * datanya memang tidak ada. Dengan dipotong, lubangnya tetap terlihat sebagai
+ * lubang, dan kartu yang kebetulan punya satu hari kosong tidak kehilangan
+ * seluruh isiannya (yang akan membuatnya terlihat beda sendiri tanpa sebab).
+ *
+ * Potongan berisi satu titik tidak diisi: luasnya nol, dan menutupnya hanya
+ * menghasilkan garis tegak lurus yang terbaca seperti lonjakan.
+ */
+export function jalurArea(d: string, h: number): string {
+  if (!d) return '';
+  const potong = d.split('M').map((t) => t.trim()).filter(Boolean);
+  const hasil: string[] = [];
+  for (const p of potong) {
+    const titik = p.split('L').map((t) => t.trim()).filter(Boolean);
+    if (titik.length < 2) continue;
+    const x0 = titik[0].split(' ')[0];
+    const xN = titik[titik.length - 1].split(' ')[0];
+    hasil.push(`M${p} L${xN} ${h} L${x0} ${h} Z`);
+  }
+  return hasil.join(' ');
+}
+
+
 
 /**
  * Ukuran angka strip ringkasan atas: terbesar yang masih muat di kolomnya.

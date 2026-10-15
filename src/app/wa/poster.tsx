@@ -9,13 +9,13 @@ import {
   rupiahRingkas, segmenStatus, segmenLain, kunciTampil, tataLetakStatus, BIAYA_BLOK, TINGGI_SPARK, lebarTeksKira, potongTeks, JEDA_LABEL, labelPitaPisah, tataLabelStatus, tampil1, tampil2,
   KARTU, tinggiKartuTersedia, ukuranAtpMuat, UKURAN_DOI,
   teksTarget, teksTargetAtp, ruangTarget, pilihKanan, nilaiDoi, nilaiAtp, warnaTarget, UKURAN_TARGET,
-  ukuranStripMuat, STRIP_INSET,
+  ukuranStripMuat, STRIP, lebarStrip, IKON, jalurArea,
 } from '@/lib/wa-poster';
 // Dipakai dari atp.ts, TIDAK ditulis ulang di sini: angka di poster dan angka di
 // halaman /atp harus sama ejaannya ("71,0%"), dan dua fungsi dengan satu tugas
 // akan berbeda pada kasus null-nya.
 import { persenTeks as persenAtp } from '@/lib/atp';
-import type { DataWa, AreaWa } from './types';
+import type { DataWa, AreaWa, TitikTotal } from './types';
 
 /**
  * Poster 1600×1000 — SATU elemen <svg>, bukan HTML.
@@ -425,6 +425,13 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
     bagian.push(<Teks key="tr" x={x + pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel}>{`TREN ${labelDoi(tampil1(disp) ? 1 : 2, disp)} — 30 HARI`}</Teks>);
     cy += 6;
     if (spark.d) {
+      // Isian bergradasi di bawah garis (permintaan user 15 Okt 2026). Ia tidak
+      // menambah keterangan baru — tugasnya menegaskan ARAH BACA: mana "dasar"
+      // grafik, yang pada garis telanjang harus ditebak. Jalurnya kosong kalau
+      // deretnya terputus; lihat `jalurArea`.
+      {jalurArea(spark.d, TINGGI_SPARK) && bagian.push(
+        <path key="spa" d={jalurArea(spark.d, TINGGI_SPARK)} fill="url(#gs-primary)" transform={`translate(${x + pad} ${cy})`} />,
+      )}
       bagian.push(<path key="sp" d={spark.d} fill="none" stroke={WARNA.primary} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" transform={`translate(${x + pad} ${cy})`} />);
       if (spark.titikAkhir) {
         bagian.push(<circle key="spd" cx={x + pad + spark.titikAkhir.x} cy={cy + spark.titikAkhir.y} r={4} fill={WARNA.primary} stroke={WARNA.permukaan} strokeWidth={2} />);
@@ -455,6 +462,9 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
     bagian.push(<Teks key="ta" x={x + pad} y={cy} size={11} weight={600} fill={WARNA.tintaLabel}>TREN ATP — 30 HARI</Teks>);
     cy += 6;
     if (sparkAtp.d) {
+      {jalurArea(sparkAtp.d, TINGGI_SPARK) && bagian.push(
+        <path key="tapa" d={jalurArea(sparkAtp.d, TINGGI_SPARK)} fill="url(#gs-primary)" transform={`translate(${x + pad} ${cy})`} />,
+      )}
       bagian.push(<path key="tap" d={sparkAtp.d} fill="none" stroke={WARNA.primary} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" transform={`translate(${x + pad} ${cy})`} />);
       if (sparkAtp.titikAkhir) {
         bagian.push(<circle key="tad" cx={x + pad + sparkAtp.titikAkhir.x} cy={cy + sparkAtp.titikAkhir.y} r={4} fill={WARNA.primary} stroke={WARNA.permukaan} strokeWidth={2} />);
@@ -475,11 +485,102 @@ function KartuArea({ a, x, y, w, h, blok, disp, kritisMaks, tampil, atpSize, onK
     cy += TINGGI_SPARK + 20;
   }
 
+  // --- sumbu waktu, SATU untuk kedua tren ---
+  //
+  // Kedua tren memakai rentang tanggal yang sama persis, jadi menyebutnya dua
+  // kali hanya memakan tinggi kartu. Sumbunya tidak berlabel tanggal: di lebar
+  // 294px, enam tanggal akan saling menimpa dan tidak ada yang bisa dibaca.
+  // Yang perlu diketahui pembaca cuma SEBERAPA PANJANG rentangnya — itu yang
+  // ditulis — sementara tanggal persisnya ada di halaman /monitoring.
+  if (blok.tren || blok.trenAtp) {
+    const sy = cy + 2;
+    bagian.push(<line key="sx" x1={x + pad} y1={sy} x2={x + w - pad} y2={sy} stroke={WARNA.garisHalus} strokeWidth={1} />);
+    for (let i = 0; i <= 3; i++) {
+      const tx = x + pad + (isi * i) / 3;
+      bagian.push(<line key={`sxt${i}`} x1={tx} y1={sy} x2={tx} y2={sy + 4} stroke={WARNA.garisHalus} strokeWidth={1} />);
+    }
+    bagian.push(<Teks key="sxl" x={x + w / 2} y={sy + 16} size={11} fill={WARNA.tintaLabel} anchor="middle">30 hari</Teks>);
+    cy = sy + BIAYA_BLOK.sumbu;
+  }
+
   return (
     <g onClick={onKlik} style={onKlik ? { cursor: 'pointer' } : undefined}>
       <rect x={x} y={y} width={w} height={h} rx={12} fill={WARNA.permukaan} stroke={WARNA.garis} strokeWidth={1} />
       <rect x={x} y={y} width={w} height={3} rx={1.5} fill={nKritis > 0 ? WARNA.kritisSolid : WARNA.amanSolid} />
       {bagian}
+    </g>
+  );
+}
+
+/** Nada kartu strip: netral (tanpa target), tercapai, atau meleset. */
+type Nada = 'kritis' | 'aman';
+type KartuRingkas = {
+  l: string; v: string; ikon: string;
+  seri?: (number | null)[];
+  /** Teks target, mis. "Target \u2264 14h". Hanya ada pada angka yang punya target. */
+  target?: string;
+  /** Nilai targetnya, untuk garis putus-putus di sparkline. */
+  targetNilai?: number;
+  nada?: Nada;
+};
+
+const NADA_GARIS: Record<Nada, string> = { kritis: WARNA.kritisSolid, aman: WARNA.amanSolid };
+const NADA_TINTA: Record<Nada, string> = { kritis: WARNA.kritisFg, aman: WARNA.amanFg };
+
+/**
+ * Satu kartu di strip kepala: label + ikon, angka, targetnya, lalu sparkline.
+ *
+ * Sparkline-nya DISKALAKAN IKUT TARGETNYA (`jalurSpark` menerima nilai target
+ * sebagai anggota deret lewat `extra`), bukan hanya ikut rentang datanya. Tanpa
+ * itu, target yang berada di luar rentang 30 hari — justru kasus yang paling
+ * perlu dilihat, "tidak pernah tercapai" — akan tergambar di luar kotak atau
+ * terpotong di tepinya.
+ */
+function KartuStrip({ r, x, y, w, fs }: { r: KartuRingkas; x: number; y: number; w: number; fs: number }) {
+  const { pad, h } = STRIP;
+  const isi = w - 2 * pad;
+  const garis = r.nada ? NADA_GARIS[r.nada] : WARNA.primary;
+  const tinta = r.nada ? NADA_TINTA[r.nada] : WARNA.tinta;
+  const grad = r.nada ? `gs-${r.nada}` : 'gs-primary';
+  // Label dipotong pada ruang yang TERSISA setelah ikon. SVG tidak membungkus
+  // dan tidak punya elipsis: label kepanjangan akan tergambar menimpa ikonnya.
+  const lab = potongTeks(r.l.toUpperCase(), isi - 22, 10);
+
+  const SPARK_Y = 72;
+  const SPARK_H = h - SPARK_Y - 8;
+  const nilai = r.seri ?? [];
+  const sp = nilai.length >= 2
+    ? jalurSpark(nilai, isi, SPARK_H, 3, r.targetNilai)
+    : null;
+  const yTarget = sp && r.targetNilai !== undefined ? sp.yDari(r.targetNilai) : null;
+
+  return (
+    <g>
+      <rect x={x} y={y} width={w} height={h} rx={12} fill={WARNA.permukaan} stroke={WARNA.garis} strokeWidth={1} />
+      <Teks x={x + pad} y={y + 20} size={10} weight={600} fill={WARNA.tintaLabel}>{lab}</Teks>
+      <g
+        transform={`translate(${x + w - pad - 16} ${y + 8})`}
+        fill="none" stroke={WARNA.netralSolid} strokeWidth={1.3} strokeLinejoin="round" strokeLinecap="round" opacity={0.85}
+      >
+        <path d={IKON[r.ikon] ?? ''} />
+      </g>
+      <Teks x={x + pad} y={y + 50} size={fs} weight={700} fill={tinta} mono>{r.v}</Teks>
+      {r.target ? (
+        <Teks x={x + pad} y={y + 66} size={11} weight={700} fill={r.nada ? tinta : WARNA.tintaLabel}>{r.target}</Teks>
+      ) : null}
+      {sp?.d ? (
+        <g transform={`translate(${x + pad} ${y + SPARK_Y})`}>
+          {jalurArea(sp.d, SPARK_H) ? <path d={jalurArea(sp.d, SPARK_H)} fill={`url(#${grad})`} /> : null}
+          {yTarget !== null ? (
+            <line
+              x1={0} y1={yTarget} x2={isi} y2={yTarget}
+              stroke={garis} strokeWidth={2} strokeDasharray="7 5" strokeLinecap="round" opacity={0.95}
+            />
+          ) : null}
+          <path d={sp.d} fill="none" stroke={garis} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+          {sp.titikAkhir ? <circle cx={sp.titikAkhir.x} cy={sp.titikAkhir.y} r={3} fill={garis} /> : null}
+        </g>
+      ) : null}
     </g>
   );
 }
@@ -507,56 +608,85 @@ export function Poster({ data, onPilihArea }: Props) {
     })),
     w - 2 * KARTU.pad,
   );
+  // Angka DOI keseluruhan dinilai oleh ambang GABUNGAN, ATP oleh targetnya.
+  // Satu aturan untuk seluruh strip: angka yang punya target memakai warna
+  // untuk mengatakan terpenuhi atau tidak — kalau hanya salah satunya
+  // berwarna, yang tidak berwarna terbaca seolah tidak punya target.
+  const nadaDoi = (doi: number | null | undefined): Nada | undefined => {
+    const n = nilaiDoi(doi, data.ambang);
+    return n ? (n.baik ? 'aman' : 'kritis') : undefined;
+  };
+  const nadaAtp = (persen: number | null | undefined): Nada | undefined => {
+    const n = nilaiAtp(persen, data.atpTarget);
+    return n ? (n.baik ? 'aman' : 'kritis') : undefined;
+  };
+  // ---------------------------------------------------------------------
+  // STRIP KEPALA — satu KARTU per angka (permintaan user 15 Okt 2026).
+  //
+  // Dulu satu kotak panjang dengan garis pemisah dan angka telanjang. Tiga hal
+  // yang berubah, dan ketiganya menambah keterangan, bukan hiasan:
+  //
+  //   1. Tiap angka punya SPARKLINE 30 hari di bawahnya. "94,7%" tidak
+  //      mengatakan apakah ia sedang naik dari 88% atau turun dari 99%; itu
+  //      perbedaan antara kabar baik dan kabar buruk, dan selama ini hilang.
+  //   2. Angka yang punya TARGET menulis targetnya di bawah angkanya DAN
+  //      menggambarnya sebagai garis putus-putus di sparkline-nya. Jadi
+  //      terbaca bukan cuma "hari ini meleset" tapi "30 hari tidak pernah
+  //      menyentuhnya" — atau "baru memotongnya kemarin".
+  //   3. Ikon kecil per kartu, sebagai penanda saja; labelnya tetap ditulis
+  //      penuh, jadi ikon yang salah tafsir tidak menyesatkan.
+  //
+  // Dua kolom "Target DOI"/"Target ATP" yang sempat berdiri sendiri (pagi
+  // 15 Okt) DIHAPUS: targetnya kini melebur ke kartu angkanya masing-masing,
+  // dan kolom berisi angka mati yang tidak pernah berubah tiap hari hanya
+  // mempersempit delapan kartu lainnya.
+  // ---------------------------------------------------------------------
+  const tt = data.trenTotal ?? [];
+  // Perlu minimal dua titik: satu titik bukan tren, dan menggambarnya sebagai
+  // garis datar akan menyatakan "tidak berubah" untuk sesuatu yang belum
+  // pernah diukur dua kali.
+  const seri = (f: (p: TitikTotal) => number | null): (number | null)[] | undefined =>
+    (tt.length >= 2 ? tt.map(f) : undefined);
   const ringkas = [
-    { l: 'SKU dihitung', v: t ? angkaRingkas(t.sku) : '—' },
-    ...(tampil1(disp) ? [{ l: labelDoi(1, disp), v: t ? `${hari(t.doi1)} hari` : '—' }] : []),
-    ...(tampil2(disp) ? [{ l: labelDoi(2, disp), v: t ? `${hari(t.doi2)} hari` : '—' }] : []),
-    { l: 'ADS', v: t ? adsTeks(tampil1(disp) ? t.ads1 : t.ads2) : '—' },
-    { l: 'Total stok', v: t ? `${angkaRingkas(t.stock)} pcs` : '—' },
-    { l: 'Dalam perjalanan', v: t ? `${angkaRingkas(t.transit)} pcs` : '—' },
-    { l: 'Nilai stok', v: t ? rupiahRingkas(t.value) : '—' },
-    { l: 'Nilai + Nilai SIT', v: t ? rupiahRingkas(t.value + t.valueTransit) : '—' },
-    { l: 'Kritis + Low', v: t ? `${t.kritis + t.low} SKU` : '—', tone: t && t.kritis > 0 ? WARNA.kritisFg : undefined },
-    // ATP keseluruhan di kepala (permintaan user 10 Okt 2026). Sebelumnya
-    // kepala hanya meringkas DOI, padahal tiap kartu sudah memuat ATP-nya —
-    // jadi tidak ada satu pun angka ATP untuk SELURUH perusahaan.
-    //
-    // "—" saat pembaginya 0 BUKAN 0%: artinya belum ada SKU yang diputuskan
-    // sebarannya di mana pun. Menggambarnya 0% akan terbaca seperti bencana.
-    // Diwarnai merah kalau di bawah target — satu sinyal untuk SELURUH
-    // perusahaan, di tempat yang paling dulu dilihat orang. Tanpa tone, target
-    // ATP cuma terbaca per kartu dan tidak ada ringkasannya.
+    { l: 'SKU dihitung', v: t ? angkaRingkas(t.sku) : '\u2014', ikon: 'kalender', seri: seri((p) => p.sku) },
+    ...(tampil1(disp) ? [{
+      l: labelDoi(1, disp), v: t ? `${hari(t.doi1)} hari` : '\u2014', ikon: 'jam',
+      seri: seri((p) => p.doi1), nada: nadaDoi(t?.doi1),
+      target: data.ambang ? teksTarget(data.ambang.max) : undefined, targetNilai: data.ambang?.max,
+    }] : []),
+    ...(tampil2(disp) ? [{
+      l: labelDoi(2, disp), v: t ? `${hari(t.doi2)} hari` : '\u2014', ikon: 'jam',
+      seri: seri((p) => p.doi2), nada: nadaDoi(t?.doi2),
+      target: data.ambang ? teksTarget(data.ambang.max) : undefined, targetNilai: data.ambang?.max,
+    }] : []),
+    { l: 'ADS', v: t ? adsTeks(tampil1(disp) ? t.ads1 : t.ads2) : '\u2014', ikon: 'batang', seri: seri((p) => (tampil1(disp) ? p.ads1 : p.ads2)) },
+    { l: 'Total stok', v: t ? `${angkaRingkas(t.stock)} pcs` : '\u2014', ikon: 'kotak', seri: seri((p) => p.stock) },
+    { l: 'Dalam perjalanan', v: t ? `${angkaRingkas(t.transit)} pcs` : '\u2014', ikon: 'truk', seri: seri((p) => p.transit) },
+    { l: 'Nilai stok', v: t ? rupiahRingkas(t.value) : '\u2014', ikon: 'dompet', seri: seri((p) => p.value) },
+    // SENGAJA TANPA SPARKLINE. Nilai barang dalam perjalanan dihitung ulang
+    // dari baris snapshot hari ini (`nilaiTransit`) dan TIDAK ikut tersimpan di
+    // ringkasan harian, jadi sejarah yang ada cuma nilai stok. Menggambarnya di
+    // bawah angka "nilai + nilai SIT" berarti memasang kurva yang bukan milik
+    // angka itu — lebih baik kosong daripada mirip-mirip.
+    { l: 'Nilai + Nilai SIT', v: t ? rupiahRingkas(t.value + t.valueTransit) : '\u2014', ikon: 'koin' },
     {
-      l: 'ATP keseluruhan',
-      v: t?.atp ? persenAtp(t.atp.persen) : '—',
-      tone: (() => {
-        const n = nilaiAtp(t?.atp?.persen, data.atpTarget);
-        return n ? warnaTarget(n.baik) : undefined;
-      })(),
+      l: 'Kritis + Low', v: t ? `${t.kritis + t.low} SKU` : '\u2014', ikon: 'siaga',
+      seri: seri((p) => p.kritisLow), nada: t && t.kritis > 0 ? ('kritis' as const) : undefined,
     },
-    // TARGETNYA sendiri, satu kolom di sebelah angkanya (permintaan user
-    // 15 Okt 2026: "berikan 1 kolom lagi ... dengan angka target, total
-    // keseluruhannya dengan target berapa").
-    //
-    // Sebelum ini target keseluruhan cuma muncul sebagai WARNA pada kolom "ATP
-    // keseluruhan" — merah berarti "di bawah target" tanpa pernah menyebut
-    // targetnya berapa, dan warna sendirian bukan keterangan.
-    //
-    // Angkanya dari baris GABUNGAN di Pengaturan, bukan rata-rata target
-    // cabang: ia memang target SELURUH perusahaan, dan ia pula yang sudah
-    // dipakai mewarnai kolom di sebelahnya. Dua kolom bertetangga ini harus
-    // dinilai dengan angka yang sama, kalau tidak warnanya jadi membantah
-    // targetnya sendiri.
-    //
-    // "≥" sama seperti di kartu: target ATP adalah batas BAWAH.
-    { l: 'Target ATP', v: data.atpTarget ? `\u2265${Math.round(data.atpTarget)}%` : '—' },
-  ] as { l: string; v: string; tone?: string }[];
-  const rw = (KANVAS.w - 2 * M) / ringkas.length;
-  // Angka strip mengecil saat kolomnya bertambah — DIUKUR dari teks yang
-  // benar-benar akan digambar, lihat `ukuranStripMuat`. Tangga per jumlah kolom
-  // yang dipakai sebelumnya tidak melihat panjang teksnya, dan itu yang membuat
-  // kolom ke-10 melubernya 3px tanpa ada yang gagal.
-  const rFs = ukuranStripMuat(ringkas.map((r) => r.v), rw - STRIP_INSET);
+    // ATP keseluruhan (permintaan user 10 Okt 2026). "\u2014" saat pembaginya 0
+    // BUKAN 0%: artinya belum ada SKU yang diputuskan sebarannya di mana pun.
+    {
+      l: 'ATP keseluruhan', v: t?.atp ? persenAtp(t.atp.persen) : '\u2014', ikon: 'centang',
+      seri: seri((p) => p.atp), nada: nadaAtp(t?.atp?.persen),
+      target: teksTargetAtp(data.atpTarget) || undefined, targetNilai: data.atpTarget ?? undefined,
+    },
+  ] as KartuRingkas[];
+  const rw = lebarStrip(ringkas.length);
+  const rIsi = rw - 2 * STRIP.pad;
+  // Ukuran angka DIUKUR dari teks yang benar-benar digambar, lihat
+  // `ukuranStripMuat` — bukan tangga per jumlah kolom, yang tidak melihat
+  // panjang teksnya sama sekali.
+  const rFs = ukuranStripMuat(ringkas.map((r) => r.v), rIsi, 24);
 
   return (
     <svg
@@ -567,6 +697,20 @@ export function Poster({ data, onPilihArea }: Props) {
       height={KANVAS.h}
       style={{ display: 'block', width: '100%', height: 'auto' }}
     >
+      {/*
+        Gradasi dideklarasikan SEKALI dan dipakai ulang semua sparkline.
+        `objectBoundingBox` (bawaan) membuat satu definisi cocok untuk kotak
+        ukuran apa pun, jadi tidak perlu satu defs per kartu — dan id yang
+        beranak-pinak itulah yang biasanya tertukar saat poster diserialkan.
+      */}
+      <defs>
+        {([['gs-primary', WARNA.primary], ['gs-kritis', WARNA.kritisSolid], ['gs-aman', WARNA.amanSolid]] as const).map(([id, c]) => (
+          <linearGradient key={id} id={id} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={c} stopOpacity={c === WARNA.kritisSolid ? 0.20 : 0.28} />
+            <stop offset="100%" stopColor={c} stopOpacity={0} />
+          </linearGradient>
+        ))}
+      </defs>
       <rect width={KANVAS.w} height={KANVAS.h} fill={WARNA.kanvas} />
 
       {/* kepala */}
@@ -580,14 +724,9 @@ export function Poster({ data, onPilihArea }: Props) {
       </Teks>
       <Teks x={KANVAS.w - M} y={70} size={13} weight={700} fill={WARNA.primary} anchor="end">IEG · DOI Monitor</Teks>
 
-      {/* ringkasan seluruh area */}
-      <rect x={M} y={96} width={KANVAS.w - 2 * M} height={96} rx={12} fill={WARNA.permukaan} stroke={WARNA.garis} />
+      {/* ringkasan seluruh area — satu kartu per angka */}
       {ringkas.map((r, i) => (
-        <g key={r.l}>
-          {i > 0 ? <line x1={M + i * rw} y1={116} x2={M + i * rw} y2={172} stroke={WARNA.garisHalus} /> : null}
-          <Teks x={M + i * rw + STRIP_INSET} y={126} size={11} weight={600} fill={WARNA.tintaLabel}>{r.l.toUpperCase()}</Teks>
-          <Teks x={M + i * rw + STRIP_INSET} y={162} size={rFs} weight={700} fill={r.tone ?? WARNA.tinta} mono>{r.v}</Teks>
-        </g>
+        <KartuStrip key={r.l} r={r} x={M + i * (rw + STRIP.jarak)} y={STRIP.y} w={rw} fs={rFs} />
       ))}
 
       {/* kartu per area */}

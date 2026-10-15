@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { pitaDoi } from './area-master';
-import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2, KANVAS, KARTU, tinggiKartuTersedia, BIAYA_BLOK, labelPitaPisah, tataLabelStatus, ukuranAtpMuat, ukuranStripMuat, STRIP_INSET, lebarDoiBesar, doiPlusSit, UKURAN_DOI, UKURAN_ATP, TINGGI_SPARK } from './wa-poster';
+import { adsTeks, angkaRingkas, deretTren, jalurSpark, labelDoi, lebarKartu, lebarTeksKira, gutterLabel, potongTeks, JEDA_LABEL, STATUS_POSTER, URUT_STATUS, URUT_LAIN, rupiahRingkas, segmenStatus, segmenLain, kunciTampil, labelPita, tinggiKartu, tataLetakStatus, tampil1, tampil2, KANVAS, KARTU, tinggiKartuTersedia, BIAYA_BLOK, labelPitaPisah, tataLabelStatus, ukuranAtpMuat, ukuranStripMuat, STRIP, lebarStrip, jalurArea, teksTarget, teksTargetAtp, lebarDoiBesar, doiPlusSit, UKURAN_DOI, UKURAN_ATP, TINGGI_SPARK } from './wa-poster';
 
 test('rupiah diringkas per satuan', () => {
   assert.equal(rupiahRingkas(52_431_882_100), 'Rp 52,4 M');
@@ -316,52 +316,112 @@ test('nama area dan lencana kritis muat di kepala kartu', () => {
   }
 });
 
-test('strip ringkasan atas: label DAN angka muat di kolomnya, sampai 11 kolom', () => {
-  // 9 kolom = keadaan satu opsi DOI sebelum 15 Okt; 10 = setelah kolom
-  // "Target ATP" ditambahkan; 11 = mode dua opsi DOI dengan kolom itu.
+test('kartu strip: label, angka, target dan sparkline muat di kartunya', () => {
+  // 9 kartu = satu opsi DOI; 10 = mode dua opsi. Sejak 15 Okt 2026 strip bukan
+  // lagi satu kotak bergaris pemisah melainkan kartu terpisah, jadi lebarnya
+  // ikut berkurang oleh jeda antar kartu — `lebarStrip` yang menghitungnya.
   //
-  // DIUKUR MONO untuk angkanya, karena itulah yang digambar poster
-  // (`mono` pada <Teks>). Versi lama tes ini mengukur 0,56 sementara poster
-  // menggambar 0,62, dan mengukur SELURUH lebar kolom padahal teksnya mulai
-  // 20px dari tepi — dua kelonggaran palsu yang menutupi luberan nyata.
+  // DIUKUR MONO untuk angkanya, karena itulah yang digambar poster. Versi lama
+  // tes ini mengukur 0,56 sementara poster menggambar 0,62, dan mengukur
+  // SELURUH lebar kolom padahal teksnya mulai dari dalam padding — dua
+  // kelonggaran palsu yang menutupi luberan nyata.
   const NILAI = [
     'Rp 52,4 M', 'Rp 120 M', '56.115/hari', '156.115/hari', '1,1 jt pcs',
-    '105 rb pcs', '20,4 hari', '157 SKU', '99,9%', '\u2265100%', '—',
+    '105 rb pcs', '20,4 hari', '157 SKU', '99,9%', '\u2014',
   ];
   const LABEL = [
     'SKU DIHITUNG', 'DALAM PERJALANAN', 'NILAI + NILAI SIT', 'KRITIS + LOW',
-    'DOI OPSI 1', 'ADS', 'ATP KESELURUHAN', 'TARGET ATP',
+    'DOI OPSI 1', 'ADS', 'ATP KESELURUHAN', 'NILAI STOK', 'TOTAL STOK',
   ];
-  for (const n of [9, 10, 11]) {
-    const isi = (KANVAS.w - 2 * 32) / n - STRIP_INSET;
-    // Label ukurannya TETAP 11px: ia yang menyebut angkanya mengukur apa, jadi
-    // ia tidak boleh mengecil mengikuti kolom. Karena itu ia harus muat apa
-    // adanya — kalau tidak, kolomnya yang terlalu banyak, bukan teksnya.
+  for (const n of [9, 10]) {
+    const isi = lebarStrip(n) - 2 * STRIP.pad;
+    // Label 10px dengan ruang ikon 22px disisihkan di kanan. Label yang tidak
+    // muat DIPOTONG oleh poster, jadi yang dijaga di sini: label terpanjang
+    // masih utuh — kalau tidak, kolomnya yang terlalu banyak.
     for (const l of LABEL) {
-      assert.ok(lebarTeksKira(l, 11) <= isi, `${n} kolom: label "${l}" tidak muat di ${isi.toFixed(0)}px`);
+      assert.ok(
+        lebarTeksKira(l, 10) <= isi - 22,
+        `${n} kartu: label "${l}" (${lebarTeksKira(l, 10).toFixed(0)}px) tidak muat di ${(isi - 22).toFixed(0)}px`,
+      );
     }
-    // Angkanya mengecil, tapi ada batasnya: di bawah 15px angka di JPG grup
-    // WhatsApp mulai tidak terbaca di layar ponsel.
-    const fs = ukuranStripMuat(NILAI, isi);
-    assert.ok(fs >= 15, `${n} kolom: angka harus mengecil sampai ${fs}px — terlalu banyak kolom`);
+    // Baris target ikut diuji: ia yang paling panjang setelah angkanya, dan ia
+    // teks biasa 11px, bukan mono.
+    for (const tgt of [teksTarget(999), teksTargetAtp(100)]) {
+      assert.ok(lebarTeksKira(tgt, 11) <= isi, `${n} kartu: "${tgt}" tidak muat di ${isi.toFixed(0)}px`);
+    }
+    const fs = ukuranStripMuat(NILAI, isi, 24);
+    assert.ok(fs >= 15, `${n} kartu: angka mengecil sampai ${fs}px — terlalu banyak kartu`);
     for (const v of NILAI) {
       assert.ok(
         lebarTeksKira(v, fs, true) <= isi,
-        `${n} kolom: angka "${v}" (${lebarTeksKira(v, fs, true).toFixed(0)}px @${fs}) tidak muat di ${isi.toFixed(0)}px`,
+        `${n} kartu: angka "${v}" (${lebarTeksKira(v, fs, true).toFixed(0)}px @${fs}) tidak muat di ${isi.toFixed(0)}px`,
       );
     }
   }
 });
 
+test('kartu strip tidak saling menimpa dan tidak melewati margin', () => {
+  // Lebar + jeda harus menutup persis lebar kanvas dikurangi dua margin. Kalau
+  // `lebarStrip` lupa menghitung jeda, kartu terakhir menggantung di luar
+  // kanvas — dan SVG tidak akan mengeluh, ia cuma menggambarnya terpotong.
+  for (const n of [1, 9, 10, 12]) {
+    const w = lebarStrip(n);
+    const kanan = 32 + (n - 1) * (w + STRIP.jarak) + w;
+    assert.ok(Math.abs(kanan - (KANVAS.w - 32)) < 0.001, `${n} kartu berakhir di ${kanan.toFixed(1)}, bukan ${KANVAS.w - 32}`);
+  }
+});
+
 test('ukuranStripMuat memilih yang TERBESAR yang muat, bukan yang pertama aman', () => {
   // Kalau ia mengembalikan ukuran minimum setiap kali, semua tes lebar di atas
-  // tetap lulus sementara posternya menggambar angka 14px di kolom lapang.
-  const kolom9 = (KANVAS.w - 2 * 32) / 9 - STRIP_INSET;
-  const kolom11 = (KANVAS.w - 2 * 32) / 11 - STRIP_INSET;
+  // tetap lulus sementara posternya menggambar angka 14px di kartu lapang.
   const nilai = ['56.115/hari', '1,1 jt pcs'];
-  assert.ok(ukuranStripMuat(nilai, kolom9) > ukuranStripMuat(nilai, kolom11), 'kolom lebih lapang = angka lebih besar');
-  assert.equal(ukuranStripMuat(['9%'], 1000), 26, 'kolom lapang memakai ukuran maksimum');
+  assert.ok(
+    ukuranStripMuat(nilai, lebarStrip(9) - 2 * STRIP.pad) > ukuranStripMuat(nilai, lebarStrip(12) - 2 * STRIP.pad),
+    'kartu lebih lapang = angka lebih besar',
+  );
+  assert.equal(ukuranStripMuat(['9%'], 1000), 26, 'kartu lapang memakai ukuran maksimum');
   assert.equal(ukuranStripMuat(['angka yang keterlaluan panjang'], 10), 14, 'mentok di batas bawah');
+});
+
+// ---------------------------------------------------------------------------
+// Sparkline: isian bergradasi + garis target (15 Okt 2026)
+// ---------------------------------------------------------------------------
+
+test('garis target ikut menentukan skala sparkline, bukan digambar di luar kotak', () => {
+  // Kasus NYATA 15 Okt: DOI keseluruhan 30 hari di kisaran 16–22 hari dengan
+  // target 14. Tanpa `extra`, 14 berada di LUAR rentang data, jadi garisnya
+  // tergambar di bawah dasar kotak — justru pada kasus yang paling perlu
+  // terlihat: target yang tidak pernah tersentuh.
+  const deret = [18, 20, 22, 19, 16];
+  const polos = jalurSpark(deret, 100, 40, 3);
+  assert.ok(polos.yDari(14) > 40, 'tanpa extra, target 14 memang jatuh di luar kotak');
+
+  const sk = jalurSpark(deret, 100, 40, 3, 14);
+  assert.ok(sk.yDari(14) <= 40 && sk.yDari(14) >= 0, `garis target di ${sk.yDari(14).toFixed(1)}px, di luar kotak 0..40`);
+  assert.ok(sk.yDari(14) > sk.yDari(16), 'target lebih kecil dari semua data -> garisnya di BAWAH kurva');
+  // Label "terendah/tertinggi" tetap menyebut DATA, bukan skala: target yang
+  // ikut diskalakan tidak boleh menyelinap jadi "terendah 14".
+  assert.equal(sk.min, 16);
+  assert.equal(sk.max, 22);
+});
+
+test('isian gradasi DIBATALKAN kalau deretnya terputus', () => {
+  // Isian menutup jalur dari titik pertama ke titik terakhir. Pada deret
+  // berlubang, jalurnya punya beberapa 'M' dan menutupnya akan menjembatani
+  // lubang itu — menggambar luas untuk hari yang datanya tidak ada. Garisnya
+  // boleh putus (itu jujur); isiannya tidak boleh menambal.
+  const utuh = jalurSpark([1, 2, 3, 4], 100, 40);
+  assert.ok(jalurArea(utuh.d, 40).endsWith('Z'), 'deret utuh tetap diisi');
+  // Deret berlubang: DUA isian terpisah, bukan satu yang menjembatani lubang.
+  const bolong = jalurSpark([1, 2, null, 4, 5], 100, 40);
+  const isian = jalurArea(bolong.d, 40);
+  assert.equal((isian.match(/Z/g) ?? []).length, 2, 'tiap potongan diisi sendiri');
+  assert.equal((isian.match(/M/g) ?? []).length, 2);
+  // Potongan satu titik tidak punya luas — menutupnya hanya menggambar garis
+  // tegak yang terbaca seperti lonjakan.
+  const sendirian = jalurSpark([1, null, 5, 6], 100, 40);
+  assert.equal((jalurArea(sendirian.d, 40).match(/Z/g) ?? []).length, 1);
+  assert.equal(jalurArea('', 40), '', 'tanpa jalur tidak ada isian');
 });
 
 // ---------------------------------------------------------------------------
@@ -422,7 +482,13 @@ test('tinggi kartu berasal dari KANVAS, bukan angka tertulis', () => {
   // Dua tempat untuk satu angka: mengubah kanvas membuat tes menjaga tinggi yang
   // tidak dipakai siapa pun, dan luberan yang mestinya ketahuan jadi lolos.
   assert.equal(tinggiKartuTersedia(), KANVAS.h - KARTU.y - KARTU.bawah);
-  assert.equal(tinggiKartuTersedia({ h: 900 }), 628, 'rumusnya sama dengan yang lama');
+  // Kanvas 1000 → 1032 dan kartu area turun 216 → 228 (15 Okt 2026): strip
+  // kepala jadi kartu bersparkline (+10px tinggi strip) dan tiap kartu area
+  // dapat sumbu waktu "30 hari" (+20px). Yang dikunci di sini HASIL BERSIHNYA:
+  // ruang kartu bertambah persis sebesar sumbu itu — tidak kurang (isinya
+  // meluber) dan tidak lebih (kaki poster jadi pita kosong).
+  assert.equal(tinggiKartuTersedia(), 748);
+  assert.equal(tinggiKartuTersedia() - 728, BIAYA_BLOK.sumbu, 'tambahan tinggi = persis biaya sumbu waktu');
 });
 
 test('blok angka = 4 baris kotak, dan biayanya cocok dengan posternya', () => {

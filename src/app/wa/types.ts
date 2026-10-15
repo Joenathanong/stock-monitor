@@ -95,6 +95,22 @@ export type AreaWa = {
   kritis: KritisWa[];
 };
 
+/** Satu hari sejarah SELURUH perusahaan, untuk sparkline di strip kepala. */
+export type TitikTotal = {
+  date: string;
+  sku: number;
+  doi1: number | null;
+  doi2: number | null;
+  ads1: number;
+  ads2: number;
+  stock: number;
+  transit: number;
+  value: number;
+  kritisLow: number;
+  /** null = potret ATP hari itu tidak ada. Bukan 0 — lihat komentar di route. */
+  atp: number | null;
+};
+
 export type DataWa = {
   ok: boolean;
   judul: string;
@@ -125,6 +141,24 @@ export type DataWa = {
    * angka keseluruhan memang bukan milik cabang mana pun.
    */
   atpTarget?: number | null;
+  /**
+   * Ambang DOI untuk angka KESELURUHAN di strip kepala — dari baris GABUNGAN.
+   *
+   * Pasangan `atpTarget` di atas, dan alasannya sama: angka keseluruhan bukan
+   * milik cabang mana pun, jadi ia tidak bisa memakai ambang salah satu cabang.
+   * Baris GABUNGAN memang sudah menjadi ambang CADANGAN untuk area yang belum
+   * punya ambang sendiri (lihat route /api/public/wa), jadi ini bukan setelan
+   * baru — hanya setelan lama yang sekarang ikut dikirim ke kepala poster.
+   */
+  ambang?: { kritis: number; min: number; max: number } | null;
+  /**
+   * Sejarah 30 hari SELURUH perusahaan — satu titik per tanggal, semua angka
+   * yang tampil di strip kepala sekaligus.
+   *
+   * Opsional: poster tetap tergambar tanpanya, kartunya hanya kehilangan
+   * sparkline. `atp` boleh null untuk tanggal yang potret ATP-nya tidak ada.
+   */
+  trenTotal?: TitikTotal[];
   areas: AreaWa[];
   trenLabel: string[];
   hariIni: string;

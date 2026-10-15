@@ -307,9 +307,13 @@ export default function WaPage() {
    * ukurannya tidak berubah kalau tata letak halaman diubah nanti.
    *
    * UKURANNYA DARI `KANVAS`, jangan ditulis mati di skrip bot: 8 Okt 2026
-   * tingginya berubah 900 → 1000 saat ATP masuk, dan bot yang memakai 900 akan
-   * MEMOTONG kaki poster tanpa galat apa pun — gambarnya terkirim, cuma kurang.
-   * Saat ini `KANVAS` = 1600×1000.
+   * tingginya berubah 900 → 1000 saat ATP masuk, lalu 1000 → 1032 pada 15 Okt
+   * saat strip kepala jadi kartu bersparkline dan tiap kartu area dapat sumbu
+   * waktu. Bot yang memakai angka lama akan MEMOTONG kaki poster tanpa galat
+   * apa pun — gambarnya terkirim, cuma kurang, dan tidak ada yang memeriksanya.
+   *
+   * Saat ini `KANVAS` = 1600×1032. Di telegram-wa-bridge angka itu ada di
+   * `DOI_IMAGE_HEIGHT` (atau perintah `/doitinggi`), BUKAN di repo ini.
    */
   const bare = useMemo(() => (typeof window === 'undefined' ? false : new URLSearchParams(window.location.search).get('bare') === '1'), []);
 

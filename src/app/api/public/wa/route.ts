@@ -7,7 +7,7 @@ import { setelanArea } from '@/lib/area-master';
 import { muatArea } from '@/lib/area-store';
 import { toDateKeyUtc } from '@/lib/dates';
 import { tolakAksesPoster } from '@/lib/wa-akses';
-import { persenAtpPerArea, trenAtp } from '@/lib/atp-store';
+import { persenAtpPerArea, trenAtp, trenAtpKeseluruhan } from '@/lib/atp-store';
 import { AMBANG_ATP_BAWAAN } from '@/lib/atp';
 import { doiPlusSit } from '@/lib/wa-poster';
 
@@ -93,6 +93,27 @@ export async function GET(req: Request) {
    * laporan yang sudah jalan.
    */
   const atpHasil = await persenAtpPerArea().catch(() => null);
+
+  // Sejarah keseluruhan untuk strip kepala. Gagal baca = daftar kosong: kartu
+  // strip tetap menulis angkanya, hanya tanpa sparkline. Sama seperti tren per
+  // kartu, fitur baru tidak boleh memadamkan laporan yang sudah jalan.
+  const sejarahGab = blok.tren ? await summaryHistory(TREN_HARI, AREA_GABUNGAN).catch(() => []) : [];
+  const atpGab = new Map(
+    (blok.tren ? await trenAtpKeseluruhan(TREN_HARI).catch(() => []) : []).map((t) => [t.date, t.persen]),
+  );
+  const trenTotal = [...sejarahGab].reverse().map((h) => ({
+    date: h.date,
+    sku: h.sku,
+    doi1: h.doi1,
+    doi2: h.doi2,
+    ads1: h.ads1,
+    ads2: h.ads2,
+    stock: h.stock,
+    transit: h.transit,
+    value: h.value,
+    kritisLow: h.critical,
+    atp: atpGab.get(h.date) ?? null,
+  }));
   const atpPerArea = new Map((atpHasil?.hasil ?? []).map((h) => [h.areaId, h]));
   const atpStok = atpHasil?.stok ?? new Map();
 
@@ -228,6 +249,22 @@ export async function GET(req: Request) {
       : null,
     // Target ATP keseluruhan untuk strip kepala = milik baris GABUNGAN.
     atpTarget: setelanGab.atpTarget,
+    // Sejarah 30 hari SELURUH perusahaan, satu titik per tanggal — dipakai
+    // sparkline di tiap kartu strip kepala (permintaan user 15 Okt 2026).
+    //
+    // Dibaca dari `doi_summary` baris GABUNGAN: potret yang memang disimpan
+    // tiap hari, bukan hitung ulang. ATP-nya dari `atp_daily`, dijumlahkan
+    // lintas area — lihat `trenAtpKeseluruhan`.
+    //
+    // Dua sumber berbeda dicocokkan lewat TANGGAL, dan tanggal yang tidak ada
+    // di salah satunya diisi null, bukan nol: hari tanpa potret ATP berarti
+    // tidak diketahui, dan menggambarnya 0% akan membuat sparkline terjun ke
+    // dasar untuk sesuatu yang tidak pernah terjadi.
+    trenTotal,
+    // Ambang DOI keseluruhan, dari baris yang sama. Dipakai kolom "Target DOI"
+    // di strip kepala (permintaan user 15 Okt 2026) — sampai saat itu angka DOI
+    // keseluruhan satu-satunya angka di strip yang tidak menyebut targetnya.
+    ambang: setelanGab.ambang ?? null,
     areas: perArea,
     // Tanggal tren dipakai sebagai label sumbu; dikirim sekali, bukan per area.
     trenLabel: perArea[0]?.tren.map((t) => t.date) ?? [],
